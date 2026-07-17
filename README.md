@@ -48,7 +48,7 @@ npm run check
 ```
 
 `npm run check` 依次执行 TypeScript 类型检查、单元/集成测试、扩展和 Shim 构建、
-本地窗口透传与 Remote SSH 窗口 `initialize`/`thread/list` 冒烟测试，以及 VSIX 打包。
+本地窗口透传与 Remote SSH 窗口初始化、线程列表和线程创建冒烟测试，以及 VSIX 打包。
 
 真实远端只读验收使用环境变量提供目标，不把主机和私钥路径写入仓库：
 

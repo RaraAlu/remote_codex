@@ -2,7 +2,7 @@
   "name": "codex-vscode-remote-bridge",
   "displayName": "Codex Remote Bridge",
   "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "publisher": "zkbot",
   "license": "MIT",

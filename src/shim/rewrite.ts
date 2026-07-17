@@ -28,6 +28,12 @@ function mergeDynamicTools(existing: unknown): unknown[] {
   return [...current, ...REMOTE_DYNAMIC_TOOLS];
 }
 
+function withoutPermissionProfile(params: Record<string, unknown>): Record<string, unknown> {
+  const rewritten = { ...params };
+  delete rewritten.permissions;
+  return rewritten;
+}
+
 export function rewriteClientMessage(
   message: RpcMessage,
   config: BridgeConfig | null,
@@ -57,7 +63,7 @@ export function rewriteClientMessage(
     return {
       ...message,
       params: {
-        ...message.params,
+        ...withoutPermissionProfile(message.params),
         cwd: controlDir,
         runtimeWorkspaceRoots: [controlDir],
         sandbox: "read-only",
@@ -78,7 +84,7 @@ export function rewriteClientMessage(
     return {
       ...message,
       params: {
-        ...message.params,
+        ...withoutPermissionProfile(message.params),
         cwd: controlDir,
         runtimeWorkspaceRoots: [controlDir],
         sandbox: "read-only",

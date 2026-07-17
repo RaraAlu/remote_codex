@@ -37,6 +37,7 @@ describe("app-server request rewriting", () => {
         method: "thread/start",
         params: {
           cwd: "/home/zkbot/work/train/MimicLite",
+          permissions: "full-access",
           dynamicTools: [{ type: "function", name: "existing", description: "", inputSchema: {} }],
         },
       },
@@ -46,6 +47,7 @@ describe("app-server request rewriting", () => {
     expect(rewritten.params.cwd).toBe("/local/control");
     expect(rewritten.params.runtimeWorkspaceRoots).toEqual(["/local/control"]);
     expect(rewritten.params.sandbox).toBe("read-only");
+    expect(rewritten.params).not.toHaveProperty("permissions");
     expect(String(rewritten.params.developerInstructions)).toContain(
       "Never fall back to local execution",
     );
@@ -54,6 +56,28 @@ describe("app-server request rewriting", () => {
       "existing",
       ...REMOTE_TOOL_NAMES,
     ]);
+  });
+
+  it("removes the named permission profile when resuming under the read-only sandbox", () => {
+    const rewritten = rewriteClientMessage(
+      {
+        id: 3,
+        method: "thread/resume",
+        params: {
+          threadId: "thread_123",
+          permissions: "full-access",
+        },
+      },
+      config,
+      "/local/control",
+    ) as { params: Record<string, unknown> };
+
+    expect(rewritten.params).toMatchObject({
+      cwd: "/local/control",
+      runtimeWorkspaceRoots: ["/local/control"],
+      sandbox: "read-only",
+    });
+    expect(rewritten.params).not.toHaveProperty("permissions");
   });
 
   it("fails closed for unknown server requests", () => {

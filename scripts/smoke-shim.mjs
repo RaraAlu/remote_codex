@@ -24,7 +24,7 @@ function appServerEnvironment(stateDir, codexHome, sessionConfigPath = null) {
   return environment;
 }
 
-async function runHandshake(shim, environment) {
+async function runHandshake(shim, environment, startThread = false) {
   const child = spawn(shim, appServerArgs, {
     env: environment,
     stdio: "pipe",
@@ -60,6 +60,20 @@ async function runHandshake(shim, environment) {
           })}\n`,
         );
       } else if (message.id === 2) {
+        if (startThread) {
+          child.stdin.write(
+            `${JSON.stringify({
+              id: 3,
+              method: "thread/start",
+              params: {
+                permissions: "full-access",
+              },
+            })}\n`,
+          );
+        } else {
+          child.stdin.end();
+        }
+      } else if (message.id === 3) {
         child.stdin.end();
       }
     }
@@ -109,6 +123,13 @@ function assertHandshake({ messages, stdout }) {
   const threadList = messages.find((message) => message.id === 2);
   if (!Array.isArray(threadList?.result?.data)) {
     throw new Error(`Missing app-server thread/list response: ${stdout}`);
+  }
+}
+
+function assertThreadStarted({ messages, stdout }) {
+  const threadStart = messages.find((message) => message.id === 3);
+  if (!threadStart?.result?.thread?.id) {
+    throw new Error(`Missing app-server thread/start response: ${stdout}`);
   }
 }
 
@@ -162,8 +183,10 @@ try {
   const remoteHandshake = await runHandshake(
     shim,
     appServerEnvironment(remoteStateDir, remoteCodexHome, sessionConfigPath),
+    true,
   );
   assertHandshake(remoteHandshake);
+  assertThreadStarted(remoteHandshake);
 
   const remoteAudit = await readFile(join(remoteStateDir, "audit.jsonl"), "utf8");
   if (!remoteAudit.includes('"operation":"shim.start"')) {
@@ -174,7 +197,7 @@ try {
     throw new Error(`Control directory mode is ${controlMode.toString(8)}, expected 500`);
   }
   process.stdout.write(
-    "Shim smoke test passed: local passthrough plus remote-window initialize and thread/list\n",
+    "Shim smoke test passed: local passthrough plus remote-window startup and thread creation\n",
   );
 } finally {
   await rm(rootDir, { force: true, recursive: true });
