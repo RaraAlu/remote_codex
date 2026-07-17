@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
 import { OpenSshExecutor } from "../src/core/ssh-executor.js";
 import { ShimProxy } from "../src/shim/proxy.js";
+import { routeRemoteMcpServers } from "../src/shim/remote-mcp.js";
 
 const enabled = process.env.CODEX_BRIDGE_REMOTE_TEST === "1";
 
@@ -122,6 +123,88 @@ function fakeFullAccessRemoteExecAppServer(): ChildProcessWithoutNullStreams {
     });
   `;
   return spawn(process.execPath, ["-e", source], { stdio: "pipe" });
+}
+
+async function callCodegraphOverStdio(
+  command: string,
+  args: string[],
+  workspaceRoot: string,
+): Promise<Record<string, unknown>> {
+  return await new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, { stdio: "pipe" });
+    let stderr = "";
+    let buffer = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error(`Remote MCP timed out: ${stderr}`));
+    }, 30_000);
+
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      buffer += chunk;
+      for (;;) {
+        const newline = buffer.indexOf("\n");
+        if (newline < 0) {
+          break;
+        }
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        const message = JSON.parse(line) as {
+          id?: number;
+          result?: Record<string, unknown>;
+        };
+        if (message.id === 1) {
+          child.stdin.write(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              method: "notifications/initialized",
+              params: {},
+            })}\n`,
+          );
+          child.stdin.write(
+            `${JSON.stringify({
+              jsonrpc: "2.0",
+              id: 2,
+              method: "tools/call",
+              params: {
+                name: "codegraph_explore",
+                arguments: {
+                  projectPath: workspaceRoot,
+                  query: "package.json package name",
+                  maxFiles: 1,
+                },
+              },
+            })}\n`,
+          );
+        }
+        if (message.id === 2 && message.result) {
+          clearTimeout(timer);
+          child.stdin.end();
+          resolvePromise(message.result);
+        }
+      }
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "codex-bridge-test", version: "1.0" },
+        },
+      })}\n`,
+    );
+  });
 }
 
 describe.skipIf(!enabled)("real OpenSSH bridge acceptance", () => {
@@ -241,6 +324,32 @@ describe.skipIf(!enabled)("real OpenSSH bridge acceptance", () => {
         input.destroy();
         await rm(directory, { force: true, recursive: true });
       }
+    },
+    120_000,
+  );
+
+  it(
+    "scans local MCPs and relays a real CodeGraph call to the remote index",
+    async () => {
+      const config = remoteConfig();
+      const routing = await routeRemoteMcpServers({
+        appServerArgs: ["app-server"],
+        codexExecutable: config.codexExecutable,
+        config,
+      });
+      expect(routing.remoteServers).toContain("codegraph");
+
+      const commandIndex = routing.appServerArgs.findIndex((entry) =>
+        entry.startsWith("mcp_servers.codegraph.command="),
+      );
+      expect(commandIndex).toBeGreaterThan(-1);
+      const argsOverride = routing.appServerArgs[commandIndex + 2] ?? "";
+      const encodedArgs = argsOverride.slice(argsOverride.indexOf("=") + 1);
+      const sshArgs = JSON.parse(encodedArgs) as string[];
+      const result = await callCodegraphOverStdio("ssh", sshArgs, config.workspaceRoot);
+      expect(result).not.toMatchObject({ isError: true });
+      expect(JSON.stringify(result)).not.toContain("not initialized");
+      expect(JSON.stringify(result)).toContain("package.json");
     },
     120_000,
   );

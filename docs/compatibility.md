@@ -12,9 +12,11 @@
 
 协议文件位于 `protocol/0.144.5/`。`ServerRequest.json` 的方法集合由自动化测试与
 Shim 的已知请求白名单逐项比对；出现新请求时测试失败，而不是静默转发潜在副作用。
-0.1.9 另外使用该版本的 `commandExecution` 项、命令审批请求、输出增量字段，以及
+0.1.10 另外使用该版本的 `commandExecution` 项、命令审批请求、输出增量字段，以及
 `permissions=full-access`/`approvalPolicy=never` 权限语义，把 Bridge 工具投影成
-官方原生外观并同步审批行为；升级 app-server 时这些字段必须一并复核。
+官方原生外观并同步审批行为；MCP 路由器仅在 Remote SSH 窗口内扫描本机配置，
+把无凭据且远端存在同名可执行文件的 stdio 服务按当前 Bridge 目标覆盖为 SSH 启动，
+其他 MCP 和本地窗口仍使用用户原有配置。升级 app-server 时这些字段必须一并复核。
 
 ## 升级步骤
 

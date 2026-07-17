@@ -573,10 +573,16 @@ Bridge 自有动态工具可在返回官方界面前投影为标准 `commandExec
 读取、列目录、搜索、命令输出和审批外观。投影只改变展示协议，不改变实际工具路由、
 参数校验或审计；不得修改官方扩展文件，也不得改写不属于 Bridge 的第三方动态工具。
 
-本地 app-server 配置的 MCP、App 和 Connector 服务继续在本地运行，并允许远程
-工作区任务调用。Bridge 不应在不知道工具语义时把任意 MCP 调用自动重定向到远程；
-需要直接访问远端文件的 MCP 服务必须自行显式使用 SSH 或远程目标，项目 Shell、
-Git、测试和训练命令则统一走 `remote_exec`。
+本地 app-server 配置的 MCP、App 和 Connector 服务继续允许远程工作区任务调用。
+Bridge 在 Remote SSH 窗口中扫描本机已启用的 MCP，但只在以下条件全部满足时把
+stdio 服务进程通过当前 SSH 目标启动：配置不含环境变量和本地 `cwd`、命令不是
+包管理器或通用运行时、远端可探测到同名直接可执行文件。HTTP 服务和不满足条件的
+stdio 服务继续留在本机，不得向远端复制 Token 或环境变量。
+
+该路由只覆盖当前 app-server 进程的 MCP `command`/`args`，不得修改全局
+`~/.codex/config.toml`，也不得改写未知 MCP 工具的参数语义。工作区参数差异通过
+显式适配器处理；当前 CodeGraph 适配器把索引根目录绑定到远程工作区。用户必须能够
+按窗口关闭自动路由。项目 Shell、Git、测试和训练命令仍统一走 `remote_exec`。
 
 ### 11.4 路径模型
 

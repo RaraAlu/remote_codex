@@ -2,7 +2,7 @@
   "name": "codex-vscode-remote-bridge",
   "displayName": "Codex Remote Bridge",
   "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "private": true,
   "publisher": "zkbot",
   "license": "MIT",
@@ -75,6 +75,16 @@
           "default": "codex",
           "scope": "window",
           "description": "Local Codex CLI executable used by the shim."
+        },
+        "codexRemoteBridge.remoteMcpRouting": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "local"
+          ],
+          "default": "auto",
+          "scope": "window",
+          "description": "Automatically scan local Codex MCP servers and route eligible credential-free direct stdio servers through the active Remote SSH target, or keep every MCP local."
         },
         "codexRemoteBridge.commandTimeoutMs": {
           "type": "number",

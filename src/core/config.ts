@@ -77,6 +77,13 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
   if (input.maxParallelWrites !== undefined && input.maxParallelWrites !== 1) {
     throw new BridgeError("INVALID_CONFIG", "maxParallelWrites is fixed to 1");
   }
+  if (
+    input.remoteMcpRouting !== undefined &&
+    input.remoteMcpRouting !== "auto" &&
+    input.remoteMcpRouting !== "local"
+  ) {
+    throw new BridgeError("INVALID_CONFIG", "remoteMcpRouting must be auto or local");
+  }
 
   const sshUser =
     input.sshUser === undefined || input.sshUser === null || input.sshUser === ""
@@ -116,6 +123,7 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
       typeof input.codexExecutable === "string" && input.codexExecutable.trim()
         ? input.codexExecutable
         : DEFAULTS.codexExecutable,
+    remoteMcpRouting: input.remoteMcpRouting === "local" ? "local" : "auto",
     commandTimeoutMs: integerInRange(
       input.commandTimeoutMs,
       DEFAULTS.commandTimeoutMs,

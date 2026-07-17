@@ -32,6 +32,8 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 - SSH 子进程只继承必要环境变量，不继承 Codex、OpenAI 或其他应用凭据。
 - 未知 app-server 服务端请求默认拒绝；操作审计日志只保存在本地并结构化脱敏。
 - 协议子集由本机 Codex `0.144.5` 生成，运行时要求精确版本匹配。
+- Remote SSH 窗口自动扫描本机 Codex 已启用的 MCP：本机能力继续留在本机，可安全
+  远端启动的工作区 stdio MCP 按当前主机和工作区改为 SSH 中转。
 
 ## 尚未实现
 
@@ -44,9 +46,12 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 的本地控制目录，并通过指令要求只用远程工具，但这不能替代 Core 层的强制路由控制。
 
 远程工作区中的 Codex 可以继续调用本地 app-server 原有的 MCP、App 和 Connector
-增强能力，它们无需安装到远端。Bridge 不会把任意 MCP 工具自动改写成远程工具，
-因为其参数不一定含主机和路径语义；项目 Shell 应走 `remote_exec`，需要直接操作
-远端文件的本地 MCP 服务则必须显式支持 SSH 或远程目标。
+增强能力，它们无需安装到远端。Bridge 会扫描本机 MCP 配置，但不会修改全局
+`~/.codex/config.toml`：HTTP MCP、包含环境变量/本地工作目录的服务和包管理器启动器
+继续留在本机；无凭据的直接 stdio 可执行文件只有在远端也存在时才通过 SSH 中转。
+远端启动器自动探测 `PATH`、`~/.local/bin` 和 `/usr/local/bin`，并以远程工作区为
+当前目录。CodeGraph 是首个工作区参数适配器，会额外绑定远程索引根目录。可将
+`codexRemoteBridge.remoteMcpRouting` 设为 `local`，让所有 MCP 保持本机运行。
 
 ## 开发与自测
 

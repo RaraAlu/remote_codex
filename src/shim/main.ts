@@ -11,6 +11,7 @@ import {
 } from "../core/locations.js";
 import type { BridgeConfig } from "../core/types.js";
 import { ShimProxy } from "./proxy.js";
+import { routeRemoteMcpServers } from "./remote-mcp.js";
 
 async function loadOptionalConfig(path: string, audit: AuditLog): Promise<BridgeConfig | null> {
   try {
@@ -94,20 +95,40 @@ async function main(): Promise<number> {
   const controlDir = bridgeControlDir();
   await mkdir(controlDir, { mode: 0o500, recursive: true });
   await chmod(controlDir, 0o500);
+  let appServerArgs = [...args];
+  let localMcpServers: string[] = [];
+  let remoteMcpServers: string[] = [];
+  let mcpRoutingError: string | undefined;
+  try {
+    const routing = await routeRemoteMcpServers({
+      appServerArgs: args,
+      codexExecutable,
+      config,
+    });
+    appServerArgs = routing.appServerArgs;
+    localMcpServers = routing.localServers;
+    remoteMcpServers = routing.remoteServers;
+  } catch (error) {
+    mcpRoutingError = error instanceof Error ? error.message : String(error);
+  }
   await audit.write({
     operation: "shim.start",
     outcome: "started",
     hostId: config.host,
     workspaceRoot: config.workspaceRoot,
     details: {
-      appServerArgs: args,
+      appServerArgs,
       bridgeConfigured: true,
       controlDir,
+      localMcpServers,
+      remoteMcpRouting: config.remoteMcpRouting,
+      remoteMcpServers,
+      ...(mcpRoutingError ? { mcpRoutingError } : {}),
     },
   });
 
   const proxy = new ShimProxy({
-    appServerArgs: args,
+    appServerArgs,
     auditPath,
     codexExecutable,
     config,
