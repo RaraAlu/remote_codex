@@ -34,27 +34,38 @@ function fakeRemoteExecAppServer(): ChildProcessWithoutNullStreams {
       tool: "remote_exec",
       arguments: { argv: ["printf", "hello"], cwd: "src" },
     };
+    const emitCall = () => {
+      process.stdout.write(JSON.stringify({
+        method: "item/started",
+        params: {
+          item: {
+            id: call.callId,
+            type: "dynamicToolCall",
+            tool: call.tool,
+            arguments: call.arguments,
+            status: "inProgress",
+            success: null,
+          },
+        },
+      }) + "\\n");
+      process.stdout.write(JSON.stringify({
+        id: "remote-tool-request-1",
+        method: "item/tool/call",
+        params: call,
+      }) + "\\n");
+    };
     lines.on("line", (line) => {
       const message = JSON.parse(line);
       if (message.method === "bridge/testRemoteExec") {
+        emitCall();
+        return;
+      }
+      if (message.method === "thread/start") {
         process.stdout.write(JSON.stringify({
-          method: "item/started",
-          params: {
-            item: {
-              id: call.callId,
-              type: "dynamicToolCall",
-              tool: call.tool,
-              arguments: call.arguments,
-              status: "inProgress",
-              success: null,
-            },
-          },
+          id: message.id,
+          result: { thread: { id: call.threadId } },
         }) + "\\n");
-        process.stdout.write(JSON.stringify({
-          id: "remote-tool-request-1",
-          method: "item/tool/call",
-          params: call,
-        }) + "\\n");
+        emitCall();
         return;
       }
       if (message.id === "remote-tool-request-1") {
@@ -79,7 +90,10 @@ function fakeRemoteExecAppServer(): ChildProcessWithoutNullStreams {
   return spawn(process.execPath, ["-e", source], { stdio: "pipe" });
 }
 
-async function exerciseRemoteExecApproval(decision: "accept" | "decline") {
+async function exerciseRemoteExecApproval(
+  decision: "accept" | "decline" | null,
+  fullAccess = false,
+) {
   const directory = await mkdtemp(join(tmpdir(), "codex-bridge-approval-"));
   const input = new PassThrough();
   const output = new PassThrough();
@@ -109,7 +123,12 @@ async function exerciseRemoteExecApproval(decision: "accept" | "decline") {
         parsed.method === "item/commandExecution/requestApproval" &&
         (typeof parsed.id === "string" || typeof parsed.id === "number")
       ) {
-        input.write(`${JSON.stringify({ id: parsed.id, result: { decision } })}\n`);
+        input.write(
+          `${JSON.stringify({
+            id: parsed.id,
+            result: { decision: decision ?? "decline" },
+          })}\n`,
+        );
       }
       if (parsed.method === "item/completed") {
         finishCompleted?.();
@@ -144,7 +163,17 @@ async function exerciseRemoteExecApproval(decision: "accept" | "decline") {
     spawnSsh,
   });
   const running = proxy.run();
-  input.write(`${JSON.stringify({ id: 1, method: "bridge/testRemoteExec" })}\n`);
+  input.write(
+    `${JSON.stringify(
+      fullAccess
+        ? {
+            id: 1,
+            method: "thread/start",
+            params: { permissions: "full-access" },
+          }
+        : { id: 1, method: "bridge/testRemoteExec" },
+    )}\n`,
+  );
   await completed;
   input.end();
   await expect(running).resolves.toBe(0);
@@ -262,6 +291,25 @@ describe("ShimProxy JSONL integration", () => {
             status: "failed",
             aggregatedOutput: "Remote command execution was declined by the user",
           }),
+        }),
+      }),
+    );
+  });
+
+  it("inherits full access and runs remotely without an extra approval prompt", async () => {
+    const { messages, sshSpawns } = await exerciseRemoteExecApproval(null, true);
+    expect(sshSpawns).toBe(1);
+    expect(
+      messages.some(
+        (message) => message.method === "item/commandExecution/requestApproval",
+      ),
+    ).toBe(false);
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        method: "item/commandExecution/outputDelta",
+        params: expect.objectContaining({
+          itemId: "remote-item-1",
+          delta: "hello\n",
         }),
       }),
     );

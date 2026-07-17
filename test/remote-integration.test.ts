@@ -87,7 +87,44 @@ function fakeRemoteExecAppServer(): ChildProcessWithoutNullStreams {
   return spawn(process.execPath, ["-e", source], { stdio: "pipe" });
 }
 
-describe.skipIf(!enabled)("real OpenSSH read-only acceptance", () => {
+function fakeFullAccessRemoteExecAppServer(): ChildProcessWithoutNullStreams {
+  const source = `
+    const readline = require("node:readline");
+    const call = {
+      arguments: { argv: ["pwd"] },
+      callId: "remote_full_access_exec",
+      threadId: "thread_full_access",
+      tool: "remote_exec",
+      turnId: "turn_full_access"
+    };
+    const lines = readline.createInterface({ input: process.stdin });
+    lines.on("line", (line) => {
+      const message = JSON.parse(line);
+      if (message.method === "thread/start") {
+        process.stdout.write(JSON.stringify({
+          id: message.id,
+          result: { thread: { id: call.threadId } }
+        }) + "\\n");
+        process.stdout.write(JSON.stringify({
+          id: 101,
+          method: "item/tool/call",
+          params: call
+        }) + "\\n");
+        return;
+      }
+      if (message.id === 101) {
+        process.stdout.write(JSON.stringify({
+          method: "bridge/testResult",
+          params: message.result
+        }) + "\\n");
+        process.exit(0);
+      }
+    });
+  `;
+  return spawn(process.execPath, ["-e", source], { stdio: "pipe" });
+}
+
+describe.skipIf(!enabled)("real OpenSSH bridge acceptance", () => {
   it(
     "proves identity, repository reads, grep fallback, Git, GPU, and safe path failure",
     async () => {
@@ -293,6 +330,92 @@ describe.skipIf(!enabled)("real OpenSSH read-only acceptance", () => {
             stdout: `${config.workspaceRoot}\n`,
           },
         });
+      } finally {
+        input.destroy();
+        await rm(directory, { force: true, recursive: true });
+      }
+    },
+    120_000,
+  );
+
+  it(
+    "inherits full access and executes remote_exec without prompting",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "codex-bridge-remote-full-"));
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const messages: Array<Record<string, unknown>> = [];
+      let buffer = "";
+      output.setEncoding("utf8");
+      output.on("data", (chunk: string) => {
+        buffer += chunk;
+        for (;;) {
+          const newline = buffer.indexOf("\n");
+          if (newline < 0) {
+            break;
+          }
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          const message: unknown = JSON.parse(line);
+          if (!message || typeof message !== "object" || Array.isArray(message)) {
+            continue;
+          }
+          const record = message as Record<string, unknown>;
+          messages.push(record);
+          if (
+            record.method === "item/commandExecution/requestApproval" &&
+            (typeof record.id === "string" || typeof record.id === "number")
+          ) {
+            input.write(
+              `${JSON.stringify({ id: record.id, result: { decision: "decline" } })}\n`,
+            );
+          }
+        }
+      });
+      try {
+        const config = remoteConfig();
+        const proxy = new ShimProxy({
+          appServerArgs: ["app-server", "--stdio"],
+          auditPath: join(directory, "audit.jsonl"),
+          codexExecutable: "fake-codex",
+          config,
+          controlDir: join(directory, "control"),
+          input,
+          output,
+          errorOutput: new PassThrough(),
+          spawnCodex: () => fakeFullAccessRemoteExecAppServer(),
+        });
+        const running = proxy.run();
+        input.write(
+          `${JSON.stringify({
+            id: 1,
+            method: "thread/start",
+            params: { permissions: "full-access" },
+          })}\n`,
+        );
+        await expect(running).resolves.toBe(0);
+
+        expect(
+          messages.some(
+            (message) => message.method === "item/commandExecution/requestApproval",
+          ),
+        ).toBe(false);
+        expect(messages).toContainEqual(
+          expect.objectContaining({
+            method: "item/commandExecution/outputDelta",
+            params: expect.objectContaining({
+              delta: `${config.workspaceRoot}\n`,
+            }),
+          }),
+        );
+        const notification = messages.find(
+          (message) => message.method === "bridge/testResult",
+        );
+        const dynamicResult = notification?.params as {
+          success: boolean;
+          contentItems: Array<{ text: string }>;
+        };
+        expect(dynamicResult.success).toBe(true);
       } finally {
         input.destroy();
         await rm(directory, { force: true, recursive: true });

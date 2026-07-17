@@ -12,6 +12,7 @@ import type { BridgeConfig } from "../core/types.js";
 import { OpenSshExecutor, type SpawnProcess } from "../core/ssh-executor.js";
 import { DynamicToolRouter, REMOTE_TOOL_NAMES } from "./dynamic-tools.js";
 import { formatRemoteExecRequest, parseRemoteExecArguments } from "./remote-command.js";
+import { RemoteApprovalPolicyTracker } from "./remote-approval-policy.js";
 import {
   isRecord,
   isRpcRequest,
@@ -99,6 +100,7 @@ export class ShimProxy {
   readonly #audit: AuditLog;
   readonly #executor: OpenSshExecutor | null;
   readonly #router: DynamicToolRouter | null;
+  readonly #remoteApprovalPolicies = new RemoteApprovalPolicyTracker();
   readonly #pendingApprovals = new Map<RpcId, PendingApproval>();
   #child: ChildProcessWithoutNullStreams | null = null;
 
@@ -137,6 +139,7 @@ export class ShimProxy {
     clientLines.on("line", (line) => {
       try {
         const message = parseRpcLine(line);
+        this.#remoteApprovalPolicies.observeClientMessage(message);
         if (isRpcResponse(message) && this.#resolveApproval(message)) {
           return;
         }
@@ -198,6 +201,7 @@ export class ShimProxy {
       errorOutput.write(`codex-bridge: invalid server JSON-RPC: ${String(error)}\n`);
       return;
     }
+    this.#remoteApprovalPolicies.observeServerMessage(message);
 
     if (!isRpcRequest(message)) {
       writeMessage(output, projectServerMessage(message, this.#options.config));
@@ -218,8 +222,14 @@ export class ShimProxy {
       try {
         let context: RemoteExecContext | null = null;
         if (isRemoteExecToolCall(message)) {
-          context = await this.#requestRemoteCommandApproval(message, output);
-          if (!context) {
+          context = this.#remoteExecContext(message);
+          const requiresApproval = this.#remoteApprovalPolicies.requiresApproval(
+            context.threadId,
+          );
+          if (
+            requiresApproval &&
+            !(await this.#requestRemoteCommandApproval(context, output))
+          ) {
             const result = await this.#router.decline(
               message.id,
               message.params,
@@ -227,6 +237,20 @@ export class ShimProxy {
             );
             writeMessage(childInput, { id: message.id, result });
             return;
+          }
+          if (!requiresApproval) {
+            await this.#audit.write({
+              requestId: context.callId,
+              hostId: this.#options.config?.host,
+              workspaceRoot: this.#options.config?.workspaceRoot,
+              remoteCwd: context.cwd,
+              operation: "remote_exec.approval",
+              outcome: "succeeded",
+              details: {
+                automatic: true,
+                permissionMode: "full-access",
+              },
+            });
           }
         }
         const result = await this.#router.handle(message.id, message.params, {
@@ -276,10 +300,7 @@ export class ShimProxy {
     writeMessage(output, projectServerMessage(message, this.#options.config));
   }
 
-  async #requestRemoteCommandApproval(
-    request: RpcRequest,
-    output: Writable,
-  ): Promise<RemoteExecContext | null> {
+  #remoteExecContext(request: RpcRequest): RemoteExecContext {
     const config = this.#options.config;
     if (!config || !isRecord(request.params)) {
       throw new TypeError("Remote command approval requires Bridge configuration");
@@ -303,6 +324,17 @@ export class ShimProxy {
       threadId: params.threadId,
       turnId: params.turnId,
     };
+    return context;
+  }
+
+  async #requestRemoteCommandApproval(
+    context: RemoteExecContext,
+    output: Writable,
+  ): Promise<boolean> {
+    const config = this.#options.config;
+    if (!config) {
+      throw new TypeError("Remote command approval requires Bridge configuration");
+    }
     const approvalId = `codex-bridge-approval:${randomUUID()}`;
     const approved = new Promise<boolean>((resolve) => {
       const timeout = setTimeout(() => {
@@ -327,7 +359,7 @@ export class ShimProxy {
         availableDecisions: ["accept", "decline"],
       },
     });
-    return (await approved) ? context : null;
+    return await approved;
   }
 
   #resolveApproval(response: RpcResponse): boolean {

@@ -4,9 +4,11 @@ import { isRecord, type RpcMessage } from "./rpc.js";
 
 const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
 - The project exists only on the configured remote Ubuntu host.
-- Use only remote_* dynamic tools for project files, search, Git, tests, and commands.
+- Use remote_* dynamic tools for project files, search, Git, tests, and commands.
 - For project overviews, prefer one remote_list_tree call before focused directory listings.
-- Use remote_exec for project commands. Every remote_exec call requires explicit user approval.
+- Use remote_exec for project commands. Its approval behavior follows the active Codex permission mode.
+- Local MCP, app, and connector tools may be used for complementary capabilities.
+- A local MCP tool must not read, write, or execute project paths unless it explicitly supports the configured remote target.
 - Never use local shell or local filesystem tools for project operations.
 - The local cwd is an empty control directory and is not the project.
 - When a required remote capability is unavailable, stop and report that the bridge does not support it. Never fall back to local execution.`;
@@ -32,6 +34,9 @@ function mergeDynamicTools(existing: unknown): unknown[] {
 
 function withoutPermissionProfile(params: Record<string, unknown>): Record<string, unknown> {
   const rewritten = { ...params };
+  if (params.permissions === "full-access" && params.approvalPolicy === undefined) {
+    rewritten.approvalPolicy = "never";
+  }
   delete rewritten.permissions;
   return rewritten;
 }
@@ -98,6 +103,21 @@ export function rewriteClientMessage(
               ),
             }
           : {}),
+      },
+    };
+  }
+
+  if (message.method === "turn/start") {
+    return {
+      ...message,
+      params: {
+        ...withoutPermissionProfile(message.params),
+        cwd: controlDir,
+        runtimeWorkspaceRoots: [controlDir],
+        sandboxPolicy: {
+          type: "readOnly",
+          networkAccess: false,
+        },
       },
     };
   }

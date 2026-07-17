@@ -115,7 +115,7 @@ export const REMOTE_DYNAMIC_TOOLS = [
     type: "function",
     name: "remote_exec",
     description:
-      "Run an approved argv command in the configured remote Ubuntu workspace over SSH. Use for Git, tests, training, diagnostics, and GPU commands. The user must approve every call in the Codex command approval UI.",
+      "Run an argv command in the configured remote Ubuntu workspace over SSH. Use for Git, tests, training, diagnostics, and GPU commands. Approval follows the active Codex permission mode; full access runs without an extra prompt.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

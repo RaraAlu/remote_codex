@@ -48,8 +48,12 @@ describe("app-server request rewriting", () => {
     expect(rewritten.params.runtimeWorkspaceRoots).toEqual(["/local/control"]);
     expect(rewritten.params.sandbox).toBe("read-only");
     expect(rewritten.params).not.toHaveProperty("permissions");
+    expect(rewritten.params.approvalPolicy).toBe("never");
     expect(String(rewritten.params.developerInstructions)).toContain(
       "Never fall back to local execution",
+    );
+    expect(String(rewritten.params.developerInstructions)).toContain(
+      "Local MCP, app, and connector tools may be used",
     );
     const tools = rewritten.params.dynamicTools as Array<{ name: string }>;
     expect(tools.map((tool) => tool.name)).toEqual([
@@ -76,6 +80,36 @@ describe("app-server request rewriting", () => {
       cwd: "/local/control",
       runtimeWorkspaceRoots: ["/local/control"],
       sandbox: "read-only",
+    });
+    expect(rewritten.params).not.toHaveProperty("permissions");
+    expect(rewritten.params.approvalPolicy).toBe("never");
+  });
+
+  it("keeps turn-level full access for approvals while forcing local read-only safety", () => {
+    const rewritten = rewriteClientMessage(
+      {
+        id: 4,
+        method: "turn/start",
+        params: {
+          threadId: "thread_123",
+          input: [{ type: "text", text: "run tests" }],
+          cwd: "/home/zkbot/work/train/MimicLite",
+          permissions: "full-access",
+          sandboxPolicy: { type: "dangerFullAccess" },
+        },
+      },
+      config,
+      "/local/control",
+    ) as { params: Record<string, unknown> };
+
+    expect(rewritten.params).toMatchObject({
+      approvalPolicy: "never",
+      cwd: "/local/control",
+      runtimeWorkspaceRoots: ["/local/control"],
+      sandboxPolicy: {
+        type: "readOnly",
+        networkAccess: false,
+      },
     });
     expect(rewritten.params).not.toHaveProperty("permissions");
   });
