@@ -1,0 +1,14 @@
+.codegraph/**
+.git/**
+.gitignore
+.github/**
+coverage/**
+docs/**
+node_modules/**
+src/**
+test/**
+scripts/**
+tsconfig.json
+vitest.config.ts
+dist/*.vsix
+package-lock.json

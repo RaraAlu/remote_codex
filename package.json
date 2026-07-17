@@ -1,0 +1,119 @@
+{
+  "name": "codex-vscode-remote-bridge",
+  "displayName": "Codex Remote Bridge",
+  "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "zkbot",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.96.2",
+    "node": ">=20"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "codex",
+    "remote",
+    "ssh"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.cjs",
+  "bin": {
+    "codex-remote-bridge-shim": "./dist/codex-bridge-shim.cjs"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:codexRemoteBridge.configure",
+    "onCommand:codexRemoteBridge.start",
+    "onCommand:codexRemoteBridge.stop",
+    "onCommand:codexRemoteBridge.diagnostics",
+    "onCommand:codexRemoteBridge.showAuditLog",
+    "onCommand:codexRemoteBridge.restoreSettings"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codexRemoteBridge.configure",
+        "title": "Codex Bridge: Configure Current Remote"
+      },
+      {
+        "command": "codexRemoteBridge.start",
+        "title": "Codex Bridge: Start"
+      },
+      {
+        "command": "codexRemoteBridge.stop",
+        "title": "Codex Bridge: Stop"
+      },
+      {
+        "command": "codexRemoteBridge.diagnostics",
+        "title": "Codex Bridge: Run Diagnostics"
+      },
+      {
+        "command": "codexRemoteBridge.showAuditLog",
+        "title": "Codex Bridge: Show Audit Log"
+      },
+      {
+        "command": "codexRemoteBridge.restoreSettings",
+        "title": "Codex Bridge: Restore Official Codex Settings"
+      }
+    ],
+    "configuration": {
+      "title": "Codex Remote Bridge",
+      "properties": {
+        "codexRemoteBridge.codexExecutable": {
+          "type": "string",
+          "default": "codex",
+          "scope": "window",
+          "description": "Local Codex CLI executable used by the shim."
+        },
+        "codexRemoteBridge.commandTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 1000,
+          "maximum": 3600000,
+          "scope": "window",
+          "description": "Maximum duration for one remote operation."
+        },
+        "codexRemoteBridge.maxOutputBytes": {
+          "type": "number",
+          "default": 10485760,
+          "minimum": 1024,
+          "maximum": 104857600,
+          "scope": "window",
+          "description": "Maximum captured bytes for each remote output stream."
+        },
+        "codexRemoteBridge.connectTimeoutSeconds": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 120,
+          "scope": "window",
+          "description": "OpenSSH connection timeout."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "npm run typecheck && npm run test && npm run build && npm run smoke:shim && npm run package",
+    "package": "vsce package --allow-missing-repository --no-dependencies --out dist/codex-remote-bridge.vsix",
+    "protocol:generate": "node scripts/generate-protocol.mjs",
+    "smoke:shim": "node scripts/smoke-shim.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "^1.96.0",
+    "@vscode/vsce": "^3.6.2",
+    "esbuild": "^0.25.5",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "codexAppServerVersion": "0.144.3"
+}

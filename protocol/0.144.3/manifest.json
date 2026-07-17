@@ -1,0 +1,5 @@
+{
+  "codexVersion": "0.144.3",
+  "generatedAt": "2026-07-17T07:11:22.182Z",
+  "generator": "codex app-server generate-json-schema --experimental"
+}
