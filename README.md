@@ -10,8 +10,10 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 ## 当前实现
 
 - Bridge 扩展固定声明为 VS Code `ui` 扩展，并提供需求中的 6 个命令。
-- 配置命令识别当前单根 Remote SSH 工作区，预览后保存远程主机和规范化根目录。
+- 单根 Remote SSH 工作区打开后自动识别主机和根目录、保存配置并连接，无需手动启动。
+- 首次接管官方 Codex 设置时自动重载一次；后续打开工作区直接进入 `ready`。
 - 修改 `chatgpt.cliExecutable` 和 `remote.extensionKind` 前保存原值，并提供恢复命令。
+- 默认命令不在 VS Code 的 `PATH` 时，自动探测 `~/.local/bin/codex` 等常见本地路径。
 - CLI Shim 代理 app-server JSONL，固定本地只读控制目录，并注入实验协议能力。
 - 新线程注入远程读取、目录列出、文本搜索和 `git status` 动态工具。
 - OpenSSH 执行器使用结构化 `argv`、严格主机密钥校验、连接超时、取消和输出上限。
@@ -75,12 +77,16 @@ npm run protocol:generate
 
 1. 安装 `dist/codex-remote-bridge.vsix` 到本地 VS Code。
 2. 用 Remote SSH 打开单个远程工作区。
-3. 执行 `Codex Bridge: Configure Current Remote`，审查主机、根目录和设置差异。
-4. 重载 VS Code 窗口，执行 `Codex Bridge: Start`。
-5. 先运行 `Codex Bridge: Run Diagnostics`，确认本地扩展宿主、远端身份和
+3. Bridge 自动保存当前主机和根目录；首次接管官方设置时窗口自动重载一次。
+4. 等待状态栏显示 `Codex: local -> <host> (ready)`。
+5. 运行 `Codex Bridge: Run Diagnostics`，确认本地扩展宿主、官方设置、远端身份和
    `remote.codexInstalled=false`。
 6. 只进行远程读取、目录列出、搜索和 `git status` 验证。
-7. 停用原型前执行 `Codex Bridge: Restore Official Codex Settings`。
+7. 停用原型前执行 `Codex Bridge: Restore Official Codex Settings`；该命令同时关闭
+   `codexRemoteBridge.autoInitialize`，避免重载后再次接管。
+
+自动流程仅在 `codexRemoteBridge.autoInitialize=true`、当前窗口为 Remote SSH 且恰好
+打开一个远程根目录时运行。关闭该设置后仍可使用 Configure 和 Start 命令手动控制。
 
 本地配置默认位于 `~/.config/codex-remote-bridge/config.json`，审计日志默认位于
 `~/.local/state/codex-remote-bridge/audit.jsonl`。配置不保存密码、私钥或 Token。

@@ -7,6 +7,8 @@
 | 项目 | 状态 | 证据 |
 | --- | --- | --- |
 | `chatgpt.cliExecutable` 入口 | 已实现配置、备份和恢复 | `OfficialSettingsManager` |
+| Remote SSH 自动配置与启动 | 已实现；首次设置变更自动重载一次 | `BridgeController.initialize` |
+| 本地 Codex 常见路径探测 | 已实现并测试 | `codexExecutableCandidates` |
 | 强制官方扩展使用本地 UI Host | 已实现设置写入，待真实 Remote SSH 窗口确认 | `remote.extensionKind.openai.chatgpt=["ui"]` |
 | app-server `initialize` 代理 | 已通过真实 app-server 冒烟测试 | `npm run smoke:shim` |
 | `thread/start` 路径和能力注入 | 已实现并通过集成测试 | `rewriteClientMessage` |
