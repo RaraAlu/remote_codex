@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdir } from "node:fs/promises";
+import { access, chmod, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { AuditLog } from "../core/audit-log.js";
 import { loadBridgeConfig } from "../core/config-store.js";
 import { BridgeError } from "../core/errors.js";
 import {
+  activeBridgeConfigPath,
   bridgeAuditPath,
-  bridgeConfigPath,
   bridgeControlDir,
 } from "../core/locations.js";
 import type { BridgeConfig } from "../core/types.js";
@@ -41,36 +41,67 @@ async function passthrough(executable: string, args: readonly string[]): Promise
   });
 }
 
-async function main(): Promise<number> {
-  const args = process.argv.slice(2);
-  const controlDir = bridgeControlDir();
-  const auditPath = bridgeAuditPath();
-  const audit = new AuditLog(auditPath);
-  await mkdir(controlDir, { mode: 0o500, recursive: true });
-  await chmod(controlDir, 0o500);
-
-  const config = await loadOptionalConfig(bridgeConfigPath(), audit);
-  const codexExecutable =
-    process.env.CODEX_BRIDGE_CODEX_EXECUTABLE || config?.codexExecutable || "codex";
-  if (resolve(codexExecutable) === resolve(process.argv[1] ?? "")) {
+function assertExecutableIsNotShim(executable: string): void {
+  if (resolve(executable) === resolve(process.argv[1] ?? "")) {
     throw new BridgeError(
       "INVALID_CONFIG",
       "CODEX_BRIDGE_CODEX_EXECUTABLE resolves to the shim itself",
     );
   }
+}
+
+async function waitForSessionConfig(path: string, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      await access(path);
+      return;
+    } catch {
+      if (Date.now() >= deadline) {
+        return;
+      }
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    }
+  }
+}
+
+async function main(): Promise<number> {
+  const args = process.argv.slice(2);
+  const fallbackExecutable = process.env.CODEX_BRIDGE_CODEX_EXECUTABLE || "codex";
+  assertExecutableIsNotShim(fallbackExecutable);
+  const configPath = activeBridgeConfigPath();
+  if (!configPath) {
+    return await passthrough(fallbackExecutable, args);
+  }
+
+  const auditPath = bridgeAuditPath();
+  const audit = new AuditLog(auditPath);
+  if (process.env.CODEX_BRIDGE_SESSION_CONFIG) {
+    await waitForSessionConfig(configPath);
+  }
+  const config = await loadOptionalConfig(configPath, audit);
+  const codexExecutable =
+    process.env.CODEX_BRIDGE_CODEX_EXECUTABLE || config?.codexExecutable || fallbackExecutable;
+  assertExecutableIsNotShim(codexExecutable);
 
   if (!args.includes("app-server")) {
     return await passthrough(codexExecutable, args);
   }
+  if (!config) {
+    return await passthrough(codexExecutable, args);
+  }
 
+  const controlDir = bridgeControlDir();
+  await mkdir(controlDir, { mode: 0o500, recursive: true });
+  await chmod(controlDir, 0o500);
   await audit.write({
     operation: "shim.start",
     outcome: "started",
-    hostId: config?.host,
-    workspaceRoot: config?.workspaceRoot,
+    hostId: config.host,
+    workspaceRoot: config.workspaceRoot,
     details: {
       appServerArgs: args,
-      bridgeConfigured: Boolean(config),
+      bridgeConfigured: true,
       controlDir,
     },
   });

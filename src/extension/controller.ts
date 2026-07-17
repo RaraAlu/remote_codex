@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { hostname } from "node:os";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
@@ -11,6 +11,7 @@ import {
   bridgeAuditPath,
   bridgeConfigPath,
   bridgeControlDir,
+  bridgeSessionConfigPath,
 } from "../core/locations.js";
 import { redact } from "../core/redaction.js";
 import { OpenSshExecutor } from "../core/ssh-executor.js";
@@ -86,6 +87,7 @@ export class BridgeController implements vscode.Disposable {
   readonly #settings: OfficialSettingsManager;
   readonly #state = new BridgeStateMachine();
   readonly #status: vscode.StatusBarItem;
+  readonly #sessionConfigPath: string | null;
   #config: BridgeConfig | null = null;
   #executor: OpenSshExecutor | null = null;
   #initialization: Promise<void> | null = null;
@@ -94,6 +96,13 @@ export class BridgeController implements vscode.Disposable {
 
   constructor(context: vscode.ExtensionContext) {
     this.#context = context;
+    this.#sessionConfigPath =
+      vscode.env.remoteName === "ssh-remote" ? bridgeSessionConfigPath(process.pid) : null;
+    if (this.#sessionConfigPath) {
+      process.env.CODEX_BRIDGE_SESSION_CONFIG = this.#sessionConfigPath;
+    } else {
+      delete process.env.CODEX_BRIDGE_SESSION_CONFIG;
+    }
     this.#output = vscode.window.createOutputChannel("Codex Remote Bridge", { log: true });
     this.#settings = new OfficialSettingsManager(context);
     this.#status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 30);
@@ -189,6 +198,7 @@ export class BridgeController implements vscode.Disposable {
       }
 
       await saveBridgeConfig(bridgeConfigPath(), config);
+      await this.#saveWindowSession(config);
       this.#config = config;
       const settingsChanged = await this.#settings.configure(shimPath);
       if (settingsChanged) {
@@ -228,6 +238,7 @@ export class BridgeController implements vscode.Disposable {
     this.#state.transition("connecting");
     try {
       this.#config = await loadBridgeConfig(bridgeConfigPath());
+      await this.#saveWindowSession(this.#config);
       await this.#verifyCodexVersion(this.#config);
       await this.#connect();
       void vscode.window.showInformationMessage(
@@ -243,6 +254,7 @@ export class BridgeController implements vscode.Disposable {
 
   async stop(): Promise<void> {
     this.#autoSuppressed = true;
+    await this.#clearWindowSession();
     this.#executor?.close();
     this.#executor = null;
     this.#remoteIdentity = null;
@@ -292,8 +304,27 @@ export class BridgeController implements vscode.Disposable {
 
   dispose(): void {
     this.#executor?.close();
+    void this.#clearWindowSession().catch(() => undefined);
     this.#output.dispose();
     this.#status.dispose();
+  }
+
+  async #saveWindowSession(config: BridgeConfig): Promise<void> {
+    if (!this.#sessionConfigPath) {
+      return;
+    }
+    process.env.CODEX_BRIDGE_SESSION_CONFIG = this.#sessionConfigPath;
+    await saveBridgeConfig(this.#sessionConfigPath, config);
+  }
+
+  async #clearWindowSession(): Promise<void> {
+    if (!this.#sessionConfigPath) {
+      return;
+    }
+    if (process.env.CODEX_BRIDGE_SESSION_CONFIG === this.#sessionConfigPath) {
+      delete process.env.CODEX_BRIDGE_SESSION_CONFIG;
+    }
+    await rm(this.#sessionConfigPath, { force: true });
   }
 
   #currentRemoteConfig(): BridgeConfig {

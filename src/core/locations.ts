@@ -11,6 +11,19 @@ export function bridgeStateDir(environment: NodeJS.ProcessEnv = process.env): st
   return environment.CODEX_BRIDGE_STATE_DIR || join(stateHome, "codex-remote-bridge");
 }
 
+export function bridgeSessionConfigPath(
+  extensionHostPid = process.pid,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(bridgeStateDir(environment), "sessions", `${extensionHostPid}.json`);
+}
+
+export function activeBridgeConfigPath(
+  environment: NodeJS.ProcessEnv = process.env,
+): string | null {
+  return environment.CODEX_BRIDGE_SESSION_CONFIG || environment.CODEX_BRIDGE_CONFIG || null;
+}
+
 export function bridgeAuditPath(environment: NodeJS.ProcessEnv = process.env): string {
   return join(bridgeStateDir(environment), "audit.jsonl");
 }

@@ -1,32 +1,34 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const stateDir = await mkdtemp(join(tmpdir(), "codex-bridge-smoke-"));
-const codexHome = join(stateDir, "codex-home");
-await mkdir(codexHome, { mode: 0o700 });
+const appServerArgs = [
+  "-c",
+  "features.code_mode_host=true",
+  "app-server",
+  "--analytics-default-enabled",
+];
 
-try {
-  const shim = resolve("dist/codex-bridge-shim.cjs");
-  const child = spawn(
-    shim,
-    [
-      "-c",
-      "features.code_mode_host=true",
-      "app-server",
-      "--analytics-default-enabled",
-    ],
-    {
-      env: {
-        ...process.env,
-        CODEX_BRIDGE_CONFIG: join(stateDir, "missing-config.json"),
-        CODEX_BRIDGE_STATE_DIR: stateDir,
-        CODEX_HOME: codexHome,
-      },
-      stdio: "pipe",
-    },
-  );
+function appServerEnvironment(stateDir, codexHome, sessionConfigPath = null) {
+  const environment = {
+    ...process.env,
+    CODEX_BRIDGE_STATE_DIR: stateDir,
+    CODEX_HOME: codexHome,
+  };
+  delete environment.CODEX_BRIDGE_CONFIG;
+  delete environment.CODEX_BRIDGE_SESSION_CONFIG;
+  if (sessionConfigPath) {
+    environment.CODEX_BRIDGE_SESSION_CONFIG = sessionConfigPath;
+  }
+  return environment;
+}
+
+async function runHandshake(shim, environment) {
+  const child = spawn(shim, appServerArgs, {
+    env: environment,
+    stdio: "pipe",
+  });
 
   let stdout = "";
   let stderr = "";
@@ -96,6 +98,10 @@ try {
     .split("\n")
     .filter(Boolean)
     .map((line) => JSON.parse(line));
+  return { messages, stdout };
+}
+
+function assertHandshake({ messages, stdout }) {
   const initialize = messages.find((message) => message.id === 1);
   if (!initialize?.result?.userAgent?.includes("codex_bridge_smoke")) {
     throw new Error(`Missing app-server initialize response: ${stdout}`);
@@ -104,18 +110,72 @@ try {
   if (!Array.isArray(threadList?.result?.data)) {
     throw new Error(`Missing app-server thread/list response: ${stdout}`);
   }
+}
 
-  const audit = await readFile(join(stateDir, "audit.jsonl"), "utf8");
-  if (!audit.includes('"operation":"shim.start"')) {
-    throw new Error("Shim start was not recorded in the local audit log");
+const rootDir = await mkdtemp(join(tmpdir(), "codex-bridge-smoke-"));
+const shim = resolve("dist/codex-bridge-shim.cjs");
+
+try {
+  const localStateDir = join(rootDir, "local-state");
+  const localCodexHome = join(rootDir, "local-codex-home");
+  await mkdir(localCodexHome, { mode: 0o700, recursive: true });
+  const localHandshake = await runHandshake(
+    shim,
+    appServerEnvironment(localStateDir, localCodexHome),
+  );
+  assertHandshake(localHandshake);
+  const localAudit = await readFile(join(localStateDir, "audit.jsonl"), "utf8").catch(
+    (error) => {
+      if (error?.code === "ENOENT") {
+        return "";
+      }
+      throw error;
+    },
+  );
+  if (localAudit.includes('"operation":"shim.start"')) {
+    throw new Error("Local app-server invocation was unexpectedly intercepted by the bridge");
   }
-  const controlMode = (await stat(join(stateDir, "control"))).mode & 0o777;
+
+  const remoteStateDir = join(rootDir, "remote-state");
+  const remoteCodexHome = join(rootDir, "remote-codex-home");
+  const sessionConfigPath = join(remoteStateDir, "sessions", "smoke.json");
+  await mkdir(remoteCodexHome, { mode: 0o700, recursive: true });
+  await mkdir(join(remoteStateDir, "sessions"), { mode: 0o700, recursive: true });
+  await writeFile(
+    sessionConfigPath,
+    `${JSON.stringify({
+      version: 1,
+      host: "example.invalid",
+      workspaceRoot: "/tmp/remote-workspace",
+      connectionMode: "openssh",
+      localExecution: "deny",
+      remoteHelper: "none",
+      codexExecutable: "codex",
+      commandTimeoutMs: 120_000,
+      maxOutputBytes: 10 * 1024 * 1024,
+      maxParallelReads: 8,
+      maxParallelWrites: 1,
+      connectTimeoutSeconds: 10,
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  const remoteHandshake = await runHandshake(
+    shim,
+    appServerEnvironment(remoteStateDir, remoteCodexHome, sessionConfigPath),
+  );
+  assertHandshake(remoteHandshake);
+
+  const remoteAudit = await readFile(join(remoteStateDir, "audit.jsonl"), "utf8");
+  if (!remoteAudit.includes('"operation":"shim.start"')) {
+    throw new Error("Remote window shim start was not recorded in the audit log");
+  }
+  const controlMode = (await stat(join(remoteStateDir, "control"))).mode & 0o777;
   if (controlMode !== 0o500) {
     throw new Error(`Control directory mode is ${controlMode.toString(8)}, expected 500`);
   }
   process.stdout.write(
-    "Shim smoke test passed: official app-server args, initialize, and thread/list over JSONL\n",
+    "Shim smoke test passed: local passthrough plus remote-window initialize and thread/list\n",
   );
 } finally {
-  await rm(stateDir, { force: true, recursive: true });
+  await rm(rootDir, { force: true, recursive: true });
 }
