@@ -565,13 +565,18 @@ CLI Shim 启动本地 Codex app-server，并为会话注入远程动态工具：
 `remote_exec` 只接受 `argv` 数组。确实需要管道、重定向或 Shell 展开时，应把
 `bash -lc` 等 Shell 作为显式 `argv` 元素，并在审批界面展示完整参数。
 
+Bridge 必须继承官方界面的当前权限语义：“完全访问”或 `approvalPolicy=never` 时，
+远程命令不再重复询问；其他模式继续逐次审批。该映射只控制 Remote Executor，本地
+app-server 仍固定在空控制目录和只读沙箱中，不得因此恢复本地项目执行能力。
+
 Bridge 自有动态工具可在返回官方界面前投影为标准 `commandExecution` 项，以复用官方
 读取、列目录、搜索、命令输出和审批外观。投影只改变展示协议，不改变实际工具路由、
 参数校验或审计；不得修改官方扩展文件，也不得改写不属于 Bridge 的第三方动态工具。
 
-本地 app-server 配置的 MCP 服务继续在本地运行。Bridge 不应在不知道工具语义时把
-任意 MCP 调用自动重定向到远程；需要访问远端的 MCP 服务必须自行显式使用 SSH，
-项目 Shell、Git、测试和训练命令则统一走受审批的 `remote_exec`。
+本地 app-server 配置的 MCP、App 和 Connector 服务继续在本地运行，并允许远程
+工作区任务调用。Bridge 不应在不知道工具语义时把任意 MCP 调用自动重定向到远程；
+需要直接访问远端文件的 MCP 服务必须自行显式使用 SSH 或远程目标，项目 Shell、
+Git、测试和训练命令则统一走 `remote_exec`。
 
 ### 11.4 路径模型
 

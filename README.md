@@ -21,8 +21,9 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 - 新线程注入远程读取、单层/有界目录树、文本搜索、`git status` 和受审批命令工具。
 - Bridge 自有工具在返回官方界面前投影为原生 `commandExecution` 项，使用本地 Codex
   相同的读取、列目录、搜索和命令外观，不修改官方扩展文件。
-- `remote_exec` 只接受结构化 `argv`；每次调用都弹出官方命令审批，显示远程主机、
-  规范化 `cwd`、完整命令和环境变量变更，并实时转发 stdout/stderr。
+- `remote_exec` 只接受结构化 `argv`；“完全访问”模式不重复询问，其他权限模式使用
+  官方命令审批并显示远程主机、规范化 `cwd`、完整命令和环境变量变更。
+- stdout/stderr 实时转发；自动放行和人工审批结果都写入本地审计日志。
 - OpenSSH 执行器使用结构化 `argv`、严格主机密钥校验、连接超时、取消和输出上限。
 - 直连主机可单独配置 SSH 用户、端口和可选 IdentityFile；私钥内容不由 Bridge 读取。
 - 同一 `connectionId` 使用受限 ControlMaster 复用，并在停止时显式关闭。
@@ -42,9 +43,10 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 最后两项仍是阶段 C 的安全门槛。当前 Shim 会把 app-server 放在无项目文件且不可写
 的本地控制目录，并通过指令要求只用远程工具，但这不能替代 Core 层的强制路由控制。
 
-本地 app-server 原有的 MCP 配置仍在本地运行且可以照常使用。Bridge 不会把任意 MCP
-工具自动改写成远程工具，因为 MCP 工具参数本身不一定含主机和路径语义；项目 Shell
-应走 `remote_exec`，确需访问远端的本地 MCP 服务也应由该服务显式通过 SSH 访问。
+远程工作区中的 Codex 可以继续调用本地 app-server 原有的 MCP、App 和 Connector
+增强能力，它们无需安装到远端。Bridge 不会把任意 MCP 工具自动改写成远程工具，
+因为其参数不一定含主机和路径语义；项目 Shell 应走 `remote_exec`，需要直接操作
+远端文件的本地 MCP 服务则必须显式支持 SSH 或远程目标。
 
 ## 开发与自测
 
@@ -91,7 +93,7 @@ npm run protocol:generate
 5. 运行 `Codex Bridge: Run Diagnostics`，确认本地扩展宿主、官方设置、远端身份和
    `remote.codexInstalled=false`。
 6. 新建 Codex 任务，验证远程读取、目录树、搜索和 `git status` 的显示与本地一致。
-7. 请求执行 `pwd` 或仓库测试命令，核对审批中的主机、`cwd` 和完整命令后再批准。
+7. 请求执行 `pwd` 或仓库测试命令；“完全访问”应直接执行，其他模式应显示审批。
 8. 停用原型前执行 `Codex Bridge: Restore Official Codex Settings`；该命令同时关闭
    `codexRemoteBridge.autoInitialize`，避免重载后再次接管。
 
