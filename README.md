@@ -12,6 +12,7 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 - Bridge 扩展固定声明为 VS Code `ui` 扩展，并提供需求中的 6 个命令。
 - 单根 Remote SSH 工作区打开后自动识别主机和根目录、保存配置并连接，无需手动启动。
 - 首次接管官方 Codex 设置时自动重载一次；后续打开工作区直接进入 `ready`。
+- 每个工作区首次就绪时把 Codex Webview 恢复到默认右侧栏，修复旧布局中的灰色面板。
 - 修改 `chatgpt.cliExecutable` 和 `remote.extensionKind` 前保存原值，并提供恢复命令。
 - 默认命令不在 VS Code 的 `PATH` 时，自动探测 `~/.local/bin/codex` 等常见本地路径。
 - CLI Shim 代理 app-server JSONL，固定本地只读控制目录，并注入实验协议能力。
