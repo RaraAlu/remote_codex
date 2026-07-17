@@ -2,7 +2,7 @@
   "name": "codex-vscode-remote-bridge",
   "displayName": "Codex Remote Bridge",
   "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "publisher": "zkbot",
   "license": "MIT",
@@ -64,6 +64,12 @@
     "configuration": {
       "title": "Codex Remote Bridge",
       "properties": {
+        "codexRemoteBridge.autoInitialize": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Automatically configure and connect when a single VS Code Remote SSH workspace opens."
+        },
         "codexRemoteBridge.codexExecutable": {
           "type": "string",
           "default": "codex",

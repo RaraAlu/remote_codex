@@ -5,7 +5,19 @@ let controller: BridgeController | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   controller = new BridgeController(context);
-  context.subscriptions.push(controller, ...controller.registerCommands());
+  context.subscriptions.push(
+    controller,
+    ...controller.registerCommands(),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      void controller?.initialize();
+    }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("codexRemoteBridge")) {
+        void controller?.initialize();
+      }
+    }),
+  );
+  void controller.initialize();
 }
 
 export function deactivate(): void {
