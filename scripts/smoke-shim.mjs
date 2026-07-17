@@ -172,6 +172,7 @@ try {
       localExecution: "deny",
       remoteHelper: "none",
       remoteMcpRouting: "local",
+      remoteMcpAccess: "enabled",
       codexExecutable: "codex",
       commandTimeoutMs: 120_000,
       maxOutputBytes: 10 * 1024 * 1024,

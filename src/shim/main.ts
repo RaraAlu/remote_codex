@@ -121,6 +121,7 @@ async function main(): Promise<number> {
       bridgeConfigured: true,
       controlDir,
       localMcpServers,
+      remoteMcpAccess: config.remoteMcpAccess,
       remoteMcpRouting: config.remoteMcpRouting,
       remoteMcpServers,
       ...(mcpRoutingError ? { mcpRoutingError } : {}),

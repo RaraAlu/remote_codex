@@ -41,6 +41,7 @@ export interface BridgeConfig {
   identityFile?: string;
   codexExecutable: string;
   remoteMcpRouting: "auto" | "local";
+  remoteMcpAccess: "enabled" | "all";
   commandTimeoutMs: number;
   maxOutputBytes: number;
   maxParallelReads: number;

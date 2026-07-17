@@ -110,4 +110,69 @@ describe("remote MCP routing", () => {
     expect(scanned).toBe(false);
     expect(result.appServerArgs).toEqual(["app-server"]);
   });
+
+  it("enables and approves every configured MCP for only this app-server", async () => {
+    const allConfig = parseBridgeConfig({
+      host: "training-gpu",
+      workspaceRoot: "/remote/workspace",
+      remoteMcpAccess: "all",
+    });
+    const codegraph = stdioServer("codegraph", "codegraph", {
+      args: ["serve", "--mcp"],
+    });
+    codegraph.enabled = false;
+    const blender = stdioServer("blender", "uvx", {
+      args: ["--python", "3.11", "blender-mcp"],
+      env: { BLENDER_HOST: "localhost" },
+    });
+    blender.enabled = false;
+
+    const result = await routeRemoteMcpServers({
+      appServerArgs: ["app-server"],
+      codexExecutable: "codex",
+      config: allConfig,
+      listServers: async () => [blender, codegraph],
+      remoteExecutableAvailable: async (executable) => executable === "codegraph",
+    });
+
+    expect(result.localServers).toEqual(["blender"]);
+    expect(result.remoteServers).toEqual(["codegraph"]);
+    for (const name of ["blender", "codegraph"]) {
+      expect(result.appServerArgs).toContain(`mcp_servers.${name}.enabled=true`);
+      expect(result.appServerArgs).toContain(
+        `mcp_servers.${name}.disabled_tools=[]`,
+      );
+      expect(result.appServerArgs).toContain(
+        `mcp_servers.${name}.default_tools_approval_mode="approve"`,
+      );
+    }
+    expect(result.appServerArgs).toContain(
+      'mcp_servers.codegraph.command="ssh"',
+    );
+  });
+
+  it("can enable all MCPs while keeping every server local", async () => {
+    const allLocalConfig = parseBridgeConfig({
+      host: "training-gpu",
+      workspaceRoot: "/remote/workspace",
+      remoteMcpRouting: "local",
+      remoteMcpAccess: "all",
+    });
+    const disabled = stdioServer("disabled", "example-mcp");
+    disabled.enabled = false;
+
+    const result = await routeRemoteMcpServers({
+      appServerArgs: ["app-server"],
+      codexExecutable: "codex",
+      config: allLocalConfig,
+      listServers: async () => [disabled],
+    });
+
+    expect(result.localServers).toEqual(["disabled"]);
+    expect(result.remoteServers).toEqual([]);
+    expect(result.appServerArgs).toContain("mcp_servers.disabled.enabled=true");
+    expect(result.appServerArgs).not.toContain(
+      'mcp_servers.disabled.command="ssh"',
+    );
+  });
 });

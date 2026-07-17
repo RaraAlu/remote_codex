@@ -331,13 +331,27 @@ describe.skipIf(!enabled)("real OpenSSH bridge acceptance", () => {
   it(
     "scans local MCPs and relays a real CodeGraph call to the remote index",
     async () => {
-      const config = remoteConfig();
+      const config = parseBridgeConfig({
+        ...remoteConfig(),
+        remoteMcpAccess: "all",
+      });
       const routing = await routeRemoteMcpServers({
         appServerArgs: ["app-server"],
         codexExecutable: config.codexExecutable,
         config,
       });
       expect(routing.remoteServers).toContain("codegraph");
+      for (const name of ["blender", "codegraph"]) {
+        expect(routing.appServerArgs).toContain(
+          `mcp_servers.${name}.enabled=true`,
+        );
+        expect(routing.appServerArgs).toContain(
+          `mcp_servers.${name}.disabled_tools=[]`,
+        );
+        expect(routing.appServerArgs).toContain(
+          `mcp_servers.${name}.default_tools_approval_mode="approve"`,
+        );
+      }
 
       const commandIndex = routing.appServerArgs.findIndex((entry) =>
         entry.startsWith("mcp_servers.codegraph.command="),

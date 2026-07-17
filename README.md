@@ -32,8 +32,10 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 - SSH 子进程只继承必要环境变量，不继承 Codex、OpenAI 或其他应用凭据。
 - 未知 app-server 服务端请求默认拒绝；操作审计日志只保存在本地并结构化脱敏。
 - 协议子集由本机 Codex `0.144.5` 生成，运行时要求精确版本匹配。
-- Remote SSH 窗口自动扫描本机 Codex 已启用的 MCP：本机能力继续留在本机，可安全
-  远端启动的工作区 stdio MCP 按当前主机和工作区改为 SSH 中转。
+- Remote SSH 窗口自动扫描本机 Codex MCP：本机能力继续留在本机，可安全远端启动
+  的工作区 stdio MCP 按当前主机和工作区改为 SSH 中转。
+- 可按窗口切换 MCP 访问范围；显式选择 `all` 时启用全部已配置服务、清空工具禁用
+  列表，并将服务默认工具审批设为 `approve`，不改写全局 Codex 配置。
 
 ## 尚未实现
 
@@ -52,6 +54,10 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 远端启动器自动探测 `PATH`、`~/.local/bin` 和 `/usr/local/bin`，并以远程工作区为
 当前目录。CodeGraph 是首个工作区参数适配器，会额外绑定远程索引根目录。可将
 `codexRemoteBridge.remoteMcpRouting` 设为 `local`，让所有 MCP 保持本机运行。
+`codexRemoteBridge.remoteMcpAccess` 默认为 `enabled`，保留用户已有启用和审批策略；
+设为 `all` 后只对当前 Remote SSH 窗口的 app-server 启用全部已配置 MCP、清空
+`disabled_tools`，并设置 `default_tools_approval_mode="approve"`。服务自身未提供的
+工具不会被 Bridge 虚构，已有 `enabled_tools` allowlist 或托管策略仍是上层边界。
 
 ## 开发与自测
 
@@ -97,9 +103,11 @@ npm run protocol:generate
 4. 等待状态栏显示 `Codex: local -> <host> (ready)`。
 5. 运行 `Codex Bridge: Run Diagnostics`，确认本地扩展宿主、官方设置、远端身份和
    `remote.codexInstalled=false`。
-6. 新建 Codex 任务，验证远程读取、目录树、搜索和 `git status` 的显示与本地一致。
-7. 请求执行 `pwd` 或仓库测试命令；“完全访问”应直接执行，其他模式应显示审批。
-8. 停用原型前执行 `Codex Bridge: Restore Official Codex Settings`；该命令同时关闭
+6. 需要全部 MCP 时，将 `codexRemoteBridge.remoteMcpAccess` 设为 `all` 后完整重启
+   VS Code；审计中的 `remoteMcpAccess` 应为 `all`。
+7. 新建 Codex 任务，验证远程读取、目录树、搜索、`git status` 和 MCP 工具。
+8. 请求执行 `pwd` 或仓库测试命令；“完全访问”应直接执行，其他模式应显示审批。
+9. 停用原型前执行 `Codex Bridge: Restore Official Codex Settings`；该命令同时关闭
    `codexRemoteBridge.autoInitialize`，避免重载后再次接管。
 
 自动流程仅在 `codexRemoteBridge.autoInitialize=true`、当前窗口为 Remote SSH 且恰好

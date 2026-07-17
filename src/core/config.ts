@@ -84,6 +84,13 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
   ) {
     throw new BridgeError("INVALID_CONFIG", "remoteMcpRouting must be auto or local");
   }
+  if (
+    input.remoteMcpAccess !== undefined &&
+    input.remoteMcpAccess !== "enabled" &&
+    input.remoteMcpAccess !== "all"
+  ) {
+    throw new BridgeError("INVALID_CONFIG", "remoteMcpAccess must be enabled or all");
+  }
 
   const sshUser =
     input.sshUser === undefined || input.sshUser === null || input.sshUser === ""
@@ -124,6 +131,7 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
         ? input.codexExecutable
         : DEFAULTS.codexExecutable,
     remoteMcpRouting: input.remoteMcpRouting === "local" ? "local" : "auto",
+    remoteMcpAccess: input.remoteMcpAccess === "all" ? "all" : "enabled",
     commandTimeoutMs: integerInRange(
       input.commandTimeoutMs,
       DEFAULTS.commandTimeoutMs,

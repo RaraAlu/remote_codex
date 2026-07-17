@@ -71,6 +71,13 @@ export interface CodexMcpServer {
   transport: StdioTransport | { type: string };
 }
 
+type McpConfigProperty =
+  | "args"
+  | "command"
+  | "default_tools_approval_mode"
+  | "disabled_tools"
+  | "enabled";
+
 interface RemoteMcpRoute {
   name: string;
   executable: string;
@@ -91,15 +98,15 @@ export interface McpRoutingOptions {
   remoteExecutableAvailable?: (executable: string) => Promise<boolean>;
 }
 
-function configKey(name: string, property: "args" | "command"): string {
+function configKey(name: string, property: McpConfigProperty): string {
   const component = /^[A-Za-z0-9_-]+$/.test(name) ? name : JSON.stringify(name);
   return `mcp_servers.${component}.${property}`;
 }
 
 function configOverride(
   name: string,
-  property: "args" | "command",
-  value: string | readonly string[],
+  property: McpConfigProperty,
+  value: boolean | string | readonly string[],
 ): string {
   return `${configKey(name, property)}=${JSON.stringify(value)}`;
 }
@@ -107,7 +114,7 @@ function configOverride(
 function isRemoteCandidate(server: CodexMcpServer): server is CodexMcpServer & {
   transport: StdioTransport;
 } {
-  if (!server.enabled || server.transport.type !== "stdio") {
+  if (server.transport.type !== "stdio") {
     return false;
   }
   const transport = server.transport as StdioTransport;
@@ -198,7 +205,10 @@ export async function routeRemoteMcpServers(
     localServers: [] as string[],
     remoteServers: [] as string[],
   };
-  if (options.config.remoteMcpRouting !== "auto") {
+  if (
+    options.config.remoteMcpRouting !== "auto" &&
+    options.config.remoteMcpAccess !== "all"
+  ) {
     return unchanged;
   }
 
@@ -207,13 +217,20 @@ export async function routeRemoteMcpServers(
   const available =
     options.remoteExecutableAvailable ??
     ((executable: string) => probeRemoteExecutable(options.config, executable));
-  const servers = (await listServers()).filter((server) => server.enabled);
+  const configuredServers = await listServers();
+  const servers =
+    options.config.remoteMcpAccess === "all"
+      ? configuredServers
+      : configuredServers.filter((server) => server.enabled);
   const routes: RemoteMcpRoute[] = [];
   const localServers: string[] = [];
 
   await Promise.all(
     servers.map(async (server) => {
-      if (!isRemoteCandidate(server)) {
+      if (
+        options.config.remoteMcpRouting !== "auto" ||
+        !isRemoteCandidate(server)
+      ) {
         localServers.push(server.name);
         return;
       }
@@ -229,7 +246,7 @@ export async function routeRemoteMcpServers(
   routes.sort((left, right) => left.name.localeCompare(right.name));
   localServers.sort();
   const appServerIndex = options.appServerArgs.indexOf("app-server");
-  if (appServerIndex < 0 || routes.length === 0) {
+  if (appServerIndex < 0) {
     return {
       appServerArgs: [...options.appServerArgs],
       localServers,
@@ -237,7 +254,22 @@ export async function routeRemoteMcpServers(
     };
   }
 
-  const overrides = routes.flatMap((route) => {
+  const accessOverrides =
+    options.config.remoteMcpAccess === "all"
+      ? servers.flatMap((server) => [
+          "-c",
+          configOverride(server.name, "enabled", true),
+          "-c",
+          configOverride(server.name, "disabled_tools", []),
+          "-c",
+          configOverride(
+            server.name,
+            "default_tools_approval_mode",
+            "approve",
+          ),
+        ])
+      : [];
+  const routeOverrides = routes.flatMap((route) => {
     const sshArgs = buildSshArgs(
       options.config,
       remoteMcpCommand(route, options.config.workspaceRoot),
@@ -249,6 +281,7 @@ export async function routeRemoteMcpServers(
       configOverride(route.name, "args", sshArgs),
     ];
   });
+  const overrides = [...accessOverrides, ...routeOverrides];
   return {
     appServerArgs: [
       ...options.appServerArgs.slice(0, appServerIndex),

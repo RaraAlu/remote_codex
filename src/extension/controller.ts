@@ -342,6 +342,7 @@ export class BridgeController implements vscode.Disposable {
       identityFile: settings.get<string | null>("identityFile"),
       codexExecutable: settings.get<string>("codexExecutable"),
       remoteMcpRouting: settings.get<"auto" | "local">("remoteMcpRouting", "auto"),
+      remoteMcpAccess: settings.get<"enabled" | "all">("remoteMcpAccess", "enabled"),
       commandTimeoutMs: settings.get<number>("commandTimeoutMs"),
       maxOutputBytes: settings.get<number>("maxOutputBytes"),
       maxParallelReads: 8,
