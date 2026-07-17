@@ -59,7 +59,7 @@ async function main(): Promise<number> {
     );
   }
 
-  if (args[0] !== "app-server") {
+  if (!args.includes("app-server")) {
     return await passthrough(codexExecutable, args);
   }
 
