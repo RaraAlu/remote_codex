@@ -158,4 +158,31 @@ describe("OpenSshExecutor execution", () => {
     ]);
     expect(invocation).toBe(4);
   });
+
+  it("returns a bounded directory tree in one remote operation", async () => {
+    let invocation = 0;
+    let capturedCommand = "";
+    const fakeSpawn: SpawnProcess = (_command, args) => {
+      invocation += 1;
+      capturedCommand = args.at(-1) ?? "";
+      if (invocation <= 2) {
+        return nodeChild(
+          "process.stdout.write('/remote/workspace\\0/remote/workspace\\0');",
+        );
+      }
+      return nodeChild(
+        "process.stdout.write('/remote/workspace\\0src\\0d\\0src/index.ts\\0f\\0README.md\\0f\\0');",
+      );
+    };
+    const executor = new OpenSshExecutor(config, fakeSpawn);
+    await expect(executor.listTree(".", 2, 2)).resolves.toEqual({
+      entries: [
+        { path: "src", type: "directory" },
+        { path: "src/index.ts", type: "file" },
+      ],
+      truncated: true,
+    });
+    expect(capturedCommand).toContain("-maxdepth");
+    expect(invocation).toBe(3);
+  });
 });

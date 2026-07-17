@@ -4,12 +4,15 @@ import type { AuditLog } from "../core/audit-log.js";
 import type { OpenSshExecutor } from "../core/ssh-executor.js";
 import type { BridgeConfig, ToolResult } from "../core/types.js";
 import { isRecord, type RpcId } from "./rpc.js";
+import { parseRemoteExecArguments } from "./remote-command.js";
 
 export const REMOTE_TOOL_NAMES = new Set([
   "remote_read_file",
   "remote_list_directory",
+  "remote_list_tree",
   "remote_search",
   "remote_git_status",
+  "remote_exec",
 ]);
 
 export const REMOTE_DYNAMIC_TOOLS = [
@@ -37,13 +40,39 @@ export const REMOTE_DYNAMIC_TOOLS = [
     type: "function",
     name: "remote_list_directory",
     description:
-      "List direct children only in the configured offline remote Ubuntu workspace.",
+      "List direct children only in the configured offline remote Ubuntu workspace. Use for focused follow-up after remote_list_tree.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["path"],
       properties: {
         path: { type: "string", description: "Workspace-relative remote directory." },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "remote_list_tree",
+    description:
+      "Inspect a bounded remote workspace directory tree in one call. Prefer this before making repeated remote_list_directory calls.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path"],
+      properties: {
+        path: { type: "string", description: "Workspace-relative remote directory." },
+        depth: {
+          type: "integer",
+          minimum: 1,
+          maximum: 4,
+          description: "Maximum descendant depth. Defaults to 2.",
+        },
+        maxEntries: {
+          type: "integer",
+          minimum: 1,
+          maximum: 2000,
+          description: "Maximum returned entries. Defaults to 400.",
+        },
       },
     },
   },
@@ -82,12 +111,52 @@ export const REMOTE_DYNAMIC_TOOLS = [
       properties: {},
     },
   },
+  {
+    type: "function",
+    name: "remote_exec",
+    description:
+      "Run an approved argv command in the configured remote Ubuntu workspace over SSH. Use for Git, tests, training, diagnostics, and GPU commands. The user must approve every call in the Codex command approval UI.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["argv"],
+      properties: {
+        argv: {
+          type: "array",
+          minItems: 1,
+          maxItems: 256,
+          items: { type: "string" },
+          description:
+            "Structured remote command argv. Use ['bash','-lc','...'] only when shell syntax is required.",
+        },
+        cwd: {
+          type: "string",
+          description:
+            "Optional workspace-relative remote working directory. Defaults to the workspace root.",
+        },
+        env: {
+          type: "object",
+          additionalProperties: { type: ["string", "null"] },
+          description: "Explicit remote environment overrides. Local process variables are not inherited.",
+        },
+        timeoutMs: {
+          type: "integer",
+          minimum: 1000,
+          maximum: 3600000,
+        },
+      },
+    },
+  },
 ] as const;
 
 interface DynamicToolCall {
   arguments: unknown;
   callId: string;
   tool: string;
+}
+
+export interface DynamicToolObserver {
+  onOutput?: (chunk: string) => void;
 }
 
 function parseToolCall(value: unknown): DynamicToolCall {
@@ -131,7 +200,11 @@ export class DynamicToolRouter {
     this.#audit = audit;
   }
 
-  async handle(rpcId: RpcId, rawParams: unknown): Promise<unknown> {
+  async handle(
+    rpcId: RpcId,
+    rawParams: unknown,
+    observer: DynamicToolObserver = {},
+  ): Promise<unknown> {
     const call = parseToolCall(rawParams);
     if (!REMOTE_TOOL_NAMES.has(call.tool)) {
       throw new BridgeError("COMMAND_DENIED", `Unknown remote tool: ${call.tool}`);
@@ -151,7 +224,7 @@ export class DynamicToolRouter {
     });
 
     try {
-      const data = await this.#execute(call.tool, call.arguments);
+      const data = await this.#execute(call.tool, call.arguments, observer);
       const truncated = isRecord(data) && data.truncated === true;
       const result: ToolResult<unknown> = {
         ok: true,
@@ -207,7 +280,41 @@ export class DynamicToolRouter {
     }
   }
 
-  async #execute(tool: string, rawArguments: unknown): Promise<unknown> {
+  async decline(rpcId: RpcId, rawParams: unknown, reason: string): Promise<unknown> {
+    const call = parseToolCall(rawParams);
+    const requestId = call.callId || `req_${randomUUID()}`;
+    const error = new BridgeError("COMMAND_DENIED", reason);
+    const result: ToolResult<never> = {
+      ok: false,
+      requestId,
+      connectionId: this.#executor.connectionId,
+      hostId: this.#config.host,
+      remoteCwd: this.#config.workspaceRoot,
+      data: null,
+      truncated: false,
+      error: error.toPayload(),
+    };
+    await this.#audit.write({
+      requestId,
+      connectionId: this.#executor.connectionId,
+      hostId: this.#config.host,
+      workspaceRoot: this.#config.workspaceRoot,
+      remoteCwd: this.#config.workspaceRoot,
+      operation: call.tool,
+      outcome: "cancelled",
+      details: { rpcId, reason },
+    });
+    return {
+      success: false,
+      contentItems: [{ type: "inputText", text: JSON.stringify(result) }],
+    };
+  }
+
+  async #execute(
+    tool: string,
+    rawArguments: unknown,
+    observer: DynamicToolObserver,
+  ): Promise<unknown> {
     const args = argumentObject(rawArguments);
     switch (tool) {
       case "remote_read_file": {
@@ -219,6 +326,17 @@ export class DynamicToolRouter {
       }
       case "remote_list_directory":
         return await this.#executor.listDirectory(requiredPath(args));
+      case "remote_list_tree": {
+        const depth =
+          typeof args.depth === "number" && Number.isInteger(args.depth)
+            ? Math.max(1, Math.min(args.depth, 4))
+            : 2;
+        const maxEntries =
+          typeof args.maxEntries === "number" && Number.isInteger(args.maxEntries)
+            ? Math.max(1, Math.min(args.maxEntries, 2_000))
+            : 400;
+        return await this.#executor.listTree(requiredPath(args), depth, maxEntries);
+      }
       case "remote_search": {
         if (typeof args.query !== "string") {
           throw new BridgeError("PROTOCOL_MISMATCH", "query must be a string");
@@ -241,6 +359,17 @@ export class DynamicToolRouter {
           });
         }
         return result;
+      }
+      case "remote_exec": {
+        const request = parseRemoteExecArguments(args);
+        return await this.#executor.execute(request.argv, {
+          cwd: request.cwd,
+          env: request.env,
+          timeoutMs: request.timeoutMs,
+          sideEffect: true,
+          onStdout: observer.onOutput,
+          onStderr: observer.onOutput,
+        });
       }
       default:
         throw new BridgeError("COMMAND_DENIED", `Unsupported remote tool: ${tool}`);

@@ -58,6 +58,35 @@ function fakeToolCallingAppServer(): ChildProcessWithoutNullStreams {
   return spawn(process.execPath, ["-e", source], { stdio: "pipe" });
 }
 
+function fakeRemoteExecAppServer(): ChildProcessWithoutNullStreams {
+  const source = `
+    const readline = require("node:readline");
+    process.stdout.write(JSON.stringify({
+      id: 100,
+      method: "item/tool/call",
+      params: {
+        arguments: { argv: ["pwd"] },
+        callId: "remote_acceptance_exec",
+        threadId: "thread_test",
+        tool: "remote_exec",
+        turnId: "turn_test"
+      }
+    }) + "\\n");
+    const lines = readline.createInterface({ input: process.stdin });
+    lines.on("line", (line) => {
+      const message = JSON.parse(line);
+      if (message.id === 100) {
+        process.stdout.write(JSON.stringify({
+          method: "bridge/testResult",
+          params: message.result
+        }) + "\\n");
+        process.exit(0);
+      }
+    });
+  `;
+  return spawn(process.execPath, ["-e", source], { stdio: "pipe" });
+}
+
 describe.skipIf(!enabled)("real OpenSSH read-only acceptance", () => {
   it(
     "proves identity, repository reads, grep fallback, Git, GPU, and safe path failure",
@@ -171,6 +200,99 @@ describe.skipIf(!enabled)("real OpenSSH read-only acceptance", () => {
         expect(toolResult.data.canonicalPath).toBe(
           `${process.env.CODEX_BRIDGE_TEST_WORKSPACE}/README.md`,
         );
+      } finally {
+        input.destroy();
+        await rm(directory, { force: true, recursive: true });
+      }
+    },
+    120_000,
+  );
+
+  it(
+    "requires approval and streams a real remote_exec through the JSONL shim",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "codex-bridge-remote-exec-"));
+      const input = new PassThrough();
+      const output = new PassThrough();
+      const messages: Array<Record<string, unknown>> = [];
+      let buffer = "";
+      output.setEncoding("utf8");
+      output.on("data", (chunk: string) => {
+        buffer += chunk;
+        for (;;) {
+          const newline = buffer.indexOf("\n");
+          if (newline < 0) {
+            break;
+          }
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          const message: unknown = JSON.parse(line);
+          if (!message || typeof message !== "object" || Array.isArray(message)) {
+            continue;
+          }
+          const record = message as Record<string, unknown>;
+          messages.push(record);
+          if (
+            record.method === "item/commandExecution/requestApproval" &&
+            (typeof record.id === "string" || typeof record.id === "number")
+          ) {
+            input.write(
+              `${JSON.stringify({ id: record.id, result: { decision: "accept" } })}\n`,
+            );
+          }
+        }
+      });
+      try {
+        const config = remoteConfig();
+        const proxy = new ShimProxy({
+          appServerArgs: ["app-server", "--stdio"],
+          auditPath: join(directory, "audit.jsonl"),
+          codexExecutable: "fake-codex",
+          config,
+          controlDir: join(directory, "control"),
+          input,
+          output,
+          errorOutput: new PassThrough(),
+          spawnCodex: () => fakeRemoteExecAppServer(),
+        });
+        await expect(proxy.run()).resolves.toBe(0);
+
+        expect(messages).toContainEqual(
+          expect.objectContaining({
+            method: "item/commandExecution/requestApproval",
+            params: expect.objectContaining({
+              command: "pwd",
+              cwd: config.workspaceRoot,
+            }),
+          }),
+        );
+        expect(messages).toContainEqual(
+          expect.objectContaining({
+            method: "item/commandExecution/outputDelta",
+            params: expect.objectContaining({
+              delta: `${config.workspaceRoot}\n`,
+            }),
+          }),
+        );
+        const notification = messages.find(
+          (message) => message.method === "bridge/testResult",
+        );
+        const dynamicResult = notification?.params as {
+          success: boolean;
+          contentItems: Array<{ text: string }>;
+        };
+        expect(dynamicResult.success).toBe(true);
+        const toolResult = JSON.parse(dynamicResult.contentItems[0]?.text ?? "{}") as {
+          ok: boolean;
+          data: { actualCwd: string; stdout: string };
+        };
+        expect(toolResult).toMatchObject({
+          ok: true,
+          data: {
+            actualCwd: config.workspaceRoot,
+            stdout: `${config.workspaceRoot}\n`,
+          },
+        });
       } finally {
         input.destroy();
         await rm(directory, { force: true, recursive: true });

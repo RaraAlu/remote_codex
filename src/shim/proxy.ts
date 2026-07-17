@@ -3,20 +3,27 @@ import {
   type ChildProcessWithoutNullStreams,
   type SpawnOptionsWithoutStdio,
 } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { AuditLog } from "../core/audit-log.js";
+import { normalizeRemotePath } from "../core/path-policy.js";
 import type { BridgeConfig } from "../core/types.js";
 import { OpenSshExecutor, type SpawnProcess } from "../core/ssh-executor.js";
 import { DynamicToolRouter, REMOTE_TOOL_NAMES } from "./dynamic-tools.js";
+import { formatRemoteExecRequest, parseRemoteExecArguments } from "./remote-command.js";
 import {
   isRecord,
   isRpcRequest,
+  isRpcResponse,
   parseRpcLine,
+  type RpcId,
   type RpcMessage,
   type RpcRequest,
+  type RpcResponse,
 } from "./rpc.js";
 import { rewriteClientMessage } from "./rewrite.js";
+import { projectServerMessage } from "./native-tool-presentation.js";
 
 export const KNOWN_SERVER_REQUESTS = new Set([
   "item/commandExecution/requestApproval",
@@ -62,6 +69,27 @@ function isRemoteToolCall(request: RpcRequest): boolean {
   );
 }
 
+function isRemoteExecToolCall(request: RpcRequest): boolean {
+  return (
+    request.method === "item/tool/call" &&
+    isRecord(request.params) &&
+    request.params.tool === "remote_exec"
+  );
+}
+
+interface RemoteExecContext {
+  callId: string;
+  command: string;
+  cwd: string;
+  threadId: string;
+  turnId: string;
+}
+
+interface PendingApproval {
+  resolve: (approved: boolean) => void;
+  timeout: NodeJS.Timeout;
+}
+
 export function isUnknownServerRequest(request: RpcRequest): boolean {
   return !KNOWN_SERVER_REQUESTS.has(request.method);
 }
@@ -71,6 +99,7 @@ export class ShimProxy {
   readonly #audit: AuditLog;
   readonly #executor: OpenSshExecutor | null;
   readonly #router: DynamicToolRouter | null;
+  readonly #pendingApprovals = new Map<RpcId, PendingApproval>();
   #child: ChildProcessWithoutNullStreams | null = null;
 
   constructor(options: ShimProxyOptions) {
@@ -108,6 +137,9 @@ export class ShimProxy {
     clientLines.on("line", (line) => {
       try {
         const message = parseRpcLine(line);
+        if (isRpcResponse(message) && this.#resolveApproval(message)) {
+          return;
+        }
         const rewritten = rewriteClientMessage(
           message,
           this.#options.config,
@@ -142,6 +174,7 @@ export class ShimProxy {
         process.removeListener("SIGTERM", onSigTerm);
         clientLines.close();
         serverLines.close();
+        this.#cancelApprovals();
         this.#executor?.close();
         if (signal) {
           resolve(128);
@@ -167,7 +200,7 @@ export class ShimProxy {
     }
 
     if (!isRpcRequest(message)) {
-      writeMessage(output, message);
+      writeMessage(output, projectServerMessage(message, this.#options.config));
       return;
     }
 
@@ -183,7 +216,34 @@ export class ShimProxy {
         return;
       }
       try {
-        const result = await this.#router.handle(message.id, message.params);
+        let context: RemoteExecContext | null = null;
+        if (isRemoteExecToolCall(message)) {
+          context = await this.#requestRemoteCommandApproval(message, output);
+          if (!context) {
+            const result = await this.#router.decline(
+              message.id,
+              message.params,
+              "Remote command execution was declined by the user",
+            );
+            writeMessage(childInput, { id: message.id, result });
+            return;
+          }
+        }
+        const result = await this.#router.handle(message.id, message.params, {
+          onOutput: context
+            ? (delta) => {
+                writeMessage(output, {
+                  method: "item/commandExecution/outputDelta",
+                  params: {
+                    delta,
+                    itemId: context.callId,
+                    threadId: context.threadId,
+                    turnId: context.turnId,
+                  },
+                });
+              }
+            : undefined,
+        });
         writeMessage(childInput, { id: message.id, result });
       } catch (error) {
         writeMessage(childInput, {
@@ -213,6 +273,83 @@ export class ShimProxy {
       return;
     }
 
-    writeMessage(output, message);
+    writeMessage(output, projectServerMessage(message, this.#options.config));
+  }
+
+  async #requestRemoteCommandApproval(
+    request: RpcRequest,
+    output: Writable,
+  ): Promise<RemoteExecContext | null> {
+    const config = this.#options.config;
+    if (!config || !isRecord(request.params)) {
+      throw new TypeError("Remote command approval requires Bridge configuration");
+    }
+    const params = request.params;
+    if (
+      typeof params.callId !== "string" ||
+      typeof params.threadId !== "string" ||
+      typeof params.turnId !== "string"
+    ) {
+      throw new TypeError("Remote command call is missing thread, turn, or item identity");
+    }
+    const remote = parseRemoteExecArguments(params.arguments);
+    const context: RemoteExecContext = {
+      callId: params.callId,
+      command: formatRemoteExecRequest(remote),
+      cwd: normalizeRemotePath(
+        config.workspaceRoot,
+        remote.cwd ?? config.workspaceRoot,
+      ).absolutePath,
+      threadId: params.threadId,
+      turnId: params.turnId,
+    };
+    const approvalId = `codex-bridge-approval:${randomUUID()}`;
+    const approved = new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => {
+        this.#pendingApprovals.delete(approvalId);
+        resolve(false);
+      }, 10 * 60_000);
+      timeout.unref();
+      this.#pendingApprovals.set(approvalId, { resolve, timeout });
+    });
+    writeMessage(output, {
+      id: approvalId,
+      method: "item/commandExecution/requestApproval",
+      params: {
+        itemId: context.callId,
+        threadId: context.threadId,
+        turnId: context.turnId,
+        startedAtMs: Date.now(),
+        command: context.command,
+        commandActions: [{ type: "unknown", command: context.command }],
+        cwd: context.cwd,
+        reason: `通过 SSH 在远程主机 ${config.host} 上执行此命令`,
+        availableDecisions: ["accept", "decline"],
+      },
+    });
+    return (await approved) ? context : null;
+  }
+
+  #resolveApproval(response: RpcResponse): boolean {
+    const pending = this.#pendingApprovals.get(response.id);
+    if (!pending) {
+      return false;
+    }
+    this.#pendingApprovals.delete(response.id);
+    clearTimeout(pending.timeout);
+    const decision =
+      isRecord(response.result) && typeof response.result.decision === "string"
+        ? response.result.decision
+        : "";
+    pending.resolve(decision === "accept");
+    return true;
+  }
+
+  #cancelApprovals(): void {
+    for (const pending of this.#pendingApprovals.values()) {
+      clearTimeout(pending.timeout);
+      pending.resolve(false);
+    }
+    this.#pendingApprovals.clear();
   }
 }

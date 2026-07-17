@@ -39,6 +39,16 @@ export interface DirectoryEntry {
   type: "directory" | "file" | "other" | "symlink";
 }
 
+export interface TreeEntry {
+  path: string;
+  type: "directory" | "file" | "other" | "symlink";
+}
+
+export interface TreeListing {
+  entries: TreeEntry[];
+  truncated: boolean;
+}
+
 export interface SearchMatch {
   path: string;
   lineNumber: number;
@@ -515,6 +525,56 @@ export class OpenSshExecutor {
       entries.push({ name, type });
     }
     return entries.sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async listTree(inputPath: string, depth = 2, maxEntries = 400): Promise<TreeListing> {
+    const canonicalPath = await this.canonicalPath(inputPath);
+    const safeDepth = Math.max(1, Math.min(Math.floor(depth), 4));
+    const safeMaxEntries = Math.max(1, Math.min(Math.floor(maxEntries), 2_000));
+    const fieldLimit = (safeMaxEntries + 1) * 2;
+    const script =
+      'find -P "$1" -mindepth 1 -maxdepth "$2" -printf "%P\\0%y\\0" | head -z -n "$3"';
+    const result = await this.execute([
+      "sh",
+      "-c",
+      script,
+      "codex-bridge-tree",
+      canonicalPath,
+      String(safeDepth),
+      String(fieldLimit),
+    ]);
+    if (result.truncated) {
+      throw new BridgeError("OUTPUT_TRUNCATED", "Remote directory tree exceeded the output limit");
+    }
+    if (result.exitCode !== 0) {
+      throw new BridgeError("SSH_DISCONNECTED", "Unable to inspect remote directory tree", {
+        stderr: result.stderr,
+      });
+    }
+
+    const fields = result.stdout.split("\0");
+    const entries: TreeEntry[] = [];
+    for (let index = 0; index + 1 < fields.length; index += 2) {
+      const path = fields[index];
+      const rawType = fields[index + 1];
+      if (!path || !rawType) {
+        continue;
+      }
+      const type =
+        rawType === "d"
+          ? "directory"
+          : rawType === "f"
+            ? "file"
+            : rawType === "l"
+              ? "symlink"
+              : "other";
+      entries.push({ path, type });
+    }
+    const truncated = entries.length > safeMaxEntries;
+    return {
+      entries: entries.slice(0, safeMaxEntries),
+      truncated,
+    };
   }
 
   async search(

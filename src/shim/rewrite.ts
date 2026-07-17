@@ -5,6 +5,8 @@ import { isRecord, type RpcMessage } from "./rpc.js";
 const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
 - The project exists only on the configured remote Ubuntu host.
 - Use only remote_* dynamic tools for project files, search, Git, tests, and commands.
+- For project overviews, prefer one remote_list_tree call before focused directory listings.
+- Use remote_exec for project commands. Every remote_exec call requires explicit user approval.
 - Never use local shell or local filesystem tools for project operations.
 - The local cwd is an empty control directory and is not the project.
 - When a required remote capability is unavailable, stop and report that the bridge does not support it. Never fall back to local execution.`;
