@@ -539,6 +539,7 @@ CLI Shim 启动本地 Codex app-server，并为会话注入远程动态工具：
 
 - `remote_read_file`
 - `remote_list_directory`
+- `remote_list_tree`
 - `remote_search`
 - `remote_write_file`
 - `remote_apply_patch`
@@ -554,13 +555,23 @@ CLI Shim 启动本地 Codex app-server，并为会话注入远程动态工具：
 | --- | --- | --- |
 | `remote_read_file` | `path`、`offset`、`limit` | 内容、哈希、大小、权限、修改时间 |
 | `remote_list_directory` | `path`、`depth`、`limit` | 结构化目录项、截断游标 |
+| `remote_list_tree` | `path`、`depth`、`maxEntries` | 一次调用返回的有界目录树 |
 | `remote_search` | `query`、`paths`、`globs`、`maxResults` | 文件、行号、匹配片段 |
 | `remote_write_file` | `path`、内容、`expectedHash`、`idempotencyKey` | 新哈希、写入字节数 |
 | `remote_apply_patch` | 结构化补丁、基础哈希、`idempotencyKey` | 逐文件结果和新哈希 |
 | `remote_exec` | `argv` 或已审批 Shell、`cwd`、超时、环境变量白名单 | 输出流、退出码、耗时 |
 | `remote_cancel` | `requestId` | 是否终止、最终状态 |
 
-`remote_exec` 默认只接受 `argv` 数组。只有确实需要管道、重定向或 Shell 展开时才接受 Shell 字符串，并在审批界面明确标记。
+`remote_exec` 只接受 `argv` 数组。确实需要管道、重定向或 Shell 展开时，应把
+`bash -lc` 等 Shell 作为显式 `argv` 元素，并在审批界面展示完整参数。
+
+Bridge 自有动态工具可在返回官方界面前投影为标准 `commandExecution` 项，以复用官方
+读取、列目录、搜索、命令输出和审批外观。投影只改变展示协议，不改变实际工具路由、
+参数校验或审计；不得修改官方扩展文件，也不得改写不属于 Bridge 的第三方动态工具。
+
+本地 app-server 配置的 MCP 服务继续在本地运行。Bridge 不应在不知道工具语义时把
+任意 MCP 调用自动重定向到远程；需要访问远端的 MCP 服务必须自行显式使用 SSH，
+项目 Shell、Git、测试和训练命令则统一走受审批的 `remote_exec`。
 
 ### 11.4 路径模型
 

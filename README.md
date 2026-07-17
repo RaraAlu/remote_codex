@@ -4,8 +4,8 @@
 Codex VS Code 扩展和 Codex app-server 留在可联网的本地 Ubuntu，同时只通过
 OpenSSH 访问离线远程 Ubuntu 工作区。
 
-> 当前版本是只读技术原型，不是完整 MVP。不要用它执行写文件、训练或其他有副作用
-> 的生产操作。
+> 当前版本是读操作和受审批非交互命令的技术原型，不是完整 MVP。远程写入、运行中
+> 取消和断线恢复尚未完成，不要用于无人值守的生产训练。
 
 ## 当前实现
 
@@ -18,7 +18,11 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 - 修改 `chatgpt.cliExecutable` 和 `remote.extensionKind` 前保存原值，并提供恢复命令。
 - 默认命令不在 VS Code 的 `PATH` 时，自动探测 `~/.local/bin/codex` 等常见本地路径。
 - CLI Shim 代理 app-server JSONL，固定本地只读控制目录，并注入实验协议能力。
-- 新线程注入远程读取、目录列出、文本搜索和 `git status` 动态工具。
+- 新线程注入远程读取、单层/有界目录树、文本搜索、`git status` 和受审批命令工具。
+- Bridge 自有工具在返回官方界面前投影为原生 `commandExecution` 项，使用本地 Codex
+  相同的读取、列目录、搜索和命令外观，不修改官方扩展文件。
+- `remote_exec` 只接受结构化 `argv`；每次调用都弹出官方命令审批，显示远程主机、
+  规范化 `cwd`、完整命令和环境变量变更，并实时转发 stdout/stderr。
 - OpenSSH 执行器使用结构化 `argv`、严格主机密钥校验、连接超时、取消和输出上限。
 - 直连主机可单独配置 SSH 用户、端口和可选 IdentityFile；私钥内容不由 Bridge 读取。
 - 同一 `connectionId` 使用受限 ControlMaster 复用，并在停止时显式关闭。
@@ -31,14 +35,16 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 ## 尚未实现
 
 - 哈希保护的远程写入、补丁、删除和重命名。
-- 通用远程命令、流式训练输出、审批绑定、幂等键和断线后结果确认。
-- 官方 Codex 审批 UI 与 Bridge 写入/命令策略的端到端接入。
+- 运行中命令取消、幂等键、后台任务和断线后结果确认。
 - 对 Codex Core 内置本地 Shell 工具的执行前硬阻断。
 - 在目标 Remote SSH 主机和 MimicLite 仓库上的完整 P0 验收。
 
-最后两项是进入阶段 C 前的安全门槛。当前 Shim 会把 app-server 放在无项目文件且
-不可写的本地控制目录，并通过指令要求只用远程工具，但这不能替代 Core 层的强制
-路由控制。
+最后两项仍是阶段 C 的安全门槛。当前 Shim 会把 app-server 放在无项目文件且不可写
+的本地控制目录，并通过指令要求只用远程工具，但这不能替代 Core 层的强制路由控制。
+
+本地 app-server 原有的 MCP 配置仍在本地运行且可以照常使用。Bridge 不会把任意 MCP
+工具自动改写成远程工具，因为 MCP 工具参数本身不一定含主机和路径语义；项目 Shell
+应走 `remote_exec`，确需访问远端的本地 MCP 服务也应由该服务显式通过 SSH 访问。
 
 ## 开发与自测
 
@@ -84,8 +90,9 @@ npm run protocol:generate
 4. 等待状态栏显示 `Codex: local -> <host> (ready)`。
 5. 运行 `Codex Bridge: Run Diagnostics`，确认本地扩展宿主、官方设置、远端身份和
    `remote.codexInstalled=false`。
-6. 只进行远程读取、目录列出、搜索和 `git status` 验证。
-7. 停用原型前执行 `Codex Bridge: Restore Official Codex Settings`；该命令同时关闭
+6. 新建 Codex 任务，验证远程读取、目录树、搜索和 `git status` 的显示与本地一致。
+7. 请求执行 `pwd` 或仓库测试命令，核对审批中的主机、`cwd` 和完整命令后再批准。
+8. 停用原型前执行 `Codex Bridge: Restore Official Codex Settings`；该命令同时关闭
    `codexRemoteBridge.autoInitialize`，避免重载后再次接管。
 
 自动流程仅在 `codexRemoteBridge.autoInitialize=true`、当前窗口为 Remote SSH 且恰好
