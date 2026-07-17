@@ -22,6 +22,7 @@ import {
   OfficialSettingsManager,
   type OfficialSettingsStatus,
 } from "./settings-manager.js";
+import { repairCodexViewLocation } from "./view-location.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -350,6 +351,14 @@ export class BridgeController implements vscode.Disposable {
         machineId: this.#remoteIdentity.machineId,
       },
     });
+    try {
+      const repair = await repairCodexViewLocation(vscode.commands, this.#context.workspaceState);
+      if (repair === "repaired") {
+        this.#log("restored the Codex view to its default secondary sidebar location");
+      }
+    } catch (error) {
+      this.#log(`Codex view location repair skipped: ${String(error)}`);
+    }
   }
 
   async #diagnostics(): Promise<DiagnosticReport> {
