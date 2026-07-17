@@ -1,4 +1,4 @@
-import { posix } from "node:path";
+import { isAbsolute, normalize, posix } from "node:path";
 import { BridgeError } from "./errors.js";
 import type { BridgeConfig } from "./types.js";
 
@@ -78,6 +78,30 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
     throw new BridgeError("INVALID_CONFIG", "maxParallelWrites is fixed to 1");
   }
 
+  const sshUser =
+    input.sshUser === undefined || input.sshUser === null || input.sshUser === ""
+      ? undefined
+      : requiredString(input.sshUser, "sshUser");
+  if (sshUser && (!/^[A-Za-z_][A-Za-z0-9._-]*$/.test(sshUser) || sshUser.startsWith("-"))) {
+    throw new BridgeError("INVALID_CONFIG", "sshUser contains unsupported characters");
+  }
+
+  const sshPort =
+    input.sshPort === undefined || input.sshPort === null
+      ? undefined
+      : integerInRange(input.sshPort, 22, 1, 65_535, "sshPort");
+
+  const identityFile =
+    input.identityFile === undefined || input.identityFile === null || input.identityFile === ""
+      ? undefined
+      : requiredString(input.identityFile, "identityFile");
+  if (identityFile && (!isAbsolute(identityFile) || normalize(identityFile) !== identityFile)) {
+    throw new BridgeError(
+      "INVALID_CONFIG",
+      "identityFile must be a normalized absolute local path",
+    );
+  }
+
   return {
     version: 1,
     host,
@@ -85,6 +109,9 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
     connectionMode: "openssh",
     localExecution: "deny",
     remoteHelper: "none",
+    ...(sshUser ? { sshUser } : {}),
+    ...(sshPort ? { sshPort } : {}),
+    ...(identityFile ? { identityFile } : {}),
     codexExecutable:
       typeof input.codexExecutable === "string" && input.codexExecutable.trim()
         ? input.codexExecutable

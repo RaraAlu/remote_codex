@@ -1,4 +1,5 @@
-const SENSITIVE_KEY = /(authorization|cookie|credential|password|private.?key|refresh.?token|secret|token)/i;
+const SENSITIVE_KEY =
+  /(authorization|cookie|credential|identity.?file|password|private.?key|refresh.?token|secret|token)/i;
 const SECRET_PATTERNS = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi,
   /\b(sk|sess|codex)[-_][A-Za-z0-9_-]{12,}\b/g,

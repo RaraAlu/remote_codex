@@ -2,7 +2,7 @@
   "name": "codex-vscode-remote-bridge",
   "displayName": "Codex Remote Bridge",
   "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "publisher": "zkbot",
   "license": "MIT",
@@ -93,6 +93,35 @@
           "maximum": 120,
           "scope": "window",
           "description": "OpenSSH connection timeout."
+        },
+        "codexRemoteBridge.sshUser": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "scope": "window",
+          "description": "Optional OpenSSH user override for direct hosts."
+        },
+        "codexRemoteBridge.sshPort": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "default": null,
+          "minimum": 1,
+          "maximum": 65535,
+          "scope": "window",
+          "description": "Optional OpenSSH port override for direct hosts."
+        },
+        "codexRemoteBridge.identityFile": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "scope": "window",
+          "description": "Optional absolute local IdentityFile path passed only to OpenSSH."
         }
       }
     }
@@ -104,6 +133,7 @@
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "smoke:shim": "node scripts/smoke-shim.mjs",
     "test": "vitest run",
+    "test:remote": "vitest run test/remote-integration.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

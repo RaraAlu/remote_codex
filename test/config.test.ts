@@ -25,6 +25,22 @@ describe("parseBridgeConfig", () => {
     });
   });
 
+  it("accepts explicit direct-host OpenSSH routing without reading the key", () => {
+    expect(
+      parseBridgeConfig({
+        ...minimalConfig,
+        sshUser: "root",
+        sshPort: 42013,
+        identityFile: "/home/user/.ssh/id_ed25519",
+      }),
+    ).toMatchObject({
+      host: "training-gpu",
+      sshUser: "root",
+      sshPort: 42013,
+      identityFile: "/home/user/.ssh/id_ed25519",
+    });
+  });
+
   it.each([
     [{ ...minimalConfig, host: "-oProxyCommand=bad" }, "host"],
     [{ ...minimalConfig, host: "*.example.com" }, "host"],
@@ -34,6 +50,11 @@ describe("parseBridgeConfig", () => {
     [{ ...minimalConfig, localExecution: "allow" }, "localExecution"],
     [{ ...minimalConfig, remoteHelper: "daemon" }, "remoteHelper"],
     [{ ...minimalConfig, maxParallelWrites: 2 }, "maxParallelWrites"],
+    [{ ...minimalConfig, sshUser: "-oProxyCommand" }, "sshUser"],
+    [{ ...minimalConfig, sshPort: 0 }, "sshPort"],
+    [{ ...minimalConfig, sshPort: 65_536 }, "sshPort"],
+    [{ ...minimalConfig, identityFile: "id_rsa" }, "identityFile"],
+    [{ ...minimalConfig, identityFile: "/home/user/../id_rsa" }, "identityFile"],
   ])("rejects unsafe configuration %#", (input, expectedText) => {
     expect(() => parseBridgeConfig(input)).toThrowError(BridgeError);
     expect(() => parseBridgeConfig(input)).toThrowError(expectedText);

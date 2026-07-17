@@ -9,6 +9,7 @@ describe("redact", () => {
         authorization: "Bearer abc.def.ghi",
         nested: {
           refreshToken: "secret-value",
+          identityFile: "/home/user/.ssh/id_rsa",
           message: "header Bearer abcdefghijklmnop",
         },
       }),
@@ -17,6 +18,7 @@ describe("redact", () => {
       authorization: "[REDACTED]",
       nested: {
         refreshToken: "[REDACTED]",
+        identityFile: "[REDACTED]",
         message: "header [REDACTED]",
       },
     });

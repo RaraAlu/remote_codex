@@ -36,6 +36,9 @@ export interface BridgeConfig {
   connectionMode: "openssh";
   localExecution: "deny";
   remoteHelper: "none";
+  sshUser?: string;
+  sshPort?: number;
+  identityFile?: string;
   codexExecutable: string;
   commandTimeoutMs: number;
   maxOutputBytes: number;

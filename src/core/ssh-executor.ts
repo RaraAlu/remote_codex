@@ -1,5 +1,13 @@
-import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process";
+import {
+  spawn,
+  spawnSync,
+  type ChildProcessWithoutNullStreams,
+  type SpawnOptionsWithoutStdio,
+} from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { BridgeError } from "./errors.js";
 import { isPathInside, normalizeRemotePath } from "./path-policy.js";
@@ -66,7 +74,11 @@ export function buildRemoteCommand(cwd: string, argv: readonly string[]): string
   ].join(" ");
 }
 
-export function buildSshArgs(config: BridgeConfig, remoteCommand: string): string[] {
+export function buildSshArgs(
+  config: BridgeConfig,
+  remoteCommand: string,
+  controlPath?: string,
+): string[] {
   return [
     "-T",
     "-o",
@@ -83,6 +95,19 @@ export function buildSshArgs(config: BridgeConfig, remoteCommand: string): strin
     "ServerAliveInterval=15",
     "-o",
     "ServerAliveCountMax=2",
+    ...(controlPath
+      ? [
+          "-o",
+          "ControlMaster=auto",
+          "-o",
+          "ControlPersist=15",
+          "-o",
+          `ControlPath=${controlPath}`,
+        ]
+      : []),
+    ...(config.sshPort ? ["-p", String(config.sshPort)] : []),
+    ...(config.sshUser ? ["-l", config.sshUser] : []),
+    ...(config.identityFile ? ["-i", config.identityFile] : []),
     "--",
     config.host,
     remoteCommand,
@@ -136,12 +161,23 @@ export class OpenSshExecutor {
   readonly config: BridgeConfig;
   readonly connectionId = `conn_${randomUUID()}`;
   readonly #activeChildren = new Set<ChildProcessWithoutNullStreams>();
+  readonly #controlDirectory: string | null;
+  readonly #controlPath: string | null;
   readonly #spawnProcess: SpawnProcess;
   #closed = false;
+  #usedControlPath = false;
 
   constructor(config: BridgeConfig, spawnProcess: SpawnProcess = spawn) {
     this.config = config;
     this.#spawnProcess = spawnProcess;
+    if (spawnProcess === spawn) {
+      this.#controlDirectory = mkdtempSync(join(tmpdir(), "codex-bridge-ssh-"));
+      chmodSync(this.#controlDirectory, 0o700);
+      this.#controlPath = join(this.#controlDirectory, "control.sock");
+    } else {
+      this.#controlDirectory = null;
+      this.#controlPath = null;
+    }
   }
 
   async execute(argv: readonly string[], options: ExecuteOptions = {}): Promise<RemoteCommandResult> {
@@ -170,7 +206,7 @@ export class OpenSshExecutor {
         ? ["env", ...unsetEnvironment, ...setEnvironment, ...argv]
         : [...argv];
     const remoteCommand = buildRemoteCommand(cwd, commandArgv);
-    const sshArgs = buildSshArgs(this.config, remoteCommand);
+    const sshArgs = buildSshArgs(this.config, remoteCommand, this.#controlPath ?? undefined);
     const startedAt = performance.now();
     const timeoutMs = options.timeoutMs ?? this.config.commandTimeoutMs;
 
@@ -179,6 +215,7 @@ export class OpenSshExecutor {
         env: buildSshEnvironment(),
         stdio: "pipe",
       });
+      this.#usedControlPath = Boolean(this.#controlPath);
       this.#activeChildren.add(child);
 
       const stdout = new TailCapture(this.config.maxOutputBytes);
@@ -502,11 +539,14 @@ export class OpenSshExecutor {
       query,
       ...canonicalPaths,
     ]);
+    if (result.exitCode === 127) {
+      return await this.#searchWithGrep(query, canonicalPaths, maxResults);
+    }
     if (result.truncated) {
       throw new BridgeError("OUTPUT_TRUNCATED", "Remote search exceeded the output limit");
     }
     if (result.exitCode !== 0 && result.exitCode !== 1) {
-      throw new BridgeError("SSH_DISCONNECTED", "Remote search failed", {
+      throw new BridgeError("COMMAND_DENIED", "Remote search failed", {
         exitCode: result.exitCode,
         stderr: result.stderr,
       });
@@ -538,11 +578,89 @@ export class OpenSshExecutor {
     return matches;
   }
 
+  async #searchWithGrep(
+    query: string,
+    canonicalPaths: readonly string[],
+    maxResults: number,
+  ): Promise<SearchMatch[]> {
+    const result = await this.execute([
+      "grep",
+      "-rInZH",
+      "--binary-files=without-match",
+      "--exclude-dir=.git",
+      "--max-count",
+      String(Math.max(1, Math.min(maxResults, 5_000))),
+      "-E",
+      "--",
+      query,
+      ...canonicalPaths,
+    ]);
+    if (result.truncated) {
+      throw new BridgeError("OUTPUT_TRUNCATED", "Remote grep search exceeded the output limit");
+    }
+    if (result.exitCode !== 0 && result.exitCode !== 1) {
+      throw new BridgeError("COMMAND_DENIED", "Remote grep search failed", {
+        exitCode: result.exitCode,
+        stderr: result.stderr,
+      });
+    }
+
+    const matches: SearchMatch[] = [];
+    let cursor = 0;
+    while (cursor < result.stdout.length && matches.length < maxResults) {
+      const pathEnd = result.stdout.indexOf("\0", cursor);
+      if (pathEnd < 0) {
+        break;
+      }
+      const lineEnd = result.stdout.indexOf("\n", pathEnd + 1);
+      const payloadEnd = lineEnd < 0 ? result.stdout.length : lineEnd;
+      const payload = result.stdout.slice(pathEnd + 1, payloadEnd);
+      const separator = payload.indexOf(":");
+      const lineNumber = Number.parseInt(payload.slice(0, separator), 10);
+      if (separator > 0 && Number.isFinite(lineNumber)) {
+        matches.push({
+          path: result.stdout.slice(cursor, pathEnd),
+          lineNumber,
+          lines: payload.slice(separator + 1),
+        });
+      }
+      cursor = payloadEnd + 1;
+    }
+    return matches;
+  }
+
   close(): void {
+    if (this.#closed) {
+      return;
+    }
     this.#closed = true;
     for (const child of this.#activeChildren) {
       child.kill("SIGTERM");
     }
     this.#activeChildren.clear();
+    if (this.#usedControlPath && this.#controlPath) {
+      spawnSync(
+        "ssh",
+        [
+          "-S",
+          this.#controlPath,
+          "-O",
+          "exit",
+          ...(this.config.sshPort ? ["-p", String(this.config.sshPort)] : []),
+          ...(this.config.sshUser ? ["-l", this.config.sshUser] : []),
+          ...(this.config.identityFile ? ["-i", this.config.identityFile] : []),
+          "--",
+          this.config.host,
+        ],
+        {
+          env: buildSshEnvironment(),
+          stdio: "ignore",
+          timeout: 5_000,
+        },
+      );
+    }
+    if (this.#controlDirectory) {
+      rmSync(this.#controlDirectory, { force: true, recursive: true });
+    }
   }
 }

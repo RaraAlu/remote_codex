@@ -137,6 +137,9 @@ export class BridgeController implements vscode.Disposable {
         connectionMode: "openssh",
         localExecution: "deny",
         remoteHelper: "none",
+        sshUser: settings.get<string | null>("sshUser"),
+        sshPort: settings.get<number | null>("sshPort"),
+        identityFile: settings.get<string | null>("identityFile"),
         codexExecutable: settings.get<string>("codexExecutable"),
         commandTimeoutMs: settings.get<number>("commandTimeoutMs"),
         maxOutputBytes: settings.get<number>("maxOutputBytes"),
@@ -149,6 +152,7 @@ export class BridgeController implements vscode.Disposable {
         [
           "Codex Bridge will configure:",
           `Remote target: ${config.host}:${config.workspaceRoot}`,
+          `SSH endpoint: ${config.sshUser ? `${config.sshUser}@` : ""}${config.host}${config.sshPort ? `:${config.sshPort}` : ""}`,
           `chatgpt.cliExecutable: ${shimPath}`,
           "remote.extensionKind.openai.chatgpt: [ui]",
           "Previous global values will be backed up for restoration.",

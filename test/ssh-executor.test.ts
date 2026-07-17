@@ -43,6 +43,24 @@ describe("OpenSSH command construction", () => {
     expect(quotePosix("a'b")).toBe("'a'\"'\"'b'");
   });
 
+  it("passes direct user, port, and identity settings only to OpenSSH", () => {
+    const direct = parseBridgeConfig({
+      host: "xj-member.bitahub.com",
+      workspaceRoot: "/remote/workspace",
+      sshUser: "root",
+      sshPort: 42013,
+      identityFile: "/home/user/.ssh/id_ed25519",
+    });
+    const args = buildSshArgs(direct, "true", "/tmp/codex-bridge-control.sock");
+    expect(args).toContain("42013");
+    expect(args).toContain("root");
+    expect(args).toContain("/home/user/.ssh/id_ed25519");
+    expect(args).toContain("ControlMaster=auto");
+    expect(args).toContain("ControlPersist=15");
+    expect(args).toContain("ControlPath=/tmp/codex-bridge-control.sock");
+    expect(args.slice(-2)).toEqual(["xj-member.bitahub.com", "true"]);
+  });
+
   it("does not expose Codex or API credentials to the OpenSSH process", () => {
     const environment = buildSshEnvironment({
       HOME: "/home/user",
@@ -110,5 +128,34 @@ describe("OpenSshExecutor execution", () => {
     ).rejects.toMatchObject({
       code: "RESULT_UNKNOWN",
     });
+  });
+
+  it("falls back to recursive grep when ripgrep is unavailable", async () => {
+    let invocation = 0;
+    const fakeSpawn: SpawnProcess = () => {
+      invocation += 1;
+      if (invocation <= 2) {
+        return nodeChild(
+          "process.stdout.write('/remote/workspace\\0/remote/workspace\\0');",
+        );
+      }
+      if (invocation === 3) {
+        return nodeChild(
+          "process.stdout.write('/remote/workspace\\0'); process.stderr.write('rg: not found'); process.exitCode = 127;",
+        );
+      }
+      return nodeChild(
+        "process.stdout.write('/remote/workspace\\0/remote/workspace/README.md' + '\\0' + '1:MimicLite remote bridge\\n');",
+      );
+    };
+    const executor = new OpenSshExecutor(config, fakeSpawn);
+    await expect(executor.search("MimicLite")).resolves.toEqual([
+      {
+        path: "/remote/workspace/README.md",
+        lineNumber: 1,
+        lines: "MimicLite remote bridge",
+      },
+    ]);
+    expect(invocation).toBe(4);
   });
 });
