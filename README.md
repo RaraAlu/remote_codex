@@ -15,7 +15,10 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 - CLI Shim 代理 app-server JSONL，固定本地只读控制目录，并注入实验协议能力。
 - 新线程注入远程读取、目录列出、文本搜索和 `git status` 动态工具。
 - OpenSSH 执行器使用结构化 `argv`、严格主机密钥校验、连接超时、取消和输出上限。
+- 直连主机可单独配置 SSH 用户、端口和可选 IdentityFile；私钥内容不由 Bridge 读取。
+- 同一 `connectionId` 使用受限 ControlMaster 复用，并在停止时显式关闭。
 - 路径同时经过词法限制和远端 `realpath` 校验，符号链接不能逃逸工作区。
+- 远端缺少 `rg` 时自动使用不跟随目录符号链接的 GNU `grep` 搜索。
 - SSH 子进程只继承必要环境变量，不继承 Codex、OpenAI 或其他应用凭据。
 - 未知 app-server 服务端请求默认拒绝；操作审计日志只保存在本地并结构化脱敏。
 - 协议子集由本机 Codex `0.144.3` 生成，运行时要求精确版本匹配。
@@ -41,6 +44,19 @@ npm run check
 
 `npm run check` 依次执行 TypeScript 类型检查、单元/集成测试、扩展和 Shim 构建、
 真实本地 app-server `initialize` 冒烟测试，以及 VSIX 打包。
+
+真实远端只读验收使用环境变量提供目标，不把主机和私钥路径写入仓库：
+
+```bash
+CODEX_BRIDGE_REMOTE_TEST=1 \
+CODEX_BRIDGE_TEST_HOST=example-host \
+CODEX_BRIDGE_TEST_USER=root \
+CODEX_BRIDGE_TEST_PORT=22 \
+CODEX_BRIDGE_TEST_WORKSPACE=/absolute/remote/workspace \
+npm run test:remote
+```
+
+需要指定密钥时额外设置 `CODEX_BRIDGE_TEST_IDENTITY=/absolute/local/key/path`。
 
 生成物：
 

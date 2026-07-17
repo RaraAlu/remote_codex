@@ -8,7 +8,7 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.707.91948` | 使用公开的开发设置 `chatgpt.cliExecutable` | 待 Remote SSH UI Host 验收 |
 | Codex CLI/app-server | `0.144.3` | 必须与生成协议精确匹配 | `initialize` 冒烟通过 |
 | Remote SSH | `0.124.0` | 使用 `remote.extensionKind` 探针设置 | 待真实窗口验收 |
-| OpenSSH 客户端 | `9.6p1` | `BatchMode=yes`、`StrictHostKeyChecking=yes` | 参数与错误分类测试通过 |
+| OpenSSH 客户端 | `9.6p1` | 严格主机校验、user/port/IdentityFile、ControlMaster | xj-member 真实连接通过 |
 
 协议文件位于 `protocol/0.144.3/`。`ServerRequest.json` 的方法集合由自动化测试与
 Shim 的已知请求白名单逐项比对；出现新请求时测试失败，而不是静默转发潜在副作用。
