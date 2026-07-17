@@ -8,10 +8,11 @@
 | --- | --- | --- |
 | `chatgpt.cliExecutable` 入口 | 已实现配置、备份和恢复 | `OfficialSettingsManager` |
 | Remote SSH 自动配置与启动 | 已实现；首次设置变更自动重载一次 | `BridgeController.initialize` |
+| 本地窗口隔离 | 已实现；无 Remote SSH 会话标记时 Shim 完全透传 | `activeBridgeConfigPath` |
 | 本地 Codex 常见路径探测 | 已实现并测试 | `codexExecutableCandidates` |
 | 强制官方扩展使用本地 UI Host | 已在 xj-member 确认 Shim 和 app-server 为本地进程 | `code --status` |
 | Codex Webview 位置恢复 | 每工作区首次就绪时仅重置 Codex 视图 | `repairCodexViewLocation` |
-| app-server `initialize` 代理 | 已通过真实 app-server 冒烟测试 | `npm run smoke:shim` |
+| app-server `initialize` 代理 | 已按官方前置全局参数通过真实 app-server 冒烟测试 | `npm run smoke:shim` |
 | `thread/start` 路径和能力注入 | 已实现并通过集成测试 | `rewriteClientMessage` |
 | `thread/resume` 本地控制目录固定 | 已实现并通过单元测试覆盖相同重写路径 | `rewriteClientMessage` |
 | 远端无 Codex | 诊断已实现，待目标主机验收 | `Run Diagnostics` |

@@ -12,6 +12,8 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 - Bridge 扩展固定声明为 VS Code `ui` 扩展，并提供需求中的 6 个命令。
 - 单根 Remote SSH 工作区打开后自动识别主机和根目录、保存配置并连接，无需手动启动。
 - 首次接管官方 Codex 设置时自动重载一次；后续打开工作区直接进入 `ready`。
+- `chatgpt.cliExecutable` 虽为全局设置，但 Shim 仅在对应 Remote SSH 扩展宿主带有会话
+  配置时接管；普通本地窗口完全透传官方 Codex。
 - 每个工作区首次就绪时把 Codex Webview 恢复到默认右侧栏，修复旧布局中的灰色面板。
 - 修改 `chatgpt.cliExecutable` 和 `remote.extensionKind` 前保存原值，并提供恢复命令。
 - 默认命令不在 VS Code 的 `PATH` 时，自动探测 `~/.local/bin/codex` 等常见本地路径。
@@ -46,7 +48,7 @@ npm run check
 ```
 
 `npm run check` 依次执行 TypeScript 类型检查、单元/集成测试、扩展和 Shim 构建、
-真实本地 app-server `initialize` 冒烟测试，以及 VSIX 打包。
+本地窗口透传与 Remote SSH 窗口 `initialize`/`thread/list` 冒烟测试，以及 VSIX 打包。
 
 真实远端只读验收使用环境变量提供目标，不把主机和私钥路径写入仓库：
 
@@ -88,9 +90,11 @@ npm run protocol:generate
 
 自动流程仅在 `codexRemoteBridge.autoInitialize=true`、当前窗口为 Remote SSH 且恰好
 打开一个远程根目录时运行。关闭该设置后仍可使用 Configure 和 Start 命令手动控制。
+普通本地工作区即使同时打开，也不会读取远程 Bridge 配置或重写 app-server 消息。
 
 本地配置默认位于 `~/.config/codex-remote-bridge/config.json`，审计日志默认位于
-`~/.local/state/codex-remote-bridge/audit.jsonl`。配置不保存密码、私钥或 Token。
+`~/.local/state/codex-remote-bridge/audit.jsonl`。Remote SSH 窗口会额外创建按本地
+Extension Host PID 隔离的会话配置；配置不保存密码、私钥或 Token。
 
 更多边界与验收信息见 `docs/implementation-status.md`、`docs/compatibility.md` 和
 `docs/security-notes.md`。

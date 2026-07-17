@@ -4,9 +4,9 @@
 
 | 组件 | 已探测版本 | 当前策略 | 状态 |
 | --- | --- | --- | --- |
-| VS Code | `1.129.0` | 扩展引擎最低 `^1.96.2` | 本机构建通过 |
-| 官方 Codex 扩展 | `openai.chatgpt@26.707.91948` | `chatgpt.cliExecutable`，本地 Extension Host | xj-member 本地进程已验证；Webview 布局待修复版重载确认 |
-| Codex CLI/app-server | `0.144.3` | 必须与生成协议精确匹配 | `initialize` 冒烟通过 |
+| VS Code | `1.128.0` | 扩展引擎最低 `^1.96.2` | 本机构建通过 |
+| 官方 Codex 扩展 | `openai.chatgpt@26.707.91948` | 全局 Shim，本地 Extension Host，按窗口会话激活 | Remote SSH 接管与本地窗口透传已并行验证 |
+| Codex CLI/app-server | `0.144.3` | 必须与生成协议精确匹配 | 官方启动参数、`initialize` 和 `thread/list` 冒烟通过 |
 | Remote SSH | `0.124.0` | 使用 `remote.extensionKind` 探针设置 | 待真实窗口验收 |
 | OpenSSH 客户端 | `9.6p1` | 严格主机校验、user/port/IdentityFile、ControlMaster | xj-member 真实连接通过 |
 
