@@ -17,6 +17,7 @@ describe("parseBridgeConfig", () => {
       localExecution: "deny",
       remoteHelper: "none",
       codexExecutable: "codex",
+      sshExecutable: "ssh",
       remoteMcpRouting: "auto",
       remoteMcpAccess: "enabled",
       commandTimeoutMs: 120_000,
@@ -40,6 +41,25 @@ describe("parseBridgeConfig", () => {
       sshUser: "root",
       sshPort: 42013,
       identityFile: "/home/user/.ssh/id_ed25519",
+    });
+  });
+
+  it("accepts a window-scoped VS Code Remote transport descriptor", () => {
+    expect(
+      parseBridgeConfig({
+        ...minimalConfig,
+        connectionMode: "vscode-remote",
+        remoteHelper: "vscode-extension",
+        vscodeTransport: {
+          endpoint: "\\\\.\\pipe\\codex-bridge",
+          sessionId: "session-1",
+          token: "0123456789abcdef0123456789abcdef",
+        },
+      }),
+    ).toMatchObject({
+      connectionMode: "vscode-remote",
+      remoteHelper: "vscode-extension",
+      vscodeTransport: { sessionId: "session-1" },
     });
   });
 

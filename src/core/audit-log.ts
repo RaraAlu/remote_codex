@@ -1,5 +1,6 @@
-import { appendFile, chmod, mkdir } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { chmodIfSupported } from "./file-permissions.js";
 import { redact } from "./redaction.js";
 import type { AuditEvent } from "./types.js";
 
@@ -20,6 +21,6 @@ export class AuditLog {
       encoding: "utf8",
       mode: 0o600,
     });
-    await chmod(this.path, 0o600);
+    await chmodIfSupported(this.path, 0o600);
   }
 }

@@ -5,11 +5,12 @@ import {
   type SpawnOptionsWithoutStdio,
 } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { BridgeError } from "./errors.js";
+import { chmodSyncIfSupported } from "./file-permissions.js";
 import { isPathInside, normalizeRemotePath } from "./path-policy.js";
 import type {
   BridgeConfig,
@@ -126,10 +127,13 @@ export function buildSshArgs(
 
 export function buildSshEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
+  hostPlatform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   const sanitized: NodeJS.ProcessEnv = {};
   const allowedName =
-    /^(DISPLAY|HOME|LANG|LC_[A-Z0-9_]+|LOGNAME|PATH|SSH_AGENT_PID|SSH_ASKPASS|SSH_ASKPASS_REQUIRE|SSH_AUTH_SOCK|TERM|USER|WAYLAND_DISPLAY|XDG_RUNTIME_DIR)$/;
+    hostPlatform === "win32"
+      ? /^(COMSPEC|HOME|HOMEDRIVE|HOMEPATH|LANG|LC_[A-Z0-9_]+|PATH|PATHEXT|SSH_AGENT_PID|SSH_ASKPASS|SSH_ASKPASS_REQUIRE|SSH_AUTH_SOCK|SYSTEMROOT|TEMP|TMP|USERDOMAIN|USERNAME|USERPROFILE|WINDIR)$/i
+      : /^(DISPLAY|HOME|LANG|LC_[A-Z0-9_]+|LOGNAME|PATH|SSH_AGENT_PID|SSH_ASKPASS|SSH_ASKPASS_REQUIRE|SSH_AUTH_SOCK|TERM|USER|WAYLAND_DISPLAY|XDG_RUNTIME_DIR)$/;
   for (const [key, value] of Object.entries(environment)) {
     if (allowedName.test(key)) {
       sanitized[key] = value;
@@ -180,9 +184,9 @@ export class OpenSshExecutor {
   constructor(config: BridgeConfig, spawnProcess: SpawnProcess = spawn) {
     this.config = config;
     this.#spawnProcess = spawnProcess;
-    if (spawnProcess === spawn) {
+    if (spawnProcess === spawn && process.platform !== "win32") {
       this.#controlDirectory = mkdtempSync(join(tmpdir(), "codex-bridge-ssh-"));
-      chmodSync(this.#controlDirectory, 0o700);
+      chmodSyncIfSupported(this.#controlDirectory, 0o700);
       this.#controlPath = join(this.#controlDirectory, "control.sock");
     } else {
       this.#controlDirectory = null;
@@ -221,7 +225,7 @@ export class OpenSshExecutor {
     const timeoutMs = options.timeoutMs ?? this.config.commandTimeoutMs;
 
     return await new Promise<RemoteCommandResult>((resolve, reject) => {
-      const child = this.#spawnProcess("ssh", sshArgs, {
+      const child = this.#spawnProcess(this.config.sshExecutable, sshArgs, {
         env: buildSshEnvironment(),
         stdio: "pipe",
       });
@@ -700,7 +704,7 @@ export class OpenSshExecutor {
     this.#activeChildren.clear();
     if (this.#usedControlPath && this.#controlPath) {
       spawnSync(
-        "ssh",
+        this.config.sshExecutable,
         [
           "-S",
           this.#controlPath,

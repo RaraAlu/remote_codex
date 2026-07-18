@@ -10,6 +10,7 @@ import { AuditLog } from "../core/audit-log.js";
 import { normalizeRemotePath } from "../core/path-policy.js";
 import type { BridgeConfig } from "../core/types.js";
 import { OpenSshExecutor, type SpawnProcess } from "../core/ssh-executor.js";
+import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
 import { DynamicToolRouter, REMOTE_TOOL_NAMES } from "./dynamic-tools.js";
 import { formatRemoteExecRequest, parseRemoteExecArguments } from "./remote-command.js";
 import { RemoteApprovalPolicyTracker } from "./remote-approval-policy.js";
@@ -108,7 +109,9 @@ export class ShimProxy {
     this.#options = options;
     this.#audit = new AuditLog(options.auditPath);
     this.#executor = options.config
-      ? new OpenSshExecutor(options.config, options.spawnSsh)
+      ? options.config.connectionMode === "vscode-remote"
+        ? new VsCodeRemoteExecutor(options.config)
+        : new OpenSshExecutor(options.config, options.spawnSsh)
       : null;
     this.#router =
       options.config && this.#executor

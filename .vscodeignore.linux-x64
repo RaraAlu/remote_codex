@@ -14,4 +14,5 @@ tsconfig.json
 vitest.config.ts
 dist/*.vsix
 !dist/codex-remote-bridge-executor.vsix
+dist/codex-bridge-shim.exe
 package-lock.json

@@ -1,4 +1,6 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
 import { BridgeError } from "../src/core/errors.js";
@@ -18,6 +20,17 @@ const config = parseBridgeConfig({
   maxOutputBytes: 1_024,
 });
 
+const posixShell = (() => {
+  if (process.platform !== "win32") {
+    return "sh";
+  }
+
+  return [process.env.ProgramW6432, process.env.ProgramFiles, process.env["ProgramFiles(x86)"]]
+    .filter((root): root is string => Boolean(root))
+    .map((root) => join(root, "Git", "bin", "sh.exe"))
+    .find(existsSync);
+})();
+
 function nodeChild(script: string): ChildProcessWithoutNullStreams {
   return spawn(process.execPath, ["-e", script], {
     stdio: "pipe",
@@ -25,10 +38,10 @@ function nodeChild(script: string): ChildProcessWithoutNullStreams {
 }
 
 describe("OpenSSH command construction", () => {
-  it("quotes newlines, spaces, and single quotes without shell reinterpretation", () => {
+  it.skipIf(!posixShell)("quotes newlines, spaces, and single quotes without shell reinterpretation", () => {
     const value = "space and 'quote'\nnext";
     const command = buildRemoteCommand("/tmp", ["printf", "%s", value]);
-    const result = spawnSync("sh", ["-c", command]);
+    const result = spawnSync(posixShell!, ["-c", command]);
     expect(result.status).toBe(0);
     const delimiter = result.stdout.indexOf(0);
     expect(result.stdout.subarray(delimiter + 1).toString()).toBe(value);
@@ -73,6 +86,25 @@ describe("OpenSSH command construction", () => {
     expect(environment).toEqual({
       HOME: "/home/user",
       SSH_AUTH_SOCK: "/run/agent.sock",
+    });
+  });
+
+  it("keeps the minimum Windows environment required by OpenSSH", () => {
+    const environment = buildSshEnvironment(
+      {
+        OPENAI_API_KEY: "api-secret",
+        PATH: "C:\\Windows\\System32",
+        SystemRoot: "C:\\Windows",
+        TEMP: "C:\\Temp",
+        USERPROFILE: "C:\\Users\\tester",
+      },
+      "win32",
+    );
+    expect(environment).toEqual({
+      PATH: "C:\\Windows\\System32",
+      SystemRoot: "C:\\Windows",
+      TEMP: "C:\\Temp",
+      USERPROFILE: "C:\\Users\\tester",
     });
   });
 });

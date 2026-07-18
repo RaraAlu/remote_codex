@@ -16,7 +16,10 @@ describe("local configuration and audit storage", () => {
     });
     await saveBridgeConfig(path, config);
     expect(await loadBridgeConfig(path)).toEqual(config);
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
+
+    if (process.platform !== "win32") {
+      expect((await stat(path)).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("writes redacted JSONL audit events with owner-only permissions", async () => {
@@ -34,6 +37,8 @@ describe("local configuration and audit storage", () => {
     const content = await readFile(path, "utf8");
     expect(content).toContain('"authorization":"[REDACTED]"');
     expect(content).not.toContain("abcdefghijklmnop");
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect((await stat(path)).mode & 0o777).toBe(0o600);
+    }
   });
 });

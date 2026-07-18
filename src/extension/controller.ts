@@ -1,9 +1,12 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { hostname } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
 import { AuditLog } from "../core/audit-log.js";
+import { codexExecutableCandidates, resolveCodexExecutable } from "../core/codex-executable.js";
 import { parseBridgeConfig } from "../core/config.js";
 import { loadBridgeConfig, saveBridgeConfig } from "../core/config-store.js";
 import { asBridgeError, BridgeError } from "../core/errors.js";
@@ -15,15 +18,23 @@ import {
 } from "../core/locations.js";
 import { redact } from "../core/redaction.js";
 import { OpenSshExecutor } from "../core/ssh-executor.js";
+import { resolveSshExecutable } from "../core/ssh-executable.js";
 import { BridgeStateMachine } from "../core/state-machine.js";
 import type { BridgeConfig, BridgeState, RemoteIdentity } from "../core/types.js";
-import { codexExecutableCandidates } from "./codex-executable.js";
+import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
+import {
+  REMOTE_EXECUTOR_COMMAND,
+  REMOTE_EXECUTOR_EXTENSION_ID,
+  REMOTE_OUTPUT_COMMAND,
+} from "../core/vscode-transport.js";
 import { detectRemoteWorkspace } from "./remote-context.js";
+import { installShimExecutable } from "./shim-executable.js";
 import {
   OfficialSettingsManager,
   type OfficialSettingsStatus,
 } from "./settings-manager.js";
 import { repairCodexViewLocation } from "./view-location.js";
+import { VsCodeTransportServer } from "./vscode-transport-server.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -73,6 +84,19 @@ function stateIcon(state: BridgeState): string {
 }
 
 async function localMachineId(): Promise<string | null> {
+  if (process.platform === "win32") {
+    try {
+      const { stdout } = await execFileAsync("reg.exe", [
+        "query",
+        "HKLM\\SOFTWARE\\Microsoft\\Cryptography",
+        "/v",
+        "MachineGuid",
+      ]);
+      return stdout.match(/MachineGuid\s+REG_SZ\s+([^\r\n]+)/i)?.[1]?.trim() ?? null;
+    } catch {
+      return null;
+    }
+  }
   try {
     return (await readFile("/etc/machine-id", "utf8")).trim();
   } catch {
@@ -88,8 +112,10 @@ export class BridgeController implements vscode.Disposable {
   readonly #state = new BridgeStateMachine();
   readonly #status: vscode.StatusBarItem;
   readonly #sessionConfigPath: string | null;
+  readonly #transport: VsCodeTransportServer;
   #config: BridgeConfig | null = null;
   #executor: OpenSshExecutor | null = null;
+  #sessionConfig: BridgeConfig | null = null;
   #initialization: Promise<void> | null = null;
   #autoSuppressed = false;
   #remoteIdentity: RemoteIdentity | null = null;
@@ -105,6 +131,19 @@ export class BridgeController implements vscode.Disposable {
     }
     this.#output = vscode.window.createOutputChannel("Codex Remote Bridge", { log: true });
     this.#settings = new OfficialSettingsManager(context);
+    this.#transport = new VsCodeTransportServer(() => this.#sessionConfig ?? this.#config);
+    const officialCodex = vscode.extensions.getExtension("openai.chatgpt");
+    const bundledCodex = officialCodex
+      ? join(
+          officialCodex.extensionPath,
+          "bin",
+          process.platform === "win32" ? "windows-x86_64" : "linux-x86_64",
+          process.platform === "win32" ? "codex.exe" : "codex",
+        )
+      : undefined;
+    process.env.CODEX_BRIDGE_CODEX_EXECUTABLE ??= resolveCodexExecutable("codex", {
+      additionalCandidates: bundledCodex ? [bundledCodex] : [],
+    });
     this.#status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 30);
     this.#status.command = "codexRemoteBridge.diagnostics";
     this.#status.tooltip = "Codex Remote Bridge diagnostics";
@@ -134,10 +173,45 @@ export class BridgeController implements vscode.Disposable {
       vscode.commands.registerCommand("codexRemoteBridge.restoreSettings", () =>
         this.restoreOfficialSettings(),
       ),
+      vscode.commands.registerCommand(REMOTE_OUTPUT_COMMAND, (event) =>
+        this.#transport.handleOutput(event),
+      ),
     ];
   }
 
   async initialize(): Promise<void> {
+    if (this.#initialization) {
+      return await this.#initialization;
+    }
+
+    const task = this.#initializeOnce();
+    this.#initialization = task;
+    try {
+      await task;
+    } finally {
+      if (this.#initialization === task) {
+        this.#initialization = null;
+      }
+    }
+  }
+
+  async #initializeOnce(): Promise<void> {
+    if (this.#settings.hasManagedExecutable()) {
+      try {
+        const shimPath = await installShimExecutable(this.#context);
+        if (await this.#settings.repairManagedExecutable(shimPath)) {
+          this.#log(`migrated the managed Codex launcher to ${shimPath}; reloading the window`);
+          await vscode.commands.executeCommand("workbench.action.reloadWindow");
+          return;
+        }
+      } catch (error) {
+        const bridgeError = asBridgeError(error, "INVALID_CONFIG");
+        this.#log(`managed launcher repair failed: ${bridgeError.message}`);
+        void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+        return;
+      }
+    }
+
     if (
       this.#autoSuppressed ||
       vscode.env.remoteName !== "ssh-remote" ||
@@ -148,19 +222,7 @@ export class BridgeController implements vscode.Disposable {
     ) {
       return;
     }
-    if (this.#initialization) {
-      return await this.#initialization;
-    }
-
-    const task = this.#configureCurrentRemote(false);
-    this.#initialization = task;
-    try {
-      await task;
-    } finally {
-      if (this.#initialization === task) {
-        this.#initialization = null;
-      }
-    }
+    await this.#configureCurrentRemote(false);
   }
 
   async configure(): Promise<void> {
@@ -177,7 +239,8 @@ export class BridgeController implements vscode.Disposable {
     this.#state.transition("configuring");
     try {
       const config = await this.#resolveCompatibleCodex(this.#currentRemoteConfig());
-      const shimPath = this.#context.asAbsolutePath("dist/codex-bridge-shim.cjs");
+      process.env.CODEX_BRIDGE_CODEX_EXECUTABLE = config.codexExecutable;
+      const shimPath = await installShimExecutable(this.#context);
       if (interactive) {
         const confirmation = await vscode.window.showWarningMessage(
           [
@@ -237,7 +300,13 @@ export class BridgeController implements vscode.Disposable {
     }
     this.#state.transition("connecting");
     try {
-      this.#config = await loadBridgeConfig(bridgeConfigPath());
+      const storedConfig = await loadBridgeConfig(bridgeConfigPath());
+      this.#config = {
+        ...storedConfig,
+        codexExecutable: resolveCodexExecutable(storedConfig.codexExecutable),
+        sshExecutable: resolveSshExecutable(storedConfig.sshExecutable),
+      };
+      process.env.CODEX_BRIDGE_CODEX_EXECUTABLE = this.#config.codexExecutable;
       await this.#saveWindowSession(this.#config);
       await this.#verifyCodexVersion(this.#config);
       await this.#connect();
@@ -257,6 +326,7 @@ export class BridgeController implements vscode.Disposable {
     await this.#clearWindowSession();
     this.#executor?.close();
     this.#executor = null;
+    await this.#transport.close();
     this.#remoteIdentity = null;
     if (this.#state.state !== "disabled") {
       this.#state.transition("disabled");
@@ -305,16 +375,26 @@ export class BridgeController implements vscode.Disposable {
   dispose(): void {
     this.#executor?.close();
     void this.#clearWindowSession().catch(() => undefined);
+    this.#transport.dispose();
     this.#output.dispose();
     this.#status.dispose();
   }
 
   async #saveWindowSession(config: BridgeConfig): Promise<void> {
+    this.#sessionConfig = await this.#prepareSessionConfig(config);
     if (!this.#sessionConfigPath) {
       return;
     }
     process.env.CODEX_BRIDGE_SESSION_CONFIG = this.#sessionConfigPath;
-    await saveBridgeConfig(this.#sessionConfigPath, config);
+    await saveBridgeConfig(this.#sessionConfigPath, this.#sessionConfig);
+  }
+
+  async #prepareSessionConfig(config: BridgeConfig): Promise<BridgeConfig> {
+    if (config.connectionMode !== "vscode-remote") {
+      return config;
+    }
+    const vscodeTransport = await this.#transport.start();
+    return parseBridgeConfig({ ...config, vscodeTransport });
   }
 
   async #clearWindowSession(): Promise<void> {
@@ -324,23 +404,29 @@ export class BridgeController implements vscode.Disposable {
     if (process.env.CODEX_BRIDGE_SESSION_CONFIG === this.#sessionConfigPath) {
       delete process.env.CODEX_BRIDGE_SESSION_CONFIG;
     }
+    this.#sessionConfig = null;
     await rm(this.#sessionConfigPath, { force: true });
   }
 
   #currentRemoteConfig(): BridgeConfig {
     const remote = detectRemoteWorkspace();
     const settings = vscode.workspace.getConfiguration("codexRemoteBridge");
+    const connectionMode = settings.get<"vscode-remote" | "openssh">(
+      "connectionMode",
+      "vscode-remote",
+    );
     return parseBridgeConfig({
       version: 1,
       host: remote.host,
       workspaceRoot: remote.workspaceRoot,
-      connectionMode: "openssh",
+      connectionMode,
       localExecution: "deny",
-      remoteHelper: "none",
+      remoteHelper: connectionMode === "vscode-remote" ? "vscode-extension" : "none",
       sshUser: settings.get<string | null>("sshUser"),
       sshPort: settings.get<number | null>("sshPort"),
       identityFile: settings.get<string | null>("identityFile"),
       codexExecutable: settings.get<string>("codexExecutable"),
+      sshExecutable: resolveSshExecutable(settings.get<string>("sshExecutable", "ssh")),
       remoteMcpRouting: settings.get<"auto" | "local">("remoteMcpRouting", "auto"),
       remoteMcpAccess: settings.get<"enabled" | "all">("remoteMcpAccess", "enabled"),
       commandTimeoutMs: settings.get<number>("commandTimeoutMs"),
@@ -355,8 +441,16 @@ export class BridgeController implements vscode.Disposable {
     if (!this.#config) {
       throw new BridgeError("INVALID_CONFIG", "Bridge is not configured");
     }
+    if (this.#config.connectionMode === "vscode-remote") {
+      await this.#ensureRemoteExecutor();
+    }
     this.#executor?.close();
-    this.#executor = new OpenSshExecutor(this.#config);
+    const sessionConfig = this.#sessionConfig ?? (await this.#prepareSessionConfig(this.#config));
+    this.#sessionConfig = sessionConfig;
+    this.#executor =
+      sessionConfig.connectionMode === "vscode-remote"
+        ? new VsCodeRemoteExecutor(sessionConfig)
+        : new OpenSshExecutor(sessionConfig);
     this.#remoteIdentity = await this.#executor.probe();
     if (this.#remoteIdentity.workspaceRoot !== this.#config.workspaceRoot) {
       this.#executor.close();
@@ -380,6 +474,7 @@ export class BridgeController implements vscode.Disposable {
       workspaceRoot: this.#config.workspaceRoot,
       remoteCwd: this.#remoteIdentity.workspaceRoot,
       details: {
+        connectionMode: this.#config.connectionMode,
         hostname: this.#remoteIdentity.hostname,
         machineId: this.#remoteIdentity.machineId,
       },
@@ -394,12 +489,96 @@ export class BridgeController implements vscode.Disposable {
     }
   }
 
+  async #ensureRemoteExecutor(): Promise<void> {
+    if (await this.#waitForRemoteExecutorCommand()) {
+      return;
+    }
+
+    const source = this.#context.asAbsolutePath("dist/codex-remote-bridge-executor.vsix");
+    let packageBytes: Buffer;
+    try {
+      packageBytes = await readFile(source);
+    } catch (error) {
+      throw new BridgeError(
+        "REMOTE_TRANSPORT_DISCONNECTED",
+        "The bundled Remote Executor VSIX is missing from the controller package",
+        undefined,
+        { cause: error },
+      );
+    }
+    const digest = createHash("sha256").update(packageBytes).digest("hex");
+    const markerKey = `codexRemoteBridge.executorInstall.${this.#config?.host ?? "remote"}`;
+    if (this.#context.globalState.get<string>(markerKey) === digest) {
+      throw new BridgeError(
+        "REMOTE_TRANSPORT_DISCONNECTED",
+        "Remote Executor was installed but its command is still unavailable; reload or reinstall the Remote SSH window",
+      );
+    }
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder || folder.uri.scheme !== "vscode-remote") {
+      throw new BridgeError(
+        "REMOTE_TRANSPORT_DISCONNECTED",
+        "Remote Executor installation requires an active Remote SSH workspace",
+      );
+    }
+    const remoteVsix = folder.uri.with({
+      path: `/tmp/codex-remote-bridge-executor-${digest.slice(0, 12)}.vsix`,
+    });
+    await vscode.workspace.fs.writeFile(remoteVsix, packageBytes);
+    try {
+      await vscode.commands.executeCommand(
+        "workbench.extensions.installExtension",
+        remoteVsix,
+        { donotSync: true },
+      );
+      await this.#context.globalState.update(markerKey, digest);
+    } finally {
+      await vscode.workspace.fs.delete(remoteVsix, { useTrash: false }).then(
+        () => undefined,
+        () => undefined,
+      );
+    }
+    this.#log("installed the Remote Executor through the active VS Code Remote connection");
+    void vscode.window.showInformationMessage(
+      "Codex Bridge installed its Remote Executor. Reloading the Remote SSH window once.",
+    );
+    await vscode.commands.executeCommand("workbench.action.reloadWindow");
+    throw new BridgeError(
+      "BRIDGE_NOT_READY",
+      "Remote Executor installation requires the in-progress window reload",
+    );
+  }
+
+  async #waitForRemoteExecutorCommand(timeoutMs = 10_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      const installed = vscode.extensions.getExtension(REMOTE_EXECUTOR_EXTENSION_ID);
+      if (installed) {
+        try {
+          await installed.activate();
+        } catch {
+          // A local copy of a workspace extension cannot activate for the remote window.
+        }
+      }
+      if ((await vscode.commands.getCommands(false)).includes(REMOTE_EXECUTOR_COMMAND)) {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    } while (Date.now() < deadline);
+    return false;
+  }
+
   async #diagnostics(): Promise<DiagnosticReport> {
     let config: BridgeConfig | null = this.#config;
     let configError: unknown = null;
     if (!config) {
       try {
-        config = await loadBridgeConfig(bridgeConfigPath());
+        const storedConfig = await loadBridgeConfig(bridgeConfigPath());
+        config = {
+          ...storedConfig,
+          codexExecutable: resolveCodexExecutable(storedConfig.codexExecutable),
+          sshExecutable: resolveSshExecutable(storedConfig.sshExecutable),
+        };
       } catch (error) {
         configError = asBridgeError(error, "INVALID_CONFIG").toPayload();
       }
@@ -409,7 +588,14 @@ export class BridgeController implements vscode.Disposable {
     let remoteCodexInstalled: boolean | null = null;
     let remoteError: unknown = configError;
     if (config) {
-      const executor = this.#executor ?? new OpenSshExecutor(config);
+      const sessionConfig =
+        this.#sessionConfig ?? (await this.#prepareSessionConfig(config));
+      this.#sessionConfig = sessionConfig;
+      const executor =
+        this.#executor ??
+        (sessionConfig.connectionMode === "vscode-remote"
+          ? new VsCodeRemoteExecutor(sessionConfig)
+          : new OpenSshExecutor(sessionConfig));
       try {
         remoteIdentity = remoteIdentity ?? (await executor.probe());
         const remoteCodex = await executor.execute([
@@ -430,7 +616,7 @@ export class BridgeController implements vscode.Disposable {
     const codexExtension = vscode.extensions.getExtension("openai.chatgpt");
     const ownExtension = vscode.extensions.getExtension("zkbot.codex-vscode-remote-bridge");
     const codexVersion = config ? await this.#readCodexVersion(config.codexExecutable) : null;
-    const shimPath = this.#context.asAbsolutePath("dist/codex-bridge-shim.cjs");
+    const shimPath = await installShimExecutable(this.#context);
     return {
       generatedAt: new Date().toISOString(),
       bridge: {
@@ -482,7 +668,25 @@ export class BridgeController implements vscode.Disposable {
       | string
       | undefined;
     let detectedVersion: string | null = null;
-    for (const executable of new Set(codexExecutableCandidates(config.codexExecutable))) {
+    const officialCodex = vscode.extensions.getExtension("openai.chatgpt");
+    const bundledCodex = officialCodex
+      ? join(
+          officialCodex.extensionPath,
+          "bin",
+          process.platform === "win32" ? "windows-x86_64" : "linux-x86_64",
+          process.platform === "win32" ? "codex.exe" : "codex",
+        )
+      : undefined;
+    for (const executable of new Set(
+      codexExecutableCandidates(
+        config.codexExecutable,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        bundledCodex ? [bundledCodex] : [],
+      ),
+    )) {
       const actual = await this.#readCodexVersion(executable);
       if (!actual) {
         continue;
@@ -492,6 +696,7 @@ export class BridgeController implements vscode.Disposable {
         return {
           ...config,
           codexExecutable: executable,
+          sshExecutable: resolveSshExecutable(config.sshExecutable),
         };
       }
     }

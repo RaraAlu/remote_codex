@@ -1,0 +1,29 @@
+{
+  "name": "codex-remote-bridge-executor",
+  "displayName": "Codex Remote Bridge Executor",
+  "description": "Remote workspace executor for Codex Remote Bridge. This component does not contain Codex or credentials.",
+  "version": "0.2.1",
+  "publisher": "zkbot",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.96.2"
+  },
+  "categories": [
+    "Other"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./dist/extension.cjs",
+  "activationEvents": [
+    "onCommand:codexRemoteBridge.executor.execute"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codexRemoteBridge.executor.execute",
+        "title": "Codex Remote Bridge: Internal Executor"
+      }
+    ]
+  }
+}

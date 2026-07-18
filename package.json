@@ -2,7 +2,7 @@
   "name": "codex-vscode-remote-bridge",
   "displayName": "Codex Remote Bridge",
   "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
-  "version": "0.1.11",
+  "version": "0.2.0",
   "private": true,
   "publisher": "zkbot",
   "license": "MIT",
@@ -75,6 +75,22 @@
           "default": "codex",
           "scope": "window",
           "description": "Local Codex CLI executable used by the shim."
+        },
+        "codexRemoteBridge.sshExecutable": {
+          "type": "string",
+          "default": "ssh",
+          "scope": "window",
+          "description": "Local OpenSSH client executable. Windows automatically discovers the built-in OpenSSH client when this is left as ssh."
+        },
+        "codexRemoteBridge.connectionMode": {
+          "type": "string",
+          "enum": [
+            "vscode-remote",
+            "openssh"
+          ],
+          "default": "vscode-remote",
+          "scope": "window",
+          "description": "Remote execution transport. vscode-remote reuses the active VS Code Remote Extension Host connection and supports password or key authentication; openssh creates an independent non-interactive SSH connection."
         },
         "codexRemoteBridge.remoteMcpRouting": {
           "type": "string",
@@ -155,7 +171,8 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "check": "npm run typecheck && npm run test && npm run build && npm run smoke:shim && npm run package",
-    "package": "vsce package --allow-missing-repository --no-dependencies --out dist/codex-remote-bridge.vsix",
+    "package": "node scripts/package.mjs current",
+    "package:all": "node scripts/package.mjs all",
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "smoke:shim": "node scripts/smoke-shim.mjs",
     "test": "vitest run",
@@ -168,6 +185,7 @@
     "@types/vscode": "^1.96.0",
     "@vscode/vsce": "^3.6.2",
     "esbuild": "^0.25.5",
+    "postject": "1.0.0-alpha.6",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   },

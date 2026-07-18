@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
-import { access, chmod, mkdir } from "node:fs/promises";
+import { access, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { AuditLog } from "../core/audit-log.js";
+import { resolveCodexExecutable } from "../core/codex-executable.js";
 import { loadBridgeConfig } from "../core/config-store.js";
 import { BridgeError } from "../core/errors.js";
+import { chmodIfSupported } from "../core/file-permissions.js";
 import {
   activeBridgeConfigPath,
   bridgeAuditPath,
@@ -68,7 +70,9 @@ async function waitForSessionConfig(path: string, timeoutMs = 5_000): Promise<vo
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
-  const fallbackExecutable = process.env.CODEX_BRIDGE_CODEX_EXECUTABLE || "codex";
+  const fallbackExecutable = resolveCodexExecutable(
+    process.env.CODEX_BRIDGE_CODEX_EXECUTABLE || "codex",
+  );
   assertExecutableIsNotShim(fallbackExecutable);
   const configPath = activeBridgeConfigPath();
   if (!configPath) {
@@ -81,8 +85,9 @@ async function main(): Promise<number> {
     await waitForSessionConfig(configPath);
   }
   const config = await loadOptionalConfig(configPath, audit);
-  const codexExecutable =
-    process.env.CODEX_BRIDGE_CODEX_EXECUTABLE || config?.codexExecutable || fallbackExecutable;
+  const codexExecutable = resolveCodexExecutable(
+    process.env.CODEX_BRIDGE_CODEX_EXECUTABLE || config?.codexExecutable || fallbackExecutable,
+  );
   assertExecutableIsNotShim(codexExecutable);
 
   if (!args.includes("app-server")) {
@@ -94,7 +99,7 @@ async function main(): Promise<number> {
 
   const controlDir = bridgeControlDir();
   await mkdir(controlDir, { mode: 0o500, recursive: true });
-  await chmod(controlDir, 0o500);
+  await chmodIfSupported(controlDir, 0o500);
   let appServerArgs = [...args];
   let localMcpServers: string[] = [];
   let remoteMcpServers: string[] = [];

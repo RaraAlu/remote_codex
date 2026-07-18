@@ -1,4 +1,4 @@
-import { isAbsolute, normalize, posix } from "node:path";
+import { posix, win32 } from "node:path";
 import { BridgeError } from "./errors.js";
 import type { BridgeConfig } from "./types.js";
 
@@ -65,11 +65,25 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
   if (input.localExecution !== undefined && input.localExecution !== "deny") {
     throw new BridgeError("INVALID_CONFIG", "localExecution is fixed to deny");
   }
-  if (input.connectionMode !== undefined && input.connectionMode !== "openssh") {
-    throw new BridgeError("INVALID_CONFIG", "Only the openssh connection mode is supported");
+  if (
+    input.connectionMode !== undefined &&
+    input.connectionMode !== "openssh" &&
+    input.connectionMode !== "vscode-remote"
+  ) {
+    throw new BridgeError(
+      "INVALID_CONFIG",
+      "connectionMode must be vscode-remote or openssh",
+    );
   }
-  if (input.remoteHelper !== undefined && input.remoteHelper !== "none") {
-    throw new BridgeError("INVALID_CONFIG", "MVP remoteHelper is fixed to none");
+  if (
+    input.remoteHelper !== undefined &&
+    input.remoteHelper !== "none" &&
+    input.remoteHelper !== "vscode-extension"
+  ) {
+    throw new BridgeError(
+      "INVALID_CONFIG",
+      "remoteHelper must be none or vscode-extension",
+    );
   }
   if (input.version !== undefined && input.version !== 1) {
     throw new BridgeError("INVALID_CONFIG", "Unsupported bridge configuration version");
@@ -109,10 +123,51 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
     input.identityFile === undefined || input.identityFile === null || input.identityFile === ""
       ? undefined
       : requiredString(input.identityFile, "identityFile");
-  if (identityFile && (!isAbsolute(identityFile) || normalize(identityFile) !== identityFile)) {
+  const identityPathApi = /^[A-Za-z]:[\\/]|^\\\\/.test(identityFile ?? "") ? win32 : posix;
+  if (
+    identityFile &&
+    (!identityPathApi.isAbsolute(identityFile) ||
+      identityPathApi.normalize(identityFile) !== identityFile)
+  ) {
     throw new BridgeError(
       "INVALID_CONFIG",
       "identityFile must be a normalized absolute local path",
+    );
+  }
+
+  const connectionMode = input.connectionMode === "vscode-remote" ? "vscode-remote" : "openssh";
+  if (
+    input.remoteHelper !== undefined &&
+    input.remoteHelper !==
+      (connectionMode === "vscode-remote" ? "vscode-extension" : "none")
+  ) {
+    throw new BridgeError(
+      "INVALID_CONFIG",
+      "remoteHelper does not match the selected connectionMode",
+    );
+  }
+  const transportInput = input.vscodeTransport;
+  let vscodeTransport: BridgeConfig["vscodeTransport"];
+  if (transportInput !== undefined) {
+    if (!transportInput || typeof transportInput !== "object" || Array.isArray(transportInput)) {
+      throw new BridgeError("INVALID_CONFIG", "vscodeTransport must be an object");
+    }
+    const transport = transportInput as Record<string, unknown>;
+    const endpoint = requiredString(transport.endpoint, "vscodeTransport.endpoint");
+    const sessionId = requiredString(transport.sessionId, "vscodeTransport.sessionId");
+    const token = requiredString(transport.token, "vscodeTransport.token");
+    if (token.length < 32) {
+      throw new BridgeError(
+        "INVALID_CONFIG",
+        "vscodeTransport.token must contain at least 32 characters",
+      );
+    }
+    vscodeTransport = { endpoint, sessionId, token };
+  }
+  if (vscodeTransport && connectionMode !== "vscode-remote") {
+    throw new BridgeError(
+      "INVALID_CONFIG",
+      "vscodeTransport is only valid with the vscode-remote connection mode",
     );
   }
 
@@ -120,9 +175,9 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
     version: 1,
     host,
     workspaceRoot,
-    connectionMode: "openssh",
+    connectionMode,
     localExecution: "deny",
-    remoteHelper: "none",
+    remoteHelper: connectionMode === "vscode-remote" ? "vscode-extension" : "none",
     ...(sshUser ? { sshUser } : {}),
     ...(sshPort ? { sshPort } : {}),
     ...(identityFile ? { identityFile } : {}),
@@ -130,6 +185,10 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
       typeof input.codexExecutable === "string" && input.codexExecutable.trim()
         ? input.codexExecutable
         : DEFAULTS.codexExecutable,
+    sshExecutable:
+      typeof input.sshExecutable === "string" && input.sshExecutable.trim()
+        ? input.sshExecutable
+        : "ssh",
     remoteMcpRouting: input.remoteMcpRouting === "local" ? "local" : "auto",
     remoteMcpAccess: input.remoteMcpAccess === "all" ? "all" : "enabled",
     commandTimeoutMs: integerInRange(
@@ -161,5 +220,6 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
       120,
       "connectTimeoutSeconds",
     ),
+    ...(vscodeTransport ? { vscodeTransport } : {}),
   };
 }

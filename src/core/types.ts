@@ -25,6 +25,7 @@ export const BRIDGE_ERROR_CODES = [
   "OUTPUT_TRUNCATED",
   "RESULT_UNKNOWN",
   "INVALID_CONFIG",
+  "REMOTE_TRANSPORT_DISCONNECTED",
 ] as const;
 
 export type BridgeErrorCode = (typeof BRIDGE_ERROR_CODES)[number];
@@ -33,13 +34,14 @@ export interface BridgeConfig {
   version: 1;
   host: string;
   workspaceRoot: string;
-  connectionMode: "openssh";
+  connectionMode: "openssh" | "vscode-remote";
   localExecution: "deny";
-  remoteHelper: "none";
+  remoteHelper: "none" | "vscode-extension";
   sshUser?: string;
   sshPort?: number;
   identityFile?: string;
   codexExecutable: string;
+  sshExecutable: string;
   remoteMcpRouting: "auto" | "local";
   remoteMcpAccess: "enabled" | "all";
   commandTimeoutMs: number;
@@ -47,6 +49,13 @@ export interface BridgeConfig {
   maxParallelReads: number;
   maxParallelWrites: 1;
   connectTimeoutSeconds: number;
+  vscodeTransport?: VsCodeTransportDescriptor;
+}
+
+export interface VsCodeTransportDescriptor {
+  endpoint: string;
+  sessionId: string;
+  token: string;
 }
 
 export interface RemoteIdentity {

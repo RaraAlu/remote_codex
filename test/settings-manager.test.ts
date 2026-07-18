@@ -95,4 +95,38 @@ describe("OfficialSettingsManager", () => {
     });
     await expect(manager.restore()).resolves.toBe(false);
   });
+
+  it("migrates a stale cross-platform Bridge launcher without preserving it as the backup", async () => {
+    const stale =
+      "/home/zkbot/.vscode/extensions/zkbot.codex-vscode-remote-bridge-0.1.11/dist/codex-bridge-shim.cjs";
+    const windowsShim =
+      "C:\\Users\\tester\\AppData\\Local\\codex-remote-bridge\\bin\\0.2.0\\codex-bridge-shim.exe";
+    mock.effective.set("chatgpt.cliExecutable", stale);
+    mock.global.set("chatgpt.cliExecutable", stale);
+    mock.effective.set("remote.extensionKind", {
+      example: ["workspace"],
+      "openai.chatgpt": ["ui"],
+    });
+    mock.global.set("remote.extensionKind", {
+      example: ["workspace"],
+      "openai.chatgpt": ["ui"],
+    });
+    const manager = new OfficialSettingsManager(context());
+
+    await expect(manager.repairManagedExecutable(windowsShim)).resolves.toBe(true);
+    expect(mock.effective.get("chatgpt.cliExecutable")).toBe(windowsShim);
+
+    const laterKinds = {
+      ...(mock.global.get("remote.extensionKind") as Record<string, string[]>),
+      later: ["ui"],
+    };
+    mock.global.set("remote.extensionKind", laterKinds);
+    mock.effective.set("remote.extensionKind", laterKinds);
+    await expect(manager.restore()).resolves.toBe(true);
+    expect(mock.effective.has("chatgpt.cliExecutable")).toBe(false);
+    expect(mock.effective.get("remote.extensionKind")).toEqual({
+      example: ["workspace"],
+      later: ["ui"],
+    });
+  });
 });

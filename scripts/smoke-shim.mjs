@@ -134,7 +134,11 @@ function assertThreadStarted({ messages, stdout }) {
 }
 
 const rootDir = await mkdtemp(join(tmpdir(), "codex-bridge-smoke-"));
-const shim = resolve("dist/codex-bridge-shim.cjs");
+const shim = resolve(
+  process.platform === "win32"
+    ? "dist/codex-bridge-shim.exe"
+    : "dist/codex-bridge-shim.cjs",
+);
 
 try {
   const localStateDir = join(rootDir, "local-state");
@@ -194,9 +198,11 @@ try {
   if (!remoteAudit.includes('"operation":"shim.start"')) {
     throw new Error("Remote window shim start was not recorded in the audit log");
   }
-  const controlMode = (await stat(join(remoteStateDir, "control"))).mode & 0o777;
-  if (controlMode !== 0o500) {
-    throw new Error(`Control directory mode is ${controlMode.toString(8)}, expected 500`);
+  if (process.platform !== "win32") {
+    const controlMode = (await stat(join(remoteStateDir, "control"))).mode & 0o777;
+    if (controlMode !== 0o500) {
+      throw new Error(`Control directory mode is ${controlMode.toString(8)}, expected 500`);
+    }
   }
   process.stdout.write(
     "Shim smoke test passed: local passthrough plus remote-window startup and thread creation\n",

@@ -1,6 +1,10 @@
 import type { BridgeErrorCode, BridgeErrorPayload } from "./types.js";
 
-const RETRYABLE_CODES = new Set<BridgeErrorCode>(["SSH_DISCONNECTED", "OUTPUT_TRUNCATED"]);
+const RETRYABLE_CODES = new Set<BridgeErrorCode>([
+  "SSH_DISCONNECTED",
+  "OUTPUT_TRUNCATED",
+  "REMOTE_TRANSPORT_DISCONNECTED",
+]);
 
 export class BridgeError extends Error {
   readonly code: BridgeErrorCode;

@@ -184,7 +184,7 @@ async function probeRemoteExecutable(
   const args = buildSshArgs(config, remoteCommand);
   return await new Promise<boolean>((resolvePromise) => {
     const child = execFile(
-      "ssh",
+      config.sshExecutable,
       args,
       {
         encoding: "utf8",
@@ -228,6 +228,7 @@ export async function routeRemoteMcpServers(
   await Promise.all(
     servers.map(async (server) => {
       if (
+        options.config.connectionMode !== "openssh" ||
         options.config.remoteMcpRouting !== "auto" ||
         !isRemoteCandidate(server)
       ) {
@@ -276,7 +277,7 @@ export async function routeRemoteMcpServers(
     );
     return [
       "-c",
-      configOverride(route.name, "command", "ssh"),
+      configOverride(route.name, "command", options.config.sshExecutable),
       "-c",
       configOverride(route.name, "args", sshArgs),
     ];

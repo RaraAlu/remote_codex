@@ -1,6 +1,7 @@
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { BridgeError } from "./errors.js";
+import { chmodIfSupported } from "./file-permissions.js";
 import { parseBridgeConfig } from "./config.js";
 import type { BridgeConfig } from "./types.js";
 
@@ -31,7 +32,7 @@ export async function saveBridgeConfig(path: string, config: BridgeConfig): Prom
     encoding: "utf8",
     mode: 0o600,
   });
-  await chmod(temporaryPath, 0o600);
+  await chmodIfSupported(temporaryPath, 0o600);
   await rename(temporaryPath, path);
-  await chmod(path, 0o600);
+  await chmodIfSupported(path, 0o600);
 }
