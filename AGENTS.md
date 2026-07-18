@@ -22,12 +22,15 @@
 - The currently verified official extension is `openai.chatgpt@26.707.91948` with `codex-cli 0.144.5`.
 - Newer official extension versions must be tested for task-creation behavior before being declared supported; `26.715.31925` rejects the Windows UI representation of a Remote SSH root as `Unknown local project`.
 - In `vscode-remote` mode, do not claim that a workspace MCP is remotely routed unless it is actually bridged through the VS Code transport. The legacy SSH stdio MCP route only applies to `openssh` mode.
+- Use `docs/upgrade-tracking.md` as the release gate whenever any compatibility-set component, VS Code, Remote SSH, OpenSSH, MCP routing, or a supported local platform changes. Create or update a dated release record from `docs/acceptance/release-template.md` instead of overwriting old evidence.
 
 ## Verification
 
 - Run targeted tests while iterating, then `npm run check` before packaging a release candidate.
 - For integration fixes, verify the installed VSIX in a real Remote SSH window and inspect both the Codex log and Bridge audit log.
 - Confirm that task creation reaches the shim and that project operations are recorded as remote operations before committing the integration fix.
+- Record Windows x64 and Linux x64 separately. Cross-packaging a VSIX proves artifact construction and content isolation only; it does not prove the other platform's Extension Host, Shim, official task, or Remote SSH runtime path.
+- Record the hard gates and quantitative metrics defined in `docs/upgrade-tracking.md`. Mark missing evidence as `待补测`; never turn an unmeasured value into zero or copy a prior release result without rerunning the triggered chain.
 
 ## Generated Artifacts
 

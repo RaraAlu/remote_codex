@@ -23,7 +23,7 @@
 | `thread/start` 路径和能力注入 | 已实现并通过集成测试 | `rewriteClientMessage` |
 | `permissions`/`sandbox` 互斥 | 移除客户端权限档案并固定本地只读 sandbox | `rewriteClientMessage` |
 | `thread/resume` 本地控制目录固定 | 已实现并通过单元测试覆盖相同重写路径 | `rewriteClientMessage` |
-| 远端无 Codex | 诊断已实现，待目标主机验收 | `Run Diagnostics` |
+| 远端无 Codex | 诊断已实现；xj-member 目标已确认未安装 Codex | `Run Diagnostics` / 2026-07-16 验收 |
 
 阶段 A 退出条件尚未完全满足：还需要在真实 Remote SSH 窗口使用官方界面完成一次
 不访问项目的对话，并记录官方扩展实际运行位置。
@@ -42,7 +42,7 @@
 | 词法路径限制 | 已实现并测试 |
 | 远端 `realpath` 与符号链接防逃逸 | 已用仓库内指向 `/root/.local` 的真实符号链接验证 |
 | 独立本地审计日志和脱敏 | 已实现并测试 |
-| Bridge 工具原生界面投影 | 已实现并测试；真实窗口观感待 0.1.8 实机确认 |
+| Bridge 工具原生界面投影 | 已实现并测试；当前支持组合仍缺独立的真实窗口界面观感证据 |
 | 远程 URI、Diff 和文件跳转 | 未实现 |
 
 阶段 B 的执行器与 Shim 动态只读工具已通过真实 SSH 验收。尚缺 VS Code 当前文件、
@@ -64,6 +64,14 @@
 
 阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行；写操作、取消、断线恢复
 和本地执行硬阻断完成前，不得用于无人值守的有副作用任务。
+
+## 升级与发布跟踪
+
+发布门禁、升级触发矩阵、量化回归规则和 Windows/Linux 分平台要求已统一写入
+`docs/upgrade-tracking.md`，候选版本使用 `docs/acceptance/release-template.md` 保存独立
+证据。0.2.7 首份基线位于 `docs/acceptance/2026-07-18-release-0.2.7.md`：Windows x64
+Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controller 仅完成打包和
+内容核对，本地 Extension Host、CJS Shim、官方任务及 Remote SSH 运行时仍为待补测。
 
 ## 本地 MCP 边界
 
