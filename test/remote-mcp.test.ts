@@ -53,6 +53,7 @@ describe("remote MCP routing", () => {
       config,
       listServers: async () => servers,
       remoteExecutableAvailable: async (executable) => executable === "codegraph",
+      validateConfigOverrides: async () => true,
     });
 
     expect(result.remoteServers).toEqual(["codegraph"]);
@@ -133,6 +134,7 @@ describe("remote MCP routing", () => {
       config: allConfig,
       listServers: async () => [blender, codegraph],
       remoteExecutableAvailable: async (executable) => executable === "codegraph",
+      validateConfigOverrides: async () => true,
     });
 
     expect(result.localServers).toEqual(["blender"]);
@@ -166,6 +168,7 @@ describe("remote MCP routing", () => {
       codexExecutable: "codex",
       config: allLocalConfig,
       listServers: async () => [disabled],
+      validateConfigOverrides: async () => true,
     });
 
     expect(result.localServers).toEqual(["disabled"]);
@@ -174,5 +177,31 @@ describe("remote MCP routing", () => {
     expect(result.appServerArgs).not.toContain(
       'mcp_servers.disabled.command="ssh"',
     );
+  });
+
+  it("keeps plugin-layer MCP transport intact when access overrides are incompatible", async () => {
+    const allLocalConfig = parseBridgeConfig({
+      host: "training-gpu",
+      workspaceRoot: "/remote/workspace",
+      remoteMcpRouting: "local",
+      remoteMcpAccess: "all",
+    });
+    const codegraph = stdioServer("codegraph", "codegraph");
+    const pluginServer = stdioServer("sites-design-picker", "node", {
+      cwd: "/plugin/sites",
+    });
+
+    const result = await routeRemoteMcpServers({
+      appServerArgs: ["app-server"],
+      codexExecutable: "codex",
+      config: allLocalConfig,
+      listServers: async () => [codegraph, pluginServer],
+      validateConfigOverrides: async (overrides) =>
+        !overrides.some((entry) => entry.includes("sites-design-picker")),
+    });
+
+    expect(result.appServerArgs).toContain("mcp_servers.codegraph.enabled=true");
+    expect(result.appServerArgs.some((entry) => entry.includes("sites-design-picker"))).toBe(false);
+    expect(result.skippedAccessServers).toEqual(["sites-design-picker"]);
   });
 });

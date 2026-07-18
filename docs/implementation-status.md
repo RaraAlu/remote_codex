@@ -71,6 +71,7 @@
 Bridge 不会移除这些服务。Remote SSH 窗口会扫描本机 MCP，并把无凭据、无本地工作
 目录、非包管理器启动且远端存在同名可执行文件的 stdio 服务通过当前 SSH 目标启动；
 其余服务继续留在本机。`remoteMcpAccess=enabled` 保留已有启用和审批策略；
-`remoteMcpAccess=all` 为当前 app-server 启用全部已配置服务、清空工具禁用列表并
-设置默认工具审批为 `approve`。所有覆盖仅作用于当前 app-server，不写入全局 Codex
-配置。CodeGraph 已加入工作区根目录适配并通过真实远端索引调用验收。
+`remoteMcpAccess=all` 为当前 app-server 尝试启用已配置服务、清空工具禁用列表并
+设置默认工具审批为 `approve`。覆盖会由同版本 Codex 校验；会替换插件层 transport
+的不兼容服务保持原配置。所有覆盖仅作用于当前 app-server，不写入全局 Codex 配置。
+CodeGraph 已加入工作区根目录适配并通过真实远端索引调用验收。

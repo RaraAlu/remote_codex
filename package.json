@@ -2,7 +2,7 @@
   "name": "codex-vscode-remote-bridge",
   "displayName": "Codex Remote Bridge",
   "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "publisher": "zkbot",
   "license": "MIT",
@@ -110,7 +110,7 @@
           ],
           "default": "enabled",
           "scope": "window",
-          "description": "Preserve the configured MCP enablement and approval policy, or enable every configured MCP and approve its tools for this Remote SSH Codex process."
+          "description": "Preserve configured MCP policy, or enable and approve MCPs whose per-process overrides pass validation without replacing their transport."
         },
         "codexRemoteBridge.commandTimeoutMs": {
           "type": "number",

@@ -84,10 +84,17 @@ interface RemoteMcpRoute {
   args: string[];
 }
 
+interface McpOverrideGroup {
+  kind: "access" | "route";
+  name: string;
+  values: string[];
+}
+
 export interface McpRoutingResult {
   appServerArgs: string[];
   localServers: string[];
   remoteServers: string[];
+  skippedAccessServers: string[];
 }
 
 export interface McpRoutingOptions {
@@ -96,6 +103,7 @@ export interface McpRoutingOptions {
   config: BridgeConfig;
   listServers?: () => Promise<CodexMcpServer[]>;
   remoteExecutableAvailable?: (executable: string) => Promise<boolean>;
+  validateConfigOverrides?: (overrides: readonly string[]) => Promise<boolean>;
 }
 
 function configKey(name: string, property: McpConfigProperty): string {
@@ -170,6 +178,44 @@ async function listCodexMcpServers(codexExecutable: string): Promise<CodexMcpSer
   return Array.isArray(parsed) ? (parsed as CodexMcpServer[]) : [];
 }
 
+async function validateConfigOverrides(
+  codexExecutable: string,
+  overrides: readonly string[],
+): Promise<boolean> {
+  try {
+    await execFileAsync(codexExecutable, [...overrides, "mcp", "list", "--json"], {
+      encoding: "utf8",
+      env: process.env,
+      maxBuffer: 1024 * 1024,
+      timeout: 5_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function compatibleOverrideGroups(
+  groups: readonly McpOverrideGroup[],
+  validate: (overrides: readonly string[]) => Promise<boolean>,
+): Promise<McpOverrideGroup[]> {
+  if (groups.length === 0) {
+    return [];
+  }
+  const flatten = (items: readonly McpOverrideGroup[]) => items.flatMap((item) => item.values);
+  if (await validate(flatten(groups))) {
+    return [...groups];
+  }
+
+  const accepted: McpOverrideGroup[] = [];
+  for (const group of groups) {
+    if (await validate(flatten([...accepted, group]))) {
+      accepted.push(group);
+    }
+  }
+  return accepted;
+}
+
 async function probeRemoteExecutable(
   config: BridgeConfig,
   executable: string,
@@ -204,6 +250,7 @@ export async function routeRemoteMcpServers(
     appServerArgs: [...options.appServerArgs],
     localServers: [] as string[],
     remoteServers: [] as string[],
+    skippedAccessServers: [] as string[],
   };
   if (
     options.config.remoteMcpRouting !== "auto" &&
@@ -252,44 +299,79 @@ export async function routeRemoteMcpServers(
       appServerArgs: [...options.appServerArgs],
       localServers,
       remoteServers: routes.map((route) => route.name),
+      skippedAccessServers: [],
     };
   }
 
-  const accessOverrides =
+  const accessGroups: McpOverrideGroup[] =
     options.config.remoteMcpAccess === "all"
-      ? servers.flatMap((server) => [
-          "-c",
-          configOverride(server.name, "enabled", true),
-          "-c",
-          configOverride(server.name, "disabled_tools", []),
-          "-c",
-          configOverride(
-            server.name,
-            "default_tools_approval_mode",
-            "approve",
-          ),
-        ])
+      ? servers.map((server) => ({
+          kind: "access",
+          name: server.name,
+          values: [
+            "-c",
+            configOverride(server.name, "enabled", true),
+            "-c",
+            configOverride(server.name, "disabled_tools", []),
+            "-c",
+            configOverride(
+              server.name,
+              "default_tools_approval_mode",
+              "approve",
+            ),
+          ],
+        }))
       : [];
-  const routeOverrides = routes.flatMap((route) => {
+  const routeGroups: McpOverrideGroup[] = routes.map((route) => {
     const sshArgs = buildSshArgs(
       options.config,
       remoteMcpCommand(route, options.config.workspaceRoot),
     );
-    return [
-      "-c",
-      configOverride(route.name, "command", options.config.sshExecutable),
-      "-c",
-      configOverride(route.name, "args", sshArgs),
-    ];
+    return {
+      kind: "route",
+      name: route.name,
+      values: [
+        "-c",
+        configOverride(route.name, "command", options.config.sshExecutable),
+        "-c",
+        configOverride(route.name, "args", sshArgs),
+      ],
+    };
   });
-  const overrides = [...accessOverrides, ...routeOverrides];
+  const validate =
+    options.validateConfigOverrides ??
+    ((overrides: readonly string[]) => validateConfigOverrides(options.codexExecutable, overrides));
+  const acceptedGroups = await compatibleOverrideGroups(
+    [...routeGroups, ...accessGroups],
+    validate,
+  );
+  const acceptedRoutes = new Set(
+    acceptedGroups.filter((group) => group.kind === "route").map((group) => group.name),
+  );
+  const acceptedAccess = new Set(
+    acceptedGroups.filter((group) => group.kind === "access").map((group) => group.name),
+  );
+  const remoteServers = routes
+    .map((route) => route.name)
+    .filter((name) => acceptedRoutes.has(name));
+  for (const route of routes) {
+    if (!acceptedRoutes.has(route.name)) {
+      localServers.push(route.name);
+    }
+  }
+  const skippedAccessServers =
+    options.config.remoteMcpAccess === "all"
+      ? servers.map((server) => server.name).filter((name) => !acceptedAccess.has(name)).sort()
+      : [];
+  const overrides = acceptedGroups.flatMap((group) => group.values);
   return {
     appServerArgs: [
       ...options.appServerArgs.slice(0, appServerIndex),
       ...overrides,
       ...options.appServerArgs.slice(appServerIndex),
     ],
-    localServers,
-    remoteServers: routes.map((route) => route.name),
+    localServers: [...new Set(localServers)].sort(),
+    remoteServers,
+    skippedAccessServers,
   };
 }

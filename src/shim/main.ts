@@ -103,6 +103,7 @@ async function main(): Promise<number> {
   let appServerArgs = [...args];
   let localMcpServers: string[] = [];
   let remoteMcpServers: string[] = [];
+  let skippedMcpAccessServers: string[] = [];
   let mcpRoutingError: string | undefined;
   try {
     const routing = await routeRemoteMcpServers({
@@ -113,6 +114,7 @@ async function main(): Promise<number> {
     appServerArgs = routing.appServerArgs;
     localMcpServers = routing.localServers;
     remoteMcpServers = routing.remoteServers;
+    skippedMcpAccessServers = routing.skippedAccessServers;
   } catch (error) {
     mcpRoutingError = error instanceof Error ? error.message : String(error);
   }
@@ -129,6 +131,7 @@ async function main(): Promise<number> {
       remoteMcpAccess: config.remoteMcpAccess,
       remoteMcpRouting: config.remoteMcpRouting,
       remoteMcpServers,
+      skippedMcpAccessServers,
       ...(mcpRoutingError ? { mcpRoutingError } : {}),
     },
   });

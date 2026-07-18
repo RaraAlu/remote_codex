@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | VS Code | `1.129.1`（Windows x64） | 扩展引擎最低 `^1.96.2` | 本机构建通过 |
 | 官方 Codex 扩展 | `openai.chatgpt@26.715.31925` | 全局 Shim，本地 Extension Host，按窗口会话激活 | Remote SSH 接管与本地窗口透传已并行验证 |
-| Bridge Controller | `0.2.4`，Windows x64、Linux x64 | 同一扩展 ID，分别发布 `win32-x64` 和 `linux-x64` VSIX | 两个目标包均已生成并检查内容 |
+| Bridge Controller | `0.2.5`，Windows x64、Linux x64 | 同一扩展 ID，分别发布 `win32-x64` 和 `linux-x64` VSIX | 两个目标包均已生成并检查内容 |
 | Remote Executor | `0.2.4`，Linux x64 | Workspace 扩展；通过当前 Remote SSH 通道自动部署，不含 Codex 或凭据 | 真实 Remote SSH 窗口已通过握手、探针、`pwd` 和目录读取回环 |
 | Codex CLI/app-server | `0.144.5` | 必须与生成协议精确匹配；按平台发现原生可执行文件 | Windows 原生 npm CLI 的版本、`initialize`、`thread/list` 和 `thread/start` 冒烟通过 |
 | Remote SSH | `0.124.0` | 使用 `remote.extensionKind` 探针设置 | 待真实窗口验收 |
