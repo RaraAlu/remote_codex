@@ -7,13 +7,19 @@ import {
   REMOTE_EXECUTOR_COMMAND,
   REMOTE_EXECUTOR_PING_COMMAND,
   REMOTE_EXECUTOR_PROTOCOL_VERSION,
+  REMOTE_OUTPUT_COMMAND,
+  REMOTE_STDIO_MAX_FRAME_BYTES,
   type RemoteExecutorCommandRequest,
   type RemoteExecutorCommandResponse,
   type RemoteOutputEvent,
 } from "../core/vscode-transport.js";
 import { matchesRemoteWorkspaceRoot } from "./workspace.js";
+import { RemoteStdioSessions } from "./stdio-sessions.js";
 
 const executors = new Map<string, LocalProcessExecutor>();
+const stdioSessions = new RemoteStdioSessions(async (event) => {
+  await vscode.commands.executeCommand(REMOTE_OUTPUT_COMMAND, event);
+});
 
 function record(value: unknown, name: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -37,6 +43,13 @@ function numberValue(value: unknown, fallback: number, name: string): number {
     throw new BridgeError("PROTOCOL_MISMATCH", `${name} must be an integer`);
   }
   return value;
+}
+
+function stringArray(value: unknown, name: string): string[] {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new BridgeError("PROTOCOL_MISMATCH", `${name} must be a string array`);
+  }
+  return value as string[];
 }
 
 function validateWorkspace(request: RemoteExecutorCommandRequest): void {
@@ -150,6 +163,29 @@ async function dispatch(
       await outputQueue;
       return result;
     }
+    case "stdioStart": {
+      await stdioSessions.start({
+        args: stringArray(params.args, "params.args"),
+        executable: stringValue(params.executable, "params.executable"),
+        id: request.id,
+        maxFrameBytes: Math.min(request.policy.maxOutputBytes, REMOTE_STDIO_MAX_FRAME_BYTES),
+        workspaceRoot: request.workspaceRoot,
+      });
+      return { started: true };
+    }
+    case "stdioWrite":
+      await stdioSessions.write(
+        request.id,
+        stringValue(params.chunk, "params.chunk"),
+        Math.min(request.policy.maxOutputBytes, REMOTE_STDIO_MAX_FRAME_BYTES),
+      );
+      return { written: true };
+    case "stdioEnd":
+      stdioSessions.end(request.id);
+      return { ended: true };
+    case "stdioStop":
+      stdioSessions.stop(request.id);
+      return { stopped: true };
   }
 }
 
@@ -163,7 +199,7 @@ async function executeRequest(
       typeof request.id !== "string" ||
       typeof request.hostId !== "string" ||
       typeof request.workspaceRoot !== "string" ||
-      typeof request.outputCommand !== "string" ||
+      request.outputCommand !== REMOTE_OUTPUT_COMMAND ||
       !request.policy ||
       !Number.isInteger(request.policy.commandTimeoutMs) ||
       !Number.isInteger(request.policy.maxOutputBytes)
@@ -191,6 +227,7 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
+  stdioSessions.close();
   for (const executor of executors.values()) {
     executor.close();
   }

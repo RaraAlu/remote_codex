@@ -1,33 +1,18 @@
 import { execFile } from "node:child_process";
-import { basename } from "node:path";
 import { promisify } from "node:util";
+import {
+  areRemoteMcpArgumentsSafe,
+  remoteMcpExecutableName,
+} from "../core/remote-mcp-policy.js";
 import {
   buildSshArgs,
   buildSshEnvironment,
   quotePosix,
 } from "../core/ssh-executor.js";
 import type { BridgeConfig } from "../core/types.js";
+import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
 
 const execFileAsync = promisify(execFile);
-const LOCAL_LAUNCHERS = new Set([
-  "bash",
-  "bun",
-  "cmd",
-  "docker",
-  "node",
-  "npx",
-  "powershell",
-  "pwsh",
-  "python",
-  "python3",
-  "sh",
-  "ssh",
-  "uv",
-  "uvx",
-]);
-const SAFE_REMOTE_ARGUMENT = /^-{0,2}[A-Za-z0-9][A-Za-z0-9._+-]*$/;
-const SENSITIVE_ARGUMENT =
-  /(^|[-_])(api[-_]?key|auth|credential|password|secret|token)([-_=]|$)/i;
 
 const REMOTE_MCP_LAUNCHER = [
   "set -eu",
@@ -102,6 +87,7 @@ export interface McpRoutingOptions {
   codexExecutable: string;
   config: BridgeConfig;
   listServers?: () => Promise<CodexMcpServer[]>;
+  relay?: { args: string[]; command: string };
   remoteExecutableAvailable?: (executable: string) => Promise<boolean>;
   validateConfigOverrides?: (overrides: readonly string[]) => Promise<boolean>;
 }
@@ -126,25 +112,23 @@ function isRemoteCandidate(server: CodexMcpServer): server is CodexMcpServer & {
     return false;
   }
   const transport = server.transport as StdioTransport;
-  const executable = basename(transport.command);
+  const executable = remoteMcpExecutableName(transport.command);
   return (
-    /^[A-Za-z0-9._+-]+$/.test(executable) &&
-    !LOCAL_LAUNCHERS.has(executable) &&
+    executable !== null &&
     (!transport.env || Object.keys(transport.env).length === 0) &&
     (!transport.env_vars || transport.env_vars.length === 0) &&
     !transport.cwd &&
     Array.isArray(transport.args) &&
-    transport.args.every(
-      (entry) =>
-        typeof entry === "string" &&
-        SAFE_REMOTE_ARGUMENT.test(entry) &&
-        !SENSITIVE_ARGUMENT.test(entry),
-    )
+    transport.args.every((entry) => typeof entry === "string") &&
+    areRemoteMcpArgumentsSafe(transport.args)
   );
 }
 
 function remoteArgs(server: CodexMcpServer & { transport: StdioTransport }, workspace: string) {
-  const executable = basename(server.transport.command);
+  const executable = remoteMcpExecutableName(server.transport.command);
+  if (!executable) {
+    throw new TypeError("Remote MCP candidate has no eligible executable");
+  }
   const args = [...server.transport.args];
   if (
     executable === "codegraph" &&
@@ -220,6 +204,23 @@ async function probeRemoteExecutable(
   config: BridgeConfig,
   executable: string,
 ): Promise<boolean> {
+  if (config.connectionMode === "vscode-remote") {
+    const executor = new VsCodeRemoteExecutor(config);
+    try {
+      const result = await executor.execute([
+        "sh",
+        "-c",
+        REMOTE_EXECUTABLE_PROBE,
+        "codex-bridge-mcp-probe",
+        executable,
+      ]);
+      return result.exitCode === 0;
+    } catch {
+      return false;
+    } finally {
+      executor.close();
+    }
+  }
   const remoteCommand = [
     "sh",
     "-c",
@@ -275,8 +276,8 @@ export async function routeRemoteMcpServers(
   await Promise.all(
     servers.map(async (server) => {
       if (
-        options.config.connectionMode !== "openssh" ||
         options.config.remoteMcpRouting !== "auto" ||
+        (options.config.connectionMode === "vscode-remote" && !options.relay) ||
         !isRemoteCandidate(server)
       ) {
         localServers.push(server.name);
@@ -323,18 +324,32 @@ export async function routeRemoteMcpServers(
         }))
       : [];
   const routeGroups: McpOverrideGroup[] = routes.map((route) => {
-    const sshArgs = buildSshArgs(
-      options.config,
-      remoteMcpCommand(route, options.config.workspaceRoot),
-    );
+    const launch =
+      options.config.connectionMode === "vscode-remote" && options.relay
+        ? {
+            args: [
+              ...options.relay.args,
+              "mcp-proxy",
+              route.executable,
+              ...route.args,
+            ],
+            command: options.relay.command,
+          }
+        : {
+            args: buildSshArgs(
+              options.config,
+              remoteMcpCommand(route, options.config.workspaceRoot),
+            ),
+            command: options.config.sshExecutable,
+          };
     return {
       kind: "route",
       name: route.name,
       values: [
         "-c",
-        configOverride(route.name, "command", options.config.sshExecutable),
+        configOverride(route.name, "command", launch.command),
         "-c",
-        configOverride(route.name, "args", sshArgs),
+        configOverride(route.name, "args", launch.args),
       ],
     };
   });

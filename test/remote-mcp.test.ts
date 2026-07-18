@@ -179,6 +179,48 @@ describe("remote MCP routing", () => {
     );
   });
 
+  it("routes safe stdio MCPs through the active VS Code Remote transport", async () => {
+    const vscodeConfig = parseBridgeConfig({
+      host: "training-gpu",
+      workspaceRoot: "/remote/workspace with spaces",
+      connectionMode: "vscode-remote",
+      remoteHelper: "vscode-extension",
+      vscodeTransport: {
+        endpoint: "local-endpoint",
+        sessionId: "session",
+        token: "0123456789abcdef0123456789abcdef",
+      },
+    });
+    const result = await routeRemoteMcpServers({
+      appServerArgs: ["app-server"],
+      codexExecutable: "codex",
+      config: vscodeConfig,
+      listServers: async () => [
+        stdioServer("codegraph", "codegraph", { args: ["serve", "--mcp"] }),
+      ],
+      relay: { args: [], command: "C:\\bridge\\codex-bridge-shim.exe" },
+      remoteExecutableAvailable: async () => true,
+      validateConfigOverrides: async () => true,
+    });
+
+    expect(result.remoteServers).toEqual(["codegraph"]);
+    expect(result.appServerArgs).toContain(
+      'mcp_servers.codegraph.command="C:\\\\bridge\\\\codex-bridge-shim.exe"',
+    );
+    const argsOverride = result.appServerArgs.find((entry) =>
+      entry.startsWith("mcp_servers.codegraph.args="),
+    );
+    expect(JSON.parse(argsOverride?.split("=").slice(1).join("=") ?? "[]")).toEqual([
+      "mcp-proxy",
+      "codegraph",
+      "serve",
+      "--mcp",
+      "--path",
+      "/remote/workspace with spaces",
+    ]);
+    expect(result.appServerArgs).not.toContain('mcp_servers.codegraph.command="ssh"');
+  });
+
   it("keeps plugin-layer MCP transport intact when access overrides are incompatible", async () => {
     const allLocalConfig = parseBridgeConfig({
       host: "training-gpu",

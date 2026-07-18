@@ -69,9 +69,13 @@
 
 远程工作区任务仍可使用本地 Codex app-server 原有的 MCP、App 和 Connector 服务，
 Bridge 不会移除这些服务。Remote SSH 窗口会扫描本机 MCP，并把无凭据、无本地工作
-目录、非包管理器启动且远端存在同名可执行文件的 stdio 服务通过当前 SSH 目标启动；
+目录、非包管理器启动且远端存在同名可执行文件的 stdio 服务通过当前 Bridge 目标启动；
+默认 `vscode-remote` 模式使用本地 relay 和 Remote Executor 长生命周期子进程转发原始
+stdin/stdout/stderr，复用当前 VS Code Remote SSH 连接；`openssh` 回退模式继续使用 SSH
+stdio 中转。该传输不依赖 CodeGraph，可用于所有通过同一安全策略的直接 stdio MCP。
 其余服务继续留在本机。`remoteMcpAccess=enabled` 保留已有启用和审批策略；
 `remoteMcpAccess=all` 为当前 app-server 尝试启用已配置服务、清空工具禁用列表并
 设置默认工具审批为 `approve`。覆盖会由同版本 Codex 校验；会替换插件层 transport
 的不兼容服务保持原配置。所有覆盖仅作用于当前 app-server，不写入全局 Codex 配置。
-CodeGraph 已加入工作区根目录适配并通过真实远端索引调用验收。
+CodeGraph 保留独立的工作区根目录参数适配；它是通用 stdio 通道的验收样例，而不是
+通道实现中的特殊传输分支。

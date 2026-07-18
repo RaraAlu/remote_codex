@@ -10,14 +10,22 @@ import { bridgeStateDir } from "../core/locations.js";
 import type { BridgeConfig, VsCodeTransportDescriptor } from "../core/types.js";
 import {
   isRemoteOutputEvent,
+  isRemoteStdioEvent,
+  isTransportStdioInput,
   isTransportRequest,
   REMOTE_EXECUTOR_COMMAND,
   REMOTE_OUTPUT_COMMAND,
   type RemoteExecutorCommandRequest,
   type RemoteExecutorCommandResponse,
   type RemoteOutputEvent,
+  type RemoteStdioEvent,
   type TransportMessage,
 } from "../core/vscode-transport.js";
+
+interface StdioSocket {
+  request: RemoteExecutorCommandRequest;
+  socket: Socket;
+}
 
 function transportEndpoint(sessionId: string): string {
   if (process.platform === "win32") {
@@ -43,6 +51,7 @@ export class VsCodeTransportServer implements vscode.Disposable {
   readonly #config: () => BridgeConfig | null;
   readonly #pending = new Map<string, Socket>();
   readonly #sockets = new Set<Socket>();
+  readonly #stdioSockets = new Map<string, StdioSocket>();
   #descriptor: VsCodeTransportDescriptor | null = null;
   #server: Server | null = null;
   #starting: Promise<VsCodeTransportDescriptor> | null = null;
@@ -70,6 +79,10 @@ export class VsCodeTransportServer implements vscode.Disposable {
   }
 
   handleOutput(value: unknown): void {
+    if (isRemoteStdioEvent(value)) {
+      this.#handleStdioOutput(value);
+      return;
+    }
     if (!isRemoteOutputEvent(value)) {
       return;
     }
@@ -82,6 +95,12 @@ export class VsCodeTransportServer implements vscode.Disposable {
 
   async close(): Promise<void> {
     const endpoint = this.#descriptor?.endpoint;
+    await Promise.allSettled(
+      [...this.#stdioSockets.values()].map(({ request }) =>
+        this.#sendStdioControl(request, "stdioStop", {}),
+      ),
+    );
+    this.#stdioSockets.clear();
     for (const socket of this.#sockets) {
       socket.destroy();
     }
@@ -135,7 +154,9 @@ export class VsCodeTransportServer implements vscode.Disposable {
   #accept(socket: Socket, descriptor: VsCodeTransportDescriptor): void {
     this.#sockets.add(socket);
     const lines = createInterface({ input: socket });
-    let handled = false;
+    let initialRequestHandled = false;
+    let stdioRequest: RemoteExecutorCommandRequest | null = null;
+    let inputQueue = Promise.resolve();
     const cleanup = (): void => {
       lines.close();
       this.#sockets.delete(socket);
@@ -144,16 +165,41 @@ export class VsCodeTransportServer implements vscode.Disposable {
           this.#pending.delete(id);
         }
       }
+      for (const [id, session] of this.#stdioSockets) {
+        if (session.socket === socket) {
+          this.#stdioSockets.delete(id);
+          void this.#sendStdioControl(session.request, "stdioStop", {}).catch(() => undefined);
+        }
+      }
     };
     socket.once("close", cleanup);
     socket.once("error", () => cleanup());
     lines.on("line", (line) => {
-      if (handled) {
+      if (!initialRequestHandled) {
+        initialRequestHandled = true;
+        void this.#handleLine(line, socket, descriptor).then((request) => {
+          if (request) {
+            stdioRequest = request;
+          } else {
+            socket.end();
+          }
+        });
+        return;
+      }
+      if (!stdioRequest) {
         socket.destroy();
         return;
       }
-      handled = true;
-      void this.#handleLine(line, socket, descriptor).finally(() => socket.end());
+      inputQueue = inputQueue
+        .then(() => this.#handleStdioInput(line, stdioRequest as RemoteExecutorCommandRequest))
+        .catch((error) => {
+          writeMessage(socket, {
+            error: asBridgeError(error, "REMOTE_TRANSPORT_DISCONNECTED").toPayload(),
+            id: stdioRequest?.id ?? "unknown",
+            type: "response",
+          });
+          socket.end();
+        });
     });
   }
 
@@ -161,7 +207,7 @@ export class VsCodeTransportServer implements vscode.Disposable {
     line: string,
     socket: Socket,
     descriptor: VsCodeTransportDescriptor,
-  ): Promise<void> {
+  ): Promise<RemoteExecutorCommandRequest | null> {
     let id = "unknown";
     try {
       const parsed = JSON.parse(line) as unknown;
@@ -200,6 +246,9 @@ export class VsCodeTransportServer implements vscode.Disposable {
         },
         workspaceRoot: parsed.workspaceRoot,
       };
+      if (request.operation === "stdioStart") {
+        this.#stdioSockets.set(id, { request, socket });
+      }
       const response = await vscode.commands.executeCommand<RemoteExecutorCommandResponse>(
         REMOTE_EXECUTOR_COMMAND,
         request,
@@ -211,6 +260,10 @@ export class VsCodeTransportServer implements vscode.Disposable {
         );
       }
       if (response.ok) {
+        if (request.operation === "stdioStart") {
+          writeMessage(socket, { id, type: "stdioReady" });
+          return request;
+        }
         writeMessage(socket, { id, result: response.result, type: "response" });
       } else {
         writeMessage(socket, { error: response.error, id, type: "response" });
@@ -224,5 +277,72 @@ export class VsCodeTransportServer implements vscode.Disposable {
     } finally {
       this.#pending.delete(id);
     }
+    this.#stdioSockets.delete(id);
+    return null;
+  }
+
+  async #handleStdioInput(
+    line: string,
+    request: RemoteExecutorCommandRequest,
+  ): Promise<void> {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line) as unknown;
+    } catch (error) {
+      throw new BridgeError("PROTOCOL_MISMATCH", "Invalid remote stdio input frame", undefined, {
+        cause: error,
+      });
+    }
+    if (!isTransportStdioInput(parsed) || parsed.id !== request.id) {
+      throw new BridgeError("PROTOCOL_MISMATCH", "Mismatched remote stdio input frame");
+    }
+    await this.#sendStdioControl(
+      request,
+      parsed.type === "stdioInput" ? "stdioWrite" : "stdioEnd",
+      parsed.type === "stdioInput" ? { chunk: parsed.chunk } : {},
+    );
+  }
+
+  async #sendStdioControl(
+    request: RemoteExecutorCommandRequest,
+    operation: "stdioEnd" | "stdioStop" | "stdioWrite",
+    params: Record<string, unknown>,
+  ): Promise<void> {
+    const response = await vscode.commands.executeCommand<RemoteExecutorCommandResponse>(
+      REMOTE_EXECUTOR_COMMAND,
+      { ...request, operation, params },
+    );
+    if (!response?.ok) {
+      const code = response?.error?.code;
+      throw new BridgeError(
+        code ?? "REMOTE_TRANSPORT_DISCONNECTED",
+        response?.error?.message ?? "Remote stdio control request failed",
+        response?.error?.details,
+      );
+    }
+  }
+
+  #handleStdioOutput(event: RemoteStdioEvent): void {
+    const session = this.#stdioSockets.get(event.id);
+    if (!session || session.socket.destroyed) {
+      return;
+    }
+    if (event.event === "data") {
+      writeMessage(session.socket, {
+        channel: event.channel,
+        chunk: event.chunk,
+        id: event.id,
+        type: "stdioOutput",
+      });
+      return;
+    }
+    this.#stdioSockets.delete(event.id);
+    writeMessage(session.socket, {
+      exitCode: event.exitCode,
+      id: event.id,
+      signal: event.signal,
+      type: "stdioExit",
+    });
+    session.socket.end();
   }
 }

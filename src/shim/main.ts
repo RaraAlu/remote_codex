@@ -14,6 +14,9 @@ import {
 import type { BridgeConfig } from "../core/types.js";
 import { ShimProxy } from "./proxy.js";
 import { routeRemoteMcpServers } from "./remote-mcp.js";
+import { VsCodeMcpRelay } from "./vscode-mcp-relay.js";
+
+const MCP_PROXY_MODE = "mcp-proxy";
 
 async function loadOptionalConfig(path: string, audit: AuditLog): Promise<BridgeConfig | null> {
   try {
@@ -53,6 +56,13 @@ function assertExecutableIsNotShim(executable: string): void {
   }
 }
 
+function currentShimRelayLaunch(): { args: string[]; command: string } {
+  const entry = resolve(process.argv[1] ?? process.execPath);
+  return entry === resolve(process.execPath)
+    ? { args: [], command: process.execPath }
+    : { args: [entry], command: process.execPath };
+}
+
 async function waitForSessionConfig(path: string, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (true) {
@@ -76,6 +86,9 @@ async function main(): Promise<number> {
   assertExecutableIsNotShim(fallbackExecutable);
   const configPath = activeBridgeConfigPath();
   if (!configPath) {
+    if (args[0] === MCP_PROXY_MODE) {
+      throw new BridgeError("INVALID_CONFIG", "Remote MCP relay has no active Bridge session");
+    }
     return await passthrough(fallbackExecutable, args);
   }
 
@@ -89,6 +102,17 @@ async function main(): Promise<number> {
     process.env.CODEX_BRIDGE_CODEX_EXECUTABLE || config?.codexExecutable || fallbackExecutable,
   );
   assertExecutableIsNotShim(codexExecutable);
+
+  if (args[0] === MCP_PROXY_MODE) {
+    if (!config || config.connectionMode !== "vscode-remote" || !args[1]) {
+      throw new BridgeError("INVALID_CONFIG", "Remote MCP relay configuration is unavailable");
+    }
+    return await new VsCodeMcpRelay({
+      args: args.slice(2),
+      config,
+      executable: args[1],
+    }).run();
+  }
 
   if (!args.includes("app-server")) {
     return await passthrough(codexExecutable, args);
@@ -110,6 +134,7 @@ async function main(): Promise<number> {
       appServerArgs: args,
       codexExecutable,
       config,
+      relay: currentShimRelayLaunch(),
     });
     appServerArgs = routing.appServerArgs;
     localMcpServers = routing.localServers;

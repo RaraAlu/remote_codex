@@ -3,8 +3,9 @@ import type { BridgeErrorPayload } from "./types.js";
 export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
 export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
-export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 2;
+export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 3;
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
+export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
 export interface RemoteExecutorPing {
   protocolVersion: typeof REMOTE_EXECUTOR_PROTOCOL_VERSION;
@@ -18,7 +19,11 @@ export type RemoteExecutorOperation =
   | "listTree"
   | "probe"
   | "readFile"
-  | "search";
+  | "search"
+  | "stdioEnd"
+  | "stdioStart"
+  | "stdioStop"
+  | "stdioWrite";
 
 export interface RemoteExecutorCommandRequest {
   hostId: string;
@@ -45,12 +50,38 @@ export interface RemoteOutputEvent {
   id: string;
 }
 
+export type RemoteStdioEvent =
+  | {
+      channel: "stderr" | "stdout";
+      chunk: string;
+      event: "data";
+      id: string;
+    }
+  | {
+      event: "exit";
+      exitCode: number | null;
+      id: string;
+      signal: string | null;
+    };
+
 export interface TransportRequest extends RemoteExecutorCommandRequest {
   token: string;
 }
 
+export type TransportStdioInput =
+  | { chunk: string; id: string; type: "stdioInput" }
+  | { id: string; type: "stdioEnd" };
+
 export type TransportMessage =
   | { channel: "stderr" | "stdout"; chunk: string; id: string; type: "output" }
+  | { channel: "stderr" | "stdout"; chunk: string; id: string; type: "stdioOutput" }
+  | { id: string; type: "stdioReady" }
+  | {
+      exitCode: number | null;
+      id: string;
+      signal: string | null;
+      type: "stdioExit";
+    }
   | {
       error?: BridgeErrorPayload;
       id: string;
@@ -67,6 +98,39 @@ export function isRemoteOutputEvent(value: unknown): value is RemoteOutputEvent 
     typeof event.id === "string" &&
     typeof event.chunk === "string" &&
     (event.channel === "stdout" || event.channel === "stderr")
+  );
+}
+
+export function isRemoteStdioEvent(value: unknown): value is RemoteStdioEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const event = value as Record<string, unknown>;
+  if (typeof event.id !== "string") {
+    return false;
+  }
+  if (event.event === "data") {
+    return (
+      typeof event.chunk === "string" &&
+      (event.channel === "stdout" || event.channel === "stderr")
+    );
+  }
+  return (
+    event.event === "exit" &&
+    (event.exitCode === null || typeof event.exitCode === "number") &&
+    (event.signal === null || typeof event.signal === "string")
+  );
+}
+
+export function isTransportStdioInput(value: unknown): value is TransportStdioInput {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const input = value as Record<string, unknown>;
+  return (
+    typeof input.id === "string" &&
+    ((input.type === "stdioInput" && typeof input.chunk === "string") ||
+      input.type === "stdioEnd")
   );
 }
 
@@ -103,6 +167,7 @@ export function isTransportRequest(value: unknown): value is TransportRequest {
       "probe",
       "readFile",
       "search",
+      "stdioStart",
     ].includes(request.operation) &&
     Boolean(request.params) &&
     typeof request.params === "object" &&

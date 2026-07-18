@@ -585,9 +585,14 @@ Bridge 自有动态工具可在返回官方界面前投影为标准 `commandExec
 
 本地 app-server 配置的 MCP、App 和 Connector 服务继续允许远程工作区任务调用。
 Bridge 在 Remote SSH 窗口中扫描本机 MCP，但只在以下条件全部满足时把
-stdio 服务进程通过当前 SSH 目标启动：配置不含环境变量和本地 `cwd`、命令不是
+stdio 服务进程通过当前 Bridge 目标启动：配置不含环境变量和本地 `cwd`、命令不是
 包管理器或通用运行时、远端可探测到同名直接可执行文件。HTTP 服务和不满足条件的
 stdio 服务继续留在本机，不得向远端复制 Token 或环境变量。
+
+符合条件的 stdio MCP 必须使用与具体服务无关的双向字节流通道。默认
+`vscode-remote` 模式复用当前 VS Code Remote SSH 连接，由本地 relay、窗口级认证 IPC
+和 Remote Executor 长生命周期进程共同转发 stdin/stdout/stderr；回退 `openssh` 模式
+可使用独立 SSH stdio 中转。通道断开或窗口关闭时必须终止对应远端子进程。
 
 MCP 访问范围必须可按窗口配置。默认模式保留已有启用状态和审批策略；显式全部访问
 模式应为当前 app-server 启用全部已配置 MCP、清空工具禁用列表，并把服务默认工具

@@ -265,6 +265,17 @@ export class VsCodeRemoteExecutor extends OpenSshExecutor {
           }
           return;
         }
+        if (message.type !== "response") {
+          finish(() =>
+            reject(
+              new BridgeError(
+                "PROTOCOL_MISMATCH",
+                "VS Code remote transport returned an unexpected stream frame",
+              ),
+            ),
+          );
+          return;
+        }
         if (message.error) {
           finish(() =>
             reject(

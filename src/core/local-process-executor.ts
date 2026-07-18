@@ -49,7 +49,7 @@ class TailCapture {
   }
 }
 
-function remoteProcessEnvironment(
+export function remoteProcessEnvironment(
   changes: Record<string, string | null> | undefined,
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
