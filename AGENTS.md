@@ -28,3 +28,9 @@
 - Run targeted tests while iterating, then `npm run check` before packaging a release candidate.
 - For integration fixes, verify the installed VSIX in a real Remote SSH window and inspect both the Codex log and Bridge audit log.
 - Confirm that task creation reaches the shim and that project operations are recorded as remote operations before committing the integration fix.
+
+## Generated Artifacts
+
+- Do not use `dist/` as an archive. Remove historical versioned VSIX files and keep only the latest Controller packages for both `win32-x64` and `linux-x64`, the latest versioned Remote Executor package, and the current unversioned build outputs required for packaging.
+- Derive the retained Controller version from the root `package.json` and the retained Executor version from `remote-executor/package.json`; do not delete the matching current artifacts.
+- After cleanup or packaging, verify that both current-platform Controller VSIX files, the matching versioned Executor VSIX, and `codex-remote-bridge-executor.vsix` remain in `dist/`.
