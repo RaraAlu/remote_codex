@@ -12,11 +12,10 @@ import {
   bridgeControlDir,
 } from "../core/locations.js";
 import type { BridgeConfig } from "../core/types.js";
+import { parseMcpProxyInvocation } from "./mcp-proxy-invocation.js";
 import { ShimProxy } from "./proxy.js";
 import { routeRemoteMcpServers } from "./remote-mcp.js";
 import { VsCodeMcpRelay } from "./vscode-mcp-relay.js";
-
-const MCP_PROXY_MODE = "mcp-proxy";
 
 async function loadOptionalConfig(path: string, audit: AuditLog): Promise<BridgeConfig | null> {
   try {
@@ -56,11 +55,15 @@ function assertExecutableIsNotShim(executable: string): void {
   }
 }
 
-function currentShimRelayLaunch(): { args: string[]; command: string } {
+function currentShimRelayLaunch(configPath: string): {
+  args: string[];
+  command: string;
+  sessionConfigPath: string;
+} {
   const entry = resolve(process.argv[1] ?? process.execPath);
   return entry === resolve(process.execPath)
-    ? { args: [], command: process.execPath }
-    : { args: [entry], command: process.execPath };
+    ? { args: [], command: process.execPath, sessionConfigPath: configPath }
+    : { args: [entry], command: process.execPath, sessionConfigPath: configPath };
 }
 
 async function waitForSessionConfig(path: string, timeoutMs = 5_000): Promise<void> {
@@ -80,13 +83,14 @@ async function waitForSessionConfig(path: string, timeoutMs = 5_000): Promise<vo
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
+  const mcpProxy = parseMcpProxyInvocation(args);
   const fallbackExecutable = resolveCodexExecutable(
     process.env.CODEX_BRIDGE_CODEX_EXECUTABLE || "codex",
   );
   assertExecutableIsNotShim(fallbackExecutable);
-  const configPath = activeBridgeConfigPath();
+  const configPath = mcpProxy?.configPath ?? activeBridgeConfigPath();
   if (!configPath) {
-    if (args[0] === MCP_PROXY_MODE) {
+    if (mcpProxy) {
       throw new BridgeError("INVALID_CONFIG", "Remote MCP relay has no active Bridge session");
     }
     return await passthrough(fallbackExecutable, args);
@@ -103,14 +107,14 @@ async function main(): Promise<number> {
   );
   assertExecutableIsNotShim(codexExecutable);
 
-  if (args[0] === MCP_PROXY_MODE) {
-    if (!config || config.connectionMode !== "vscode-remote" || !args[1]) {
+  if (mcpProxy) {
+    if (!config || config.connectionMode !== "vscode-remote") {
       throw new BridgeError("INVALID_CONFIG", "Remote MCP relay configuration is unavailable");
     }
     return await new VsCodeMcpRelay({
-      args: args.slice(2),
+      args: mcpProxy.args,
       config,
-      executable: args[1],
+      executable: mcpProxy.executable,
     }).run();
   }
 
@@ -134,7 +138,7 @@ async function main(): Promise<number> {
       appServerArgs: args,
       codexExecutable,
       config,
-      relay: currentShimRelayLaunch(),
+      relay: currentShimRelayLaunch(configPath),
     });
     appServerArgs = routing.appServerArgs;
     localMcpServers = routing.localServers;

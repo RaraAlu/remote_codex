@@ -198,7 +198,11 @@ describe("remote MCP routing", () => {
       listServers: async () => [
         stdioServer("codegraph", "codegraph", { args: ["serve", "--mcp"] }),
       ],
-      relay: { args: [], command: "C:\\bridge\\codex-bridge-shim.exe" },
+      relay: {
+        args: [],
+        command: "C:\\bridge\\codex-bridge-shim.exe",
+        sessionConfigPath: "C:\\bridge\\sessions\\123.json",
+      },
       remoteExecutableAvailable: async () => true,
       validateConfigOverrides: async () => true,
     });
@@ -212,6 +216,8 @@ describe("remote MCP routing", () => {
     );
     expect(JSON.parse(argsOverride?.split("=").slice(1).join("=") ?? "[]")).toEqual([
       "mcp-proxy",
+      "--session-config",
+      "C:\\bridge\\sessions\\123.json",
       "codegraph",
       "serve",
       "--mcp",

@@ -6,7 +6,7 @@
 
 - 本地：Windows x64，VS Code `1.129.1`
 - 官方扩展：`openai.chatgpt@26.707.91948`
-- Bridge Controller：`0.2.6`
+- Bridge Controller：`0.2.7`
 - Remote Executor：`0.2.5`，协议 v3
 - 连接模式：`vscode-remote`
 - 目标：`xj-member-42013:/root/work/train/MimicLite`
@@ -17,9 +17,14 @@
   恢复为 `ready`。
 - Shim 审计记录 `remoteMcpServers=["codegraph"]`，并把本机 MCP command 覆盖为当前
   Bridge Shim 的 `mcp-proxy` 子命令；`node_repl` 等不符合远端路由条件的服务仍在本机。
-- 直接通过本地 relay 发起 MCP `initialize` 和 `tools/list` 成功，远端返回
+- `0.2.6` 的直接 relay 回环虽然成功，但官方 Codex Core 会清理 MCP 子进程中的
+  `CODEX_BRIDGE_*` 环境变量，导致 app-server 显示 `startup_complete=true`、
+  `has_cached_tools=false`，没有真正注册 CodeGraph 工具。
+- `0.2.7` 将会话配置绝对路径显式放入 `mcp-proxy --session-config` 参数；受控环境探针
+  确认所有 `CODEX_BRIDGE_*` 变量均为空时，MCP `initialize` 和 `tools/list` 仍然成功并返回
   `codegraph_explore`。
-- 继续发送 `tools/call`，调用 `codegraph_explore` 查询 `command.py` 成功；响应来自
+- 通过 Codex Core `exec` 的真实 MCP tool call 调用 `codegraph_explore` 查询
+  `command.py` 成功；响应来自
   `/root/work/train/MimicLite` 的远端索引，返回 17 个符号、3 个文件且 `isError=false`。
 - 全程没有建立第二条 OpenSSH 连接，也没有向远端复制 SSH 密码、OpenAI Token 或本机
   MCP 环境变量。

@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | VS Code | `1.129.1`（Windows x64） | 扩展引擎最低 `^1.96.2` | 本机构建通过 |
 | 官方 Codex 扩展 | `openai.chatgpt@26.707.91948` | 全局 Shim，本地 Extension Host，按窗口会话激活 | Remote SSH 接管、本地窗口透传和任务创建已验证 |
-| Bridge Controller | `0.2.6`，Windows x64、Linux x64 | 同一扩展 ID，分别发布 `win32-x64` 和 `linux-x64` VSIX | Windows 包构建、安装和真实 Remote SSH 通用 MCP 回环通过 |
+| Bridge Controller | `0.2.7`，Windows x64、Linux x64 | 同一扩展 ID，分别发布 `win32-x64` 和 `linux-x64` VSIX | 环境清理条件下的 Codex Core MCP 工具调用回环通过 |
 | Remote Executor | `0.2.5`，Linux x64 | Workspace 扩展；通过当前 Remote SSH 通道自动部署，不含 Codex 或凭据 | 协议 v3 的握手、通用 stdio MCP 初始化、工具枚举和真实工具调用通过 |
 | Codex CLI/app-server | `0.144.5` | 必须与生成协议精确匹配；按平台发现原生可执行文件 | Windows 原生 npm CLI 的版本、`initialize`、`thread/list` 和 `thread/start` 冒烟通过 |
 | Remote SSH | `0.124.0` | 使用 `remote.extensionKind` 探针设置 | `xj-member-42013` 真实窗口的工作区操作与 MCP 回环通过 |
@@ -23,6 +23,10 @@ Shim 的已知请求白名单逐项比对；出现新请求时测试失败，而
 其他 MCP 和本地窗口仍使用用户原有配置。当前官方扩展内置的 `0.145.0-alpha.18`
 不会被 0.2.0 选作 Bridge 后端；必须安装或指定精确的 `0.144.5`。升级 app-server 时
 这些字段必须一并复核。
+
+Codex `0.144.5` 启动 stdio MCP 时不会继承 `CODEX_BRIDGE_*` 环境变量。Controller
+`0.2.7` 起在 MCP override 中显式传递本地会话配置路径，relay 再从受限文件读取 IPC
+端点和随机令牌；仅设置父进程环境变量的 `0.2.6` 不足以让官方 app-server 注册工具。
 
 `openai.chatgpt@26.715.31925` 会对本地 Extension Host 中的 Remote SSH 工作区 URI 执行
 新的本地项目校验，当前组合创建任务时返回 `Unknown local project`，因此不在支持矩阵

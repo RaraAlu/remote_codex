@@ -87,7 +87,7 @@ export interface McpRoutingOptions {
   codexExecutable: string;
   config: BridgeConfig;
   listServers?: () => Promise<CodexMcpServer[]>;
-  relay?: { args: string[]; command: string };
+  relay?: { args: string[]; command: string; sessionConfigPath: string };
   remoteExecutableAvailable?: (executable: string) => Promise<boolean>;
   validateConfigOverrides?: (overrides: readonly string[]) => Promise<boolean>;
 }
@@ -330,6 +330,8 @@ export async function routeRemoteMcpServers(
             args: [
               ...options.relay.args,
               "mcp-proxy",
+              "--session-config",
+              options.relay.sessionConfigPath,
               route.executable,
               ...route.args,
             ],
