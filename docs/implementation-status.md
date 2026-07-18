@@ -1,6 +1,6 @@
 # 实施状态
 
-更新日期：2026-07-17
+更新日期：2026-07-18
 
 ## 阶段 A：协议与运行位置探针
 
@@ -9,7 +9,14 @@
 | `chatgpt.cliExecutable` 入口 | 已实现配置、备份和恢复 | `OfficialSettingsManager` |
 | Remote SSH 自动配置与启动 | 已实现；首次设置变更自动重载一次 | `BridgeController.initialize` |
 | 本地窗口隔离 | 已实现；无 Remote SSH 会话标记时 Shim 完全透传 | `activeBridgeConfigPath` |
-| 本地 Codex 常见路径探测 | 已实现并测试 | `codexExecutableCandidates` |
+| 本地 Codex 常见路径探测 | 已按 Windows/Linux 平台实现并测试 | `codexExecutableCandidates` |
+| Windows 原生 Shim | Node SEA `codex-bridge-shim.exe` 已构建并通过真实 Codex 冒烟 | `scripts/build.mjs` |
+| 双平台发布 | 同一扩展 ID 分别生成 `win32-x64` 和 `linux-x64` VSIX | `scripts/package.mjs` |
+| VS Code Remote 通道 | 已实现本机 IPC、远端 Workspace Executor 和内嵌 VSIX 自动部署；真实窗口回环继续验收 | `VsCodeTransportServer` / `LocalProcessExecutor` |
+| 密码/密钥认证复用 | `vscode-remote` 模式不新建 SSH，复用当前 Remote SSH 窗口认证 | `codexRemoteBridge.connectionMode` |
+| 稳定启动器安装 | 已安装到版本与内容哈希隔离的本地状态目录 | `installBridgeShim` |
+| 跨平台旧路径迁移 | 已识别 Bridge 旧版/异平台遗留路径，不把无效路径备份为用户原值 | `OfficialSettingsManager` |
+| 本地 OpenSSH 探测 | Windows 系统 OpenSSH、显式配置和 Linux 命令名均已覆盖 | `sshExecutableCandidates` |
 | 强制官方扩展使用本地 UI Host | 已在 xj-member 确认 Shim 和 app-server 为本地进程 | `code --status` |
 | Codex Webview 位置恢复 | 每工作区首次就绪时仅重置 Codex 视图 | `repairCodexViewLocation` |
 | app-server `initialize` 代理 | 已按官方前置全局参数通过真实 app-server 冒烟测试 | `npm run smoke:shim` |
@@ -45,7 +52,7 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 结构化 `argv` 非交互命令 | 已实现；仅通过 OpenSSH 在远端执行 |
+| 结构化 `argv` 非交互命令 | 已实现；默认通过 Remote Extension Host，OpenSSH 为回退 |
 | 官方命令审批 | 已实现；非完全访问模式显示主机、规范化 `cwd`、完整命令和环境变更 |
 | 命令输出流 | 已映射为 `item/commandExecution/outputDelta` |
 | 权限模式继承 | 已按线程映射 `full-access`/`approvalPolicy=never`，其余模式失败关闭 |
@@ -55,7 +62,7 @@
 | 断线结果确认和幂等 | 未实现 |
 | Core 内置本地工具硬阻断 | 未实现 |
 
-阶段 C 尚未关闭。0.1.11 提供与官方权限模式一致的远程命令执行；写操作、取消、断线恢复
+阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行；写操作、取消、断线恢复
 和本地执行硬阻断完成前，不得用于无人值守的有副作用任务。
 
 ## 本地 MCP 边界

@@ -1,8 +1,9 @@
 # Codex Remote Bridge
 
 这是 `docs/codex-vscode-remote-bridge-requirements.md` 的可行性验证实现。目标是让官方
-Codex VS Code 扩展和 Codex app-server 留在可联网的本地 Ubuntu，同时只通过
-OpenSSH 访问离线远程 Ubuntu 工作区。
+Codex VS Code 扩展和 Codex app-server 留在可联网的本地 Windows x64 或 Ubuntu x64，
+默认复用 VS Code Remote SSH 已认证的远程通道访问离线 Ubuntu 工作区；独立 OpenSSH
+执行器保留为回退模式。
 
 > 当前版本是读操作和受审批非交互命令的技术原型，不是完整 MVP。远程写入、运行中
 > 取消和断线恢复尚未完成，不要用于无人值守的生产训练。
@@ -16,7 +17,12 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
   配置时接管；普通本地窗口完全透传官方 Codex。
 - 每个工作区首次就绪时把 Codex Webview 恢复到默认右侧栏，修复旧布局中的灰色面板。
 - 修改 `chatgpt.cliExecutable` 和 `remote.extensionKind` 前保存原值，并提供恢复命令。
-- 默认命令不在 VS Code 的 `PATH` 时，自动探测 `~/.local/bin/codex` 等常见本地路径。
+- 按本地平台自动探测 Codex：Windows 优先发现原生 npm `codex.exe` 和官方扩展内置
+  CLI，Linux 探测 `~/.local/bin/codex` 等常见路径；不会把另一平台的路径写死到设置。
+- Windows 使用 Node SEA 打包的原生 `codex-bridge-shim.exe`，Linux 使用 CJS Shim；
+  启动器安装到按版本和内容哈希隔离的本地状态目录，扩展升级后路径仍然有效。
+- 自动识别并迁移 Bridge 旧版本或另一平台遗留的 `chatgpt.cliExecutable`，同时只恢复
+  Bridge 实际接管过的官方设置，不覆盖用户后来新增的其他扩展映射。
 - CLI Shim 代理 app-server JSONL，固定本地只读控制目录，并注入实验协议能力。
 - 新线程注入远程读取、单层/有界目录树、文本搜索、`git status` 和受审批命令工具。
 - Bridge 自有工具在返回官方界面前投影为原生 `commandExecution` 项，使用本地 Codex
@@ -24,16 +30,22 @@ OpenSSH 访问离线远程 Ubuntu 工作区。
 - `remote_exec` 只接受结构化 `argv`；“完全访问”模式不重复询问，其他权限模式使用
   官方命令审批并显示远程主机、规范化 `cwd`、完整命令和环境变量变更。
 - stdout/stderr 实时转发；自动放行和人工审批结果都写入本地审计日志。
-- OpenSSH 执行器使用结构化 `argv`、严格主机密钥校验、连接超时、取消和输出上限。
+- 默认 `vscode-remote` 模式自动部署一个不含 Codex 和凭据的 Workspace Executor，
+  通过 VS Code Remote Extension Host 执行结构化操作；密码、公钥和 Agent 认证均由
+  已建立的 Remote SSH 窗口处理，Bridge 不再发起第二次认证。
+- 本地 Shim 与 UI 扩展通过带随机会话令牌的本机 Named Pipe/Unix socket 通信；UI
+  扩展再通过 VS Code 命令通道调用远端 Executor。
+- 回退 `openssh` 模式使用结构化 `argv`、严格主机密钥校验、连接超时和输出上限。
 - 直连主机可单独配置 SSH 用户、端口和可选 IdentityFile；私钥内容不由 Bridge 读取。
-- 同一 `connectionId` 使用受限 ControlMaster 复用，并在停止时显式关闭。
+- Linux 上同一 `connectionId` 使用受限 ControlMaster 复用，并在停止时显式关闭；
+  Windows 为兼容系统 OpenSSH，使用独立 SSH 会话。
 - 路径同时经过词法限制和远端 `realpath` 校验，符号链接不能逃逸工作区。
 - 远端缺少 `rg` 时自动使用不跟随目录符号链接的 GNU `grep` 搜索。
 - SSH 子进程只继承必要环境变量，不继承 Codex、OpenAI 或其他应用凭据。
 - 未知 app-server 服务端请求默认拒绝；操作审计日志只保存在本地并结构化脱敏。
 - 协议子集由本机 Codex `0.144.5` 生成，运行时要求精确版本匹配。
-- Remote SSH 窗口自动扫描本机 Codex MCP：本机能力继续留在本机，可安全远端启动
-  的工作区 stdio MCP 按当前主机和工作区改为 SSH 中转。
+- Remote SSH 窗口自动扫描本机 Codex MCP：本机能力继续留在本机；仅回退 OpenSSH
+  模式会把满足安全条件的工作区 stdio MCP 改为 SSH 中转。
 - 可按窗口切换 MCP 访问范围；显式选择 `all` 时启用全部已配置服务、清空工具禁用
   列表，并将服务默认工具审批设为 `approve`，不改写全局 Codex 配置。
 
@@ -68,6 +80,8 @@ npm run check
 
 `npm run check` 依次执行 TypeScript 类型检查、单元/集成测试、扩展和 Shim 构建、
 本地窗口透传与 Remote SSH 窗口初始化、线程列表和线程创建冒烟测试，以及 VSIX 打包。
+当前平台的 VSIX 使用 `npm run package`；在 Windows 构建机上可用
+`npm run package:all` 同时产出 Windows x64 和 Linux x64 两个目标包。
 
 真实远端只读验收使用环境变量提供目标，不把主机和私钥路径写入仓库：
 
@@ -84,8 +98,16 @@ npm run test:remote
 
 生成物：
 
+- `dist/codex-bridge-shim.exe`（Windows 构建）
 - `dist/codex-bridge-shim.cjs`
-- `dist/codex-remote-bridge.vsix`
+- `dist/codex-remote-bridge-<version>-win32-x64.vsix`
+- `dist/codex-remote-bridge-<version>-linux-x64.vsix`
+- `dist/codex-remote-bridge-executor-<version>-linux-x64.vsix`
+
+它们属于同一个扩展 ID 和同一套源码，只是针对本地 Extension Host 平台的两个分发
+产物。Controller VSIX 内嵌匹配版本的远端 Executor，并在 Remote SSH 窗口中通过
+VS Code 文件系统和扩展安装服务自动部署。Windows SEA 启动器包含 Node 运行时，因此
+VSIX 明显大于 Linux 包，并且当前构建未做代码签名；发布前应加入正式签名流程。
 
 重新生成匹配当前 Codex 版本的协议子集：
 
@@ -97,9 +119,10 @@ npm run protocol:generate
 
 ## 试用流程
 
-1. 安装 `dist/codex-remote-bridge.vsix` 到本地 VS Code。
+1. 按本地平台安装对应 VSIX：Windows 使用 `win32-x64`，Ubuntu 使用 `linux-x64`。
 2. 用 Remote SSH 打开单个远程工作区。
-3. Bridge 自动保存当前主机和根目录；首次接管官方设置时窗口自动重载一次。
+3. Bridge 自动保存当前主机和根目录、部署远端 Executor；首次接管设置或安装
+   Executor 时窗口会自动重载。
 4. 等待状态栏显示 `Codex: local -> <host> (ready)`。
 5. 运行 `Codex Bridge: Run Diagnostics`，确认本地扩展宿主、官方设置、远端身份和
    `remote.codexInstalled=false`。
@@ -114,9 +137,17 @@ npm run protocol:generate
 打开一个远程根目录时运行。关闭该设置后仍可使用 Configure 和 Start 命令手动控制。
 普通本地工作区即使同时打开，也不会读取远程 Bridge 配置或重写 app-server 消息。
 
-本地配置默认位于 `~/.config/codex-remote-bridge/config.json`，审计日志默认位于
-`~/.local/state/codex-remote-bridge/audit.jsonl`。Remote SSH 窗口会额外创建按本地
-Extension Host PID 隔离的会话配置；配置不保存密码、私钥或 Token。
+本地配置和审计日志的默认位置如下：
+
+- Windows：`%APPDATA%\codex-remote-bridge\config.json` 和
+  `%LOCALAPPDATA%\codex-remote-bridge\audit.jsonl`。
+- Linux：`~/.config/codex-remote-bridge/config.json` 和
+  `~/.local/state/codex-remote-bridge/audit.jsonl`。
+
+Remote SSH 窗口会额外创建按本地 Extension Host PID 隔离的会话配置；其中只保存
+本机 IPC 端点和随机会话令牌，不保存 SSH 密码、私钥或 OpenAI Token。默认连接模式为
+`vscode-remote`；需要独立连接时可选择 `openssh`，Windows 会自动发现系统 OpenSSH，
+也可通过 `codexRemoteBridge.sshExecutable` 指定路径或命令名。
 
 更多边界与验收信息见 `docs/implementation-status.md`、`docs/compatibility.md` 和
 `docs/security-notes.md`。
