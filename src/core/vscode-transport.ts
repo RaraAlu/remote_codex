@@ -2,7 +2,14 @@ import type { BridgeErrorPayload } from "./types.js";
 
 export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
+export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
+export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 2;
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
+
+export interface RemoteExecutorPing {
+  protocolVersion: typeof REMOTE_EXECUTOR_PROTOCOL_VERSION;
+  remoteName: "ssh-remote";
+}
 
 export type RemoteExecutorOperation =
   | "canonicalPath"
@@ -60,6 +67,16 @@ export function isRemoteOutputEvent(value: unknown): value is RemoteOutputEvent 
     typeof event.id === "string" &&
     typeof event.chunk === "string" &&
     (event.channel === "stdout" || event.channel === "stderr")
+  );
+}
+
+export function isRemoteExecutorPing(value: unknown): value is RemoteExecutorPing {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const ping = value as Record<string, unknown>;
+  return (
+    ping.protocolVersion === REMOTE_EXECUTOR_PROTOCOL_VERSION && ping.remoteName === "ssh-remote"
   );
 }
 

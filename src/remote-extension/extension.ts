@@ -5,10 +5,13 @@ import type { ExecuteOptions } from "../core/ssh-executor.js";
 import type { BridgeConfig } from "../core/types.js";
 import {
   REMOTE_EXECUTOR_COMMAND,
+  REMOTE_EXECUTOR_PING_COMMAND,
+  REMOTE_EXECUTOR_PROTOCOL_VERSION,
   type RemoteExecutorCommandRequest,
   type RemoteExecutorCommandResponse,
   type RemoteOutputEvent,
 } from "../core/vscode-transport.js";
+import { matchesRemoteWorkspaceRoot } from "./workspace.js";
 
 const executors = new Map<string, LocalProcessExecutor>();
 
@@ -44,7 +47,7 @@ function validateWorkspace(request: RemoteExecutorCommandRequest): void {
     );
   }
   const matches = vscode.workspace.workspaceFolders?.some(
-    (folder) => folder.uri.scheme === "vscode-remote" && folder.uri.path === request.workspaceRoot,
+    (folder) => matchesRemoteWorkspaceRoot(folder.uri, request.workspaceRoot),
   );
   if (!matches) {
     throw new BridgeError(
@@ -180,6 +183,10 @@ async function executeRequest(
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(REMOTE_EXECUTOR_COMMAND, executeRequest),
+    vscode.commands.registerCommand(REMOTE_EXECUTOR_PING_COMMAND, () => ({
+      protocolVersion: REMOTE_EXECUTOR_PROTOCOL_VERSION,
+      remoteName: vscode.env.remoteName,
+    })),
   );
 }
 
