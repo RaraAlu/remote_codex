@@ -1,5 +1,6 @@
 import type { BridgeConfig, WorkspaceRootConfig } from "../core/types.js";
 import { REMOTE_DYNAMIC_TOOLS, REMOTE_TOOL_NAMES } from "./dynamic-tools.js";
+import { REMOTE_PERMISSION_PROFILE_ID } from "./local-core-policy.js";
 import { isRecord, type RpcMessage } from "./rpc.js";
 
 const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
@@ -70,12 +71,23 @@ function mergeDynamicTools(existing: unknown): unknown[] {
   return [...current, ...REMOTE_DYNAMIC_TOOLS];
 }
 
-function withoutPermissionProfile(params: Record<string, unknown>): Record<string, unknown> {
+function withLocalCorePolicy(
+  params: Record<string, unknown>,
+  config: BridgeConfig | null,
+): Record<string, unknown> {
   const rewritten = { ...params };
-  if (params.permissions === "full-access" && params.approvalPolicy === undefined) {
+  delete rewritten.config;
+  delete rewritten.sandbox;
+  delete rewritten.sandboxPolicy;
+  if (config) {
     rewritten.approvalPolicy = "never";
+    rewritten.permissions = REMOTE_PERMISSION_PROFILE_ID;
+  } else {
+    if (params.permissions === "full-access" && params.approvalPolicy === undefined) {
+      rewritten.approvalPolicy = "never";
+    }
+    delete rewritten.permissions;
   }
-  delete rewritten.permissions;
   return rewritten;
 }
 
@@ -108,10 +120,10 @@ export function rewriteClientMessage(
     return {
       ...message,
       params: {
-        ...withoutPermissionProfile(message.params),
+        ...withLocalCorePolicy(message.params, config),
         cwd: controlDir,
         runtimeWorkspaceRoots: [config ? remotePrimaryRoot(config).path : controlDir],
-        sandbox: "read-only",
+        ...(config ? {} : { sandbox: "read-only" }),
         ...(config
           ? {
               developerInstructions: mergeInstructions(
@@ -129,10 +141,10 @@ export function rewriteClientMessage(
     return {
       ...message,
       params: {
-        ...withoutPermissionProfile(message.params),
+        ...withLocalCorePolicy(message.params, config),
         cwd: controlDir,
         runtimeWorkspaceRoots: [config ? remotePrimaryRoot(config).path : controlDir],
-        sandbox: "read-only",
+        ...(config ? {} : { sandbox: "read-only" }),
         ...(config
           ? {
               developerInstructions: mergeInstructions(
@@ -149,13 +161,17 @@ export function rewriteClientMessage(
     return {
       ...message,
       params: {
-        ...withoutPermissionProfile(message.params),
+        ...withLocalCorePolicy(message.params, config),
         cwd: controlDir,
         runtimeWorkspaceRoots: [config ? remotePrimaryRoot(config).path : controlDir],
-        sandboxPolicy: {
-          type: "readOnly",
-          networkAccess: false,
-        },
+        ...(config
+          ? {}
+          : {
+              sandboxPolicy: {
+                type: "readOnly",
+                networkAccess: false,
+              },
+            }),
         ...(config
           ? {
               additionalContext: mergeAdditionalContext(
@@ -164,6 +180,35 @@ export function rewriteClientMessage(
               ),
             }
           : {}),
+      },
+    };
+  }
+
+  if (message.method === "thread/settings/update") {
+    return {
+      ...message,
+      params: {
+        ...withLocalCorePolicy(message.params, config),
+        cwd: controlDir,
+      },
+    };
+  }
+
+  if (message.method === "thread/fork") {
+    return {
+      ...message,
+      params: {
+        ...withLocalCorePolicy(message.params, config),
+        cwd: controlDir,
+        runtimeWorkspaceRoots: [config ? remotePrimaryRoot(config).path : controlDir],
+        ...(config
+          ? {
+              developerInstructions: mergeInstructions(
+                message.params.developerInstructions,
+                config,
+              ),
+            }
+          : { sandbox: "read-only" }),
       },
     };
   }

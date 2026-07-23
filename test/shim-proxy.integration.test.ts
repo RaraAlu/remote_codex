@@ -1,11 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
 import type { SpawnProcess } from "../src/core/ssh-executor.js";
+import { BLOCKED_LOCAL_CLIENT_METHODS } from "../src/shim/local-core-policy.js";
 import { ShimProxy } from "../src/shim/proxy.js";
 import { isRecord } from "../src/shim/rpc.js";
 
@@ -13,8 +14,25 @@ function fakeAppServer(): ChildProcessWithoutNullStreams {
   const source = `
     const readline = require("node:readline");
     const lines = readline.createInterface({ input: process.stdin });
+    let pendingApprovalClientId = null;
     lines.on("line", (line) => {
       const message = JSON.parse(line);
+      if (message.method === "bridge/testLocalApproval") {
+        pendingApprovalClientId = message.id;
+        process.stdout.write(JSON.stringify({
+          id: "local-core-approval",
+          method: "item/commandExecution/requestApproval",
+          params: { command: "cat /tmp/local-project-decoy" },
+        }) + "\\n");
+        return;
+      }
+      if (message.id === "local-core-approval") {
+        process.stdout.write(JSON.stringify({
+          id: pendingApprovalClientId,
+          result: { receivedApprovalResponse: message },
+        }) + "\\n");
+        return;
+      }
       if (message.id !== undefined) {
         process.stdout.write(JSON.stringify({ id: message.id, result: { received: message } }) + "\\n");
       }
@@ -181,6 +199,164 @@ async function exerciseRemoteExecApproval(
 }
 
 describe("ShimProxy JSONL integration", () => {
+  it("rejects local Core approval requests without showing them to the client", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-bridge-local-approval-"));
+    const auditPath = join(directory, "audit.jsonl");
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const messages: Array<Record<string, unknown>> = [];
+    let buffer = "";
+    let finishResponse: (() => void) | undefined;
+    const response = new Promise<void>((resolve) => {
+      finishResponse = resolve;
+    });
+    output.setEncoding("utf8");
+    output.on("data", (chunk: string) => {
+      buffer += chunk;
+      for (;;) {
+        const newline = buffer.indexOf("\n");
+        if (newline < 0) {
+          break;
+        }
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        const message = JSON.parse(line) as Record<string, unknown>;
+        messages.push(message);
+        if (message.id === 7) {
+          finishResponse?.();
+        }
+      }
+    });
+
+    const proxy = new ShimProxy({
+      appServerArgs: ["app-server", "--stdio"],
+      auditPath,
+      codexExecutable: "fake-codex",
+      config: parseBridgeConfig({
+        host: "training-gpu",
+        workspaceRoot: "/remote/workspace",
+      }),
+      controlDir: join(directory, "control"),
+      input,
+      output,
+      errorOutput: new PassThrough(),
+      spawnCodex: () => fakeAppServer(),
+    });
+    const running = proxy.run();
+    input.write(
+      `${JSON.stringify({
+        id: 7,
+        method: "bridge/testLocalApproval",
+        params: {},
+      })}\n`,
+    );
+    await response;
+    input.end();
+    await expect(running).resolves.toBe(0);
+
+    expect(
+      messages.some(
+        (message) => message.method === "item/commandExecution/requestApproval",
+      ),
+    ).toBe(false);
+    expect(messages).toContainEqual({
+      id: 7,
+      result: {
+        receivedApprovalResponse: {
+          id: "local-core-approval",
+          error: {
+            code: -32003,
+            message:
+              "Codex Remote Bridge blocked local Core approval: item/commandExecution/requestApproval",
+          },
+        },
+      },
+    });
+    const audit = await readFile(auditPath, "utf8");
+    expect(audit).toContain('"operation":"local_core_approval.blocked"');
+    expect(audit).not.toContain("/tmp/local-project-decoy");
+  });
+
+  it("blocks every reviewed local Core request before app-server and audits only the method", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-bridge-local-core-"));
+    const auditPath = join(directory, "audit.jsonl");
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let captured = "";
+    output.setEncoding("utf8");
+    output.on("data", (chunk: string) => {
+      captured += chunk;
+    });
+
+    const proxy = new ShimProxy({
+      appServerArgs: ["app-server", "--stdio"],
+      auditPath,
+      codexExecutable: "fake-codex",
+      config: parseBridgeConfig({
+        host: "training-gpu",
+        workspaceRoot: "/remote/workspace",
+      }),
+      controlDir: join(directory, "control"),
+      input,
+      output,
+      errorOutput: new PassThrough(),
+      spawnCodex: () => fakeAppServer(),
+    });
+    const running = proxy.run();
+    const blockedMethods = [...BLOCKED_LOCAL_CLIENT_METHODS];
+    blockedMethods.forEach((method, index) => {
+      input.write(
+        `${JSON.stringify({
+          id: index + 100,
+          method,
+          params: { path: "/tmp/local-project-decoy" },
+        })}\n`,
+      );
+    });
+    input.write(
+      `${JSON.stringify({
+        id: 999,
+        method: "initialize",
+        params: { capabilities: {} },
+      })}\n`,
+    );
+    input.end();
+    await expect(running).resolves.toBe(0);
+
+    const messages = captured
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const blockedResponses = messages.filter((message) => {
+      const error = message.error;
+      return isRecord(error) && error.code === -32003;
+    });
+    expect(blockedResponses).toHaveLength(blockedMethods.length);
+    const forwarded = messages.filter((message) => isRecord(message.result));
+    expect(forwarded).toHaveLength(1);
+    expect(forwarded[0]).toMatchObject({
+      id: 999,
+      result: {
+        received: {
+          id: 999,
+          method: "initialize",
+        },
+      },
+    });
+
+    const audit = await readFile(auditPath, "utf8");
+    const auditEvents = audit
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(
+      auditEvents.filter(
+        (event) => event.operation === "local_core_request.blocked",
+      ),
+    ).toHaveLength(blockedMethods.length);
+    expect(audit).not.toContain("/tmp/local-project-decoy");
+  });
+
   it("rewrites initialize and thread placement before forwarding to app-server", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-proxy-"));
     const input = new PassThrough();

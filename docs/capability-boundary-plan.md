@@ -35,8 +35,8 @@ Shim 从受限运行时指针读取同一二进制并再次执行协议校验。
 2026-07-22 在 Linux x64 本机执行 `npm run check`：
 
 - TypeScript 类型检查通过。
-- 32 个测试文件通过，1 个真实远端条件测试文件跳过。
-- 129 项测试通过，5 项真实远端条件测试跳过，0 项失败。
+- 33 个测试文件通过，1 个真实远端条件测试文件跳过。
+- 139 项测试通过，5 项真实远端条件测试跳过，0 项失败。
 - Controller、Shim 和 Remote Executor 构建通过。
 - 插件内置 `0.145.0-alpha.27` 的本地透传、远程窗口启动和线程创建 Shim 冒烟通过；
   缺少受控运行时指针时，即使 PATH 存在系统 CLI 也失败关闭。
@@ -109,16 +109,16 @@ Shim 从受限运行时指针读取同一二进制并再次执行协议校验。
 | COMP-BUNDLED | 为插件内置 app-server 生成协议 | 已实施 | 不固定插件版本；内置 Codex 协议门禁、快照和自动化已同步 | 插件升级链路和真实界面待验证 |
 | COMP-145 | 适配外部 Codex `0.145.0` | 已完成后被取代 | CLI、协议、版本门禁、测试、Shim 冒烟和 Linux 候选包已完成 | 不再作为最终运行时或发布支持目标 |
 | COMP-OFFICIAL | 验证 `openai.chatgpt@26.715.61943` | 部分验证 | Shim 启动、已有会话恢复、Remote SSH 新任务、Bridge `ready` | 本地窗口透传、审批和生命周期证据不足 |
-| ROUTE-EXEC | 强化 Remote SSH 下的 `remote_exec` 路由 | 部分实现 | 新建/恢复线程注入提醒，动态工具描述明确 | turn 级提醒未刷新，模型仍可能选择 Core 本地工具 |
+| ROUTE-EXEC | 强化 Remote SSH 下的 `remote_exec` 路由 | 已实施 | 新建/恢复线程注入策略，每次 turn 通过独立上下文键刷新提醒，动态工具描述明确 | Core 本地工具硬阻断仍属于 SAFE-CORE |
 | MCP-ADAPTER | 通用远端 MCP 启动适配 | 已实施 | 受控适配器 ID、共享注册表、VS Code Remote/Remote Executor 与 OpenSSH stdin 控制头均已实现；CodeGraph 八工具实机通过 | 其他服务适配器和 OpenSSH 回退实机仍待按需补充 |
-| ROOT-PRIMARY | 远程工作区成为主工作目录 | 部分实施 | 配置 v2 已将当前 Remote SSH 根固定为唯一 `remote/primary`；远程命令默认 `cwd` 是该根目录 | Codex 线程仍以本地控制目录为 `cwd` 和 runtime root |
+| ROOT-PRIMARY | 远程工作区成为主工作目录 | 已实施 | 配置 v2 固定唯一 `remote/primary`；线程以本地控制目录为物理 `cwd`，以远程主根为逻辑 `runtimeWorkspaceRoots`；远程命令默认 `cwd` 是该根目录 | 官方 UI 新建/恢复、附件和当前文件仍待补测 |
 | ROOT-SECONDARY | 定义本地次级授权目录 | 部分实施 | 配置 v2 已定义并校验 `local/secondary` 根记录，但尚未提供授权入口 | 没有本地根选择、执行器、访问和撤销协议 |
 | DUAL-READ | 双端目录读取、树、搜索和状态 | 待实施 | 远端只读工具完整；Remote Executor 有路径约束 | 工具没有 `target`；Controller 没有本地授权目录执行器 |
 | DUAL-WRITE | 双端写入、补丁、重命名和删除 | 待实施 | 读取结果已返回远端 SHA-256 | 没有写工具、`expectedHash`、原子替换或统一错误语义 |
 | LIFE-CANCEL | 运行中取消 | 待实施 | 执行器底层接受 `AbortSignal`，超时能终止子进程 | app-server `turn/interrupt` 没有传到活动远端请求 |
 | LIFE-IDEMP | 幂等和断线结果确认 | 待实施 | 有 `callId`、`requestId`、`connectionId` 和 `RESULT_UNKNOWN` | 没有幂等账本、结果查询、重连确认或去重 |
 | LIFE-BACKGROUND | 后台任务 | 待实施 | MCP stdio 有长生命周期会话管理 | 普通命令没有 start/status/log/cancel 协议 |
-| SAFE-CORE | Core 本地 Shell/文件工具硬阻断 | 待实施 | 本地只读 sandbox、空控制目录、提示约束 | 提示不是强制边界，Shim 不拦截 Core 内置工具 |
+| SAFE-CORE | Core 本地 Shell/文件工具硬阻断 | 部分实施/待补测 | 专用本地拒绝权限配置已由官方 app-server 激活；Shim 阻断 25 个本地客户端请求和五类 Core 本地审批并失败审计 | 真实模型专用工具诱饵负测和官方 UI 恢复尚未完成；hook 不能作为完整强制边界 |
 | UX-REMOTE | 远程 URI、Diff 和文件跳转 | 待实施 | Bridge 工具可投影为原生 command item | 没有可打开的远程资源身份和 Diff 提供器 |
 | PACK-DUAL | 双平台产物构建与收集 | 待实施 | 两个平台分别有原生 Shim 构建逻辑 | Linux 无法生成 Windows SEA，`package:all` 依赖预存 `.exe` |
 | VERIFY-P0 | 完整 P0 验收 | 待补测 | 历史 Windows 到 Ubuntu 主链路有部分证据 | 当前兼容集合、取消、写入、安全失败和诱饵文件未闭环 |
@@ -261,13 +261,24 @@ VS Code 工作区 URI。2026-07-22 对官方扩展内置 `0.145.0-alpha.27` app-
 已有：
 
 - app-server 被放在空且只读的本地控制目录。
-- thread/turn sandbox 被固定为本地只读。
+- Remote Bridge app-server 定义并默认选择 `codex-remote-bridge` named permission
+  profile；线程新建、恢复、设置更新、fork 和 turn 都重新锁定该 profile、
+  `approvalPolicy=never` 与本地控制 `cwd`。
+- profile 对 `:root` 拒绝、仅放行 `:minimal` 运行时读取并禁用网络；真实官方
+  app-server 返回 `activePermissionProfile.id=codex-remote-bridge`、只读 sandbox
+  和无网络。
+- Shim 在 app-server 前阻断 25 个已知 `thread/shellCommand`、后台终端、`fs/*`、
+  `command/exec*`、`process/*` 和 `fuzzyFileSearch*` 请求，只审计方法名。
+- Core 发起的本地命令、文件、权限和两类旧协议审批在到达官方 UI 前直接失败关闭；
+  Bridge 自己生成的远程 `remote_exec` 审批不走这些方法，不受影响。
 - 开发者指令要求项目操作只使用远程工具。
 
 边界：
 
-- 只读 sandbox 仍可能允许读取本地绝对路径；它主要阻止写入，不等于项目隔离。
-- app-server 内置 Shell/文件工具不经过 Shim 的动态工具路由，无法在现有代理层硬拒绝。
+- 协议阻断覆盖客户端直达请求，但模型在 app-server 内部调用的专用工具不经过该边界，
+  仍依赖 permission profile 和真实负测。
+- 当前 Linux 环境的直接文件诱饵探针在进入路径检查前被 `bwrap` 环回网络初始化失败
+  阻断，不能把该失败当作文件拒绝命中。
 - 当前控制目录未被信任，项目级 `.codex` hooks、规则和配置不会加载。
 
 Codex `0.145.0` 的权限配置和 `PreToolUse` hooks 提供可探查的防线：权限配置可限制本地
@@ -441,11 +452,12 @@ Remote SSH 窗口进入 `ready`，官方 Codex 新任务通过
 6. 完成配置定向测试和 `npm run check` 后独立提交；工作区主次提示与 turn 级刷新留在
    阶段 2B，Core 防线探针留在阶段 2C。
 
-当前进度：阶段 2A 和 2B 的实现已完成。全量门禁为 32 个测试文件通过、1 个真实远端
-条件测试文件跳过，130 项通过、5 项跳过。构建、Shim 冒烟、Linux x64 当前平台打包、
-官方 app-server 参数探针和活动 VS Code transport 的 `remote_exec(["pwd"])` 回环通过。
-官方 UI 的新建/恢复、附件和当前文件仍待补测；阶段 2C 尚未开始，配置中的本地次级根
-仍不可访问。
+当前进度：阶段 2A 和 2B 的实现已完成；阶段 2C 已部分实施并保持待补测。全量门禁为
+33 个测试文件通过、1 个真实远端条件测试文件跳过，139 项通过、5 项跳过。构建、
+Shim 冒烟、Linux x64 当前平台打包、官方 app-server 的专用权限配置激活和活动
+VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地客户端请求的
+协议诱饵测试及五类 Core 本地审批负测通过；官方 UI 新建/恢复、附件、当前文件和真实
+模型专用工具诱饵仍待补测，配置中的本地次级根仍不可访问。
 
 阶段 2A 实机复核发现（2026-07-22）：
 
@@ -492,6 +504,54 @@ Remote SSH 窗口进入 `ready`，官方 Codex 新任务通过
    后在真实 Remote SSH 新建和恢复任务中检查 Codex 日志与 Bridge 审计。
 6. 若官方 UI 的附件、当前文件或任务创建仍把本地控制目录显示为项目根，保持候选状态并
    记录 `待补测`，不回退到 URI 合成。
+
+阶段 2C 能力探查结论（2026-07-22）：
+
+1. 当前官方扩展内置 Codex 为 `0.145.0-alpha.27`。生成的 app-server 客户端协议除
+   线程请求外，还公开了可直接触达本机的 `thread/shellCommand`、`fs/*`、
+   `command/exec*`、`process/*`、`fuzzyFileSearch*` 和后台终端请求；其中
+   `thread/shellCommand` 与 `process/spawn` 明确不继承线程 sandbox。
+2. 当前运行时接受自定义 named permission profile，并允许线程通过 `permissions`
+   选择它。Bridge 可用只读最小运行时加全局拒绝、禁用网络及 `approvalPolicy=never`
+   形成 Core 内部的失败关闭约束；必须同时重写线程新建、恢复、设置更新、fork 和 turn，
+   防止客户端后续放宽。
+3. `PreToolUse` 能覆盖常见 Bash、统一命令执行、`apply_patch`、MCP 和多数本地函数
+   工具，但 session flag 注入的 hook 在 `hooks/list` 中是 `untrusted`。自动写入用户
+   信任状态会越权，全局跳过 hook 信任又会连带执行用户其他未审核 hook，因此本阶段
+   不自动启用。
+4. 官方文档明确部分专用工具可以绕过默认 hook 路径。即使未来解决 hook 信任问题，
+   hook 也只能作为纵深防御，不能替代权限配置、协议阻断和真实诱饵负测。
+5. 当前 Linux 容器中的直接权限探针在进入文件检查前被 `bwrap` 环回网络初始化错误
+   阻断，无法据此证明文件拒绝命中。协议接受和线程绑定已经验证；Core 内部读写拒绝
+   仍需在兼容的真实 Extension Host 环境用模型驱动诱饵测试确认。
+
+阶段 2C 详细实施顺序：
+
+1. 将官方生成的 `ClientRequest`、线程设置更新和 fork 参数纳入受控协议快照；自动从
+   `ClientRequest` 提取上述高风险本地方法集合，协议升级新增同类方法时测试失败关闭。
+2. Shim 仅在已配置 Remote Bridge 的 app-server 会话中注入专用 named permission
+   profile；普通本地窗口和非 app-server 透传不受影响。
+3. 在 `thread/start`、`thread/resume`、`thread/settings/update`、`thread/fork` 和
+   `turn/start` 强制专用 profile、`approvalPolicy=never` 与控制目录，移除客户端提供
+   的 legacy sandbox 覆盖；远程逻辑主根和原有上下文继续保留。
+4. 在 Shim 的客户端请求边界拒绝所有已知高风险本地请求，不向官方 app-server 转发，
+   为有 ID 的请求返回稳定 JSON-RPC 错误，并写入不含参数和路径内容的失败审计。
+   Core 发起的本地命令、文件和权限审批也在服务端请求边界直接失败关闭，不投影到 UI。
+5. 用集成测试发送本地 Shell、文件读取、命令执行、进程启动、模糊搜索和后台终端诱饵，
+   断言官方 app-server 收到 0 个危险请求；同时验证普通请求和远程动态工具链不回归。
+6. 运行定向测试、受控协议兼容测试、Shim 冒烟、`npm run check` 和当前平台打包；随后
+   安装候选并在真实 Remote SSH 窗口检查官方任务、Codex 日志与 Bridge 审计。
+7. 若真实模型仍可通过专用 Core 路径触达本地诱饵，SAFE-CORE 保持受阻并转入 Core
+   修改或独立客户端评估；不得因此开放双端写入。
+
+阶段 2C 可证伪验收：
+
+- 已知高风险客户端请求全部被 Shim 拒绝，app-server 侧接收数为 0，审计逐项可见。
+- 客户端不能通过设置更新、fork、新建、恢复或 turn 放宽专用权限配置。
+- 官方 app-server 接受专用 profile，线程新建和恢复不因策略注入失败。
+- 真实模型对本地同名诱饵的读取、写入和执行均失败，远程 `remote_exec(["pwd"])` 仍命中
+  唯一远程主根；缺少任一真实证据时 SAFE-CORE 只能标为“部分实施/待补测”。
+- 不修改 hook 信任状态，不启用全局 hook 信任绕过，不扩大本地次级根访问范围。
 
 验收：
 
@@ -645,8 +705,10 @@ Remote SSH 窗口进入 `ready`，官方 Codex 新任务通过
   Windows、Linux 两端产物收集后再验。
 - `runtimeWorkspaceRoots` 的 app-server 参数链路已经通过无副作用探针；官方 UI 的新建、
   恢复、附件和当前文件显示仍需在安装候选后实测。
-- Core 本地工具是否能被 permission profile 与 hook 组合完全阻断尚未证明；官方文档
-  明确 hook 不是所有专用工具的完整强制边界。
+- 专用 permission profile 和 25 个客户端请求阻断已经实施，但真实模型是否仍能通过
+  app-server 内部专用工具触达本地诱饵尚未证明；官方文档明确 hook 不是所有专用工具
+  的完整强制边界。本次候选已安装但活动 Controller 未重载，重载由用户按 Remote SSH
+  安全规则手动执行。
 
 在这些证据补齐前，可以继续完成隔离的协议、类型和单元测试工作，但不得把相应功能或
 兼容集合声明为已经支持。

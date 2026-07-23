@@ -24,10 +24,13 @@ try {
   for (const relativePath of [
     "DynamicToolCallParams.json",
     "DynamicToolCallResponse.json",
+    "ClientRequest.json",
     "ServerRequest.json",
     "v1/InitializeParams.json",
+    "v2/ThreadForkParams.json",
     "v2/ThreadStartParams.json",
     "v2/ThreadResumeParams.json",
+    "v2/ThreadSettingsUpdateParams.json",
     "v2/TurnStartParams.json",
   ]) {
     await cp(join(tempDir, relativePath), join(outputDir, relativePath));

@@ -17,18 +17,23 @@
 会被忽略。官方扩展版本只用于诊断和证据，不固定为启动门禁；Controller 保存经过
 内置 app-server 协议校验的受限运行时指针，Shim 自身再次校验后才透传或代理。
 
-当前协议位于 `protocol/0.145.0-alpha.27/`，由插件内置二进制生成，并包含阶段 2B
-依赖的 `TurnStartParams`。`npm run check` 为 32 个测试文件通过、1 个真实远端条件
-文件跳过，130 项通过、5 项跳过、0 失败，插件内置 app-server 的本地透传、远程窗口
-启动、线程创建、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、缺失
-或版本不再影响这些路径。
+当前协议位于 `protocol/0.145.0-alpha.27/`，由插件内置二进制生成，并包含
+`ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。`npm run check`
+为 33 个测试文件通过、1 个真实远端条件文件跳过，139 项通过、5 项跳过、0 失败；
+插件内置 app-server 的本地透传、远程窗口启动、线程创建、本地拒绝权限配置激活、
+主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、缺失或版本不再影响
+这些路径。
 
 当前仍是候选状态：用户已重载活动 Remote SSH 窗口，进程和运行时指针确认目标窗口只
 使用官方插件内置 Codex，Bridge 对规范化远端根进入 `ready`，已有会话恢复成功。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
-覆盖，审计明确区分远程主根和本地控制目录。官方 UI 新建/恢复、附件、当前文件、本地
-窗口透传仍待补测。Linux 构建无法生成 Windows SEA Shim，双平台产物收集仍为待实施项。
+覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知
+本地客户端请求和五类 Core 本地审批，官方 app-server 实际激活
+`codex-remote-bridge` 权限配置，活动
+transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、官方 UI 新建/恢复、
+附件、当前文件和本地窗口透传仍待补测。Linux 构建无法生成 Windows SEA Shim，
+双平台产物收集仍为待实施项。
 
 ## 阶段 A：协议与运行位置探针
 
@@ -51,7 +56,9 @@
 | Codex Webview 位置恢复 | 每工作区首次就绪时仅重置 Codex 视图 | `repairCodexViewLocation` |
 | app-server `initialize` 代理 | 已按官方前置全局参数通过真实 app-server 冒烟测试 | `npm run smoke:shim` |
 | `thread/start` 路径和能力注入 | 本地进程 `cwd` 与远程逻辑主根已分离并通过实测 app-server 参数探针 | `rewriteClientMessage` |
-| `permissions`/`sandbox` 互斥 | 移除客户端权限档案并固定本地只读 sandbox | `rewriteClientMessage` |
+| Remote Bridge 权限配置 | 强制 `codex-remote-bridge` named profile、`approvalPolicy=never`，移除客户端 sandbox/config 覆盖 | `local-core-policy` / `rewriteClientMessage` |
+| 本地客户端请求阻断 | 25 个 Shell、文件、命令、进程、模糊搜索和后台终端请求在 app-server 前失败关闭并审计 | `ShimProxy` / `ClientRequest.json` |
+| Core 本地审批阻断 | 命令、文件、权限和两类旧协议审批在到达官方 UI 前失败关闭；Bridge 远程命令审批不受影响 | `ShimProxy` / `ServerRequest.json` |
 | `thread/resume` 工作区语义 | 本地控制 `cwd`、远程 `runtimeWorkspaceRoots` 和远程策略已覆盖；官方 UI 恢复待补测 | `rewriteClientMessage` |
 | `turn/start` 路由刷新 | 每轮合并独立应用上下文，刷新远程主根和 `remote_exec` 提醒且不覆盖已有键 | `rewriteClientMessage` |
 | 远端无 Codex | 诊断已实现；xj-member 目标已确认未安装 Codex | `Run Diagnostics` / 2026-07-16 验收 |

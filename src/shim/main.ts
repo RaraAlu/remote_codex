@@ -17,6 +17,7 @@ import { validateBundledCodexProtocol } from "../core/official-codex.js";
 import type { BridgeConfig } from "../core/types.js";
 import { parseMcpProxyInvocation } from "./mcp-proxy-invocation.js";
 import { OpenSshMcpRelay } from "./openssh-mcp-relay.js";
+import { withRemoteCorePolicy } from "./local-core-policy.js";
 import { ShimProxy } from "./proxy.js";
 import { routeRemoteMcpServers } from "./remote-mcp.js";
 import { VsCodeMcpRelay } from "./vscode-mcp-relay.js";
@@ -172,6 +173,7 @@ async function main(): Promise<number> {
   } catch (error) {
     mcpRoutingError = error instanceof Error ? error.message : String(error);
   }
+  appServerArgs = withRemoteCorePolicy(appServerArgs);
   await audit.write({
     operation: "shim.start",
     outcome: "started",

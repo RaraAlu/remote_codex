@@ -178,6 +178,14 @@ function assertThreadStarted({ messages, stdout }) {
   if (!threadStart?.result?.thread?.id) {
     throw new Error(`Missing app-server thread/start response: ${stdout}`);
   }
+  if (
+    threadStart.result.activePermissionProfile?.id !== "codex-remote-bridge" ||
+    threadStart.result.approvalPolicy !== "never" ||
+    threadStart.result.sandbox?.type !== "readOnly" ||
+    threadStart.result.sandbox?.networkAccess !== false
+  ) {
+    throw new Error(`Remote local-deny permission profile was not activated: ${stdout}`);
+  }
 }
 
 const rootDir = await mkdtemp(join(tmpdir(), "codex-bridge-smoke-"));
@@ -260,6 +268,21 @@ try {
     .filter(Boolean)
     .map((line) => JSON.parse(line))
     .find((entry) => entry.operation === "shim.start");
+  const auditedAppServerArgs = shimStart?.details?.appServerArgs;
+  if (
+    !Array.isArray(auditedAppServerArgs) ||
+    !auditedAppServerArgs.some((arg) => arg.startsWith("default_permissions=")) ||
+    !auditedAppServerArgs.some((arg) =>
+      arg.endsWith('filesystem={":root"="deny",":minimal"="read"}'),
+    ) ||
+    !auditedAppServerArgs.some((arg) => arg.endsWith("network.enabled=false"))
+  ) {
+    throw new Error(
+      `Remote local-deny permission profile is missing from app-server args: ${JSON.stringify(
+        shimStart?.details?.appServerArgs,
+      )}`,
+    );
+  }
   if (
     shimStart?.details?.primaryRoot?.path !== "/tmp/remote-workspace" ||
     shimStart?.details?.primaryRoot?.target !== "remote" ||

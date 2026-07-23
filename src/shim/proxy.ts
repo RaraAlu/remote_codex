@@ -12,6 +12,10 @@ import type { BridgeConfig } from "../core/types.js";
 import { OpenSshExecutor, type SpawnProcess } from "../core/ssh-executor.js";
 import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
 import { DynamicToolRouter, REMOTE_TOOL_NAMES } from "./dynamic-tools.js";
+import {
+  isBlockedLocalClientMessage,
+  isBlockedLocalServerApproval,
+} from "./local-core-policy.js";
 import { formatRemoteExecRequest, parseRemoteExecArguments } from "./remote-command.js";
 import { RemoteApprovalPolicyTracker } from "./remote-approval-policy.js";
 import {
@@ -138,25 +142,18 @@ export class ShimProxy {
     child.stderr.pipe(errorOutput, { end: false });
     const clientLines = createInterface({ input });
     const serverLines = createInterface({ input: child.stdout });
+    let clientQueue = Promise.resolve();
 
     clientLines.on("line", (line) => {
-      try {
-        const message = parseRpcLine(line);
-        this.#remoteApprovalPolicies.observeClientMessage(message);
-        if (isRpcResponse(message) && this.#resolveApproval(message)) {
-          return;
-        }
-        const rewritten = rewriteClientMessage(
-          message,
-          this.#options.config,
-          this.#options.controlDir,
-        );
-        writeMessage(child.stdin, rewritten);
-      } catch (error) {
-        errorOutput.write(`codex-bridge: invalid client JSON-RPC: ${String(error)}\n`);
-      }
+      clientQueue = clientQueue
+        .then(() => this.#handleClientLine(line, child.stdin, output))
+        .catch((error) => {
+          errorOutput.write(`codex-bridge: invalid client JSON-RPC: ${String(error)}\n`);
+        });
     });
-    clientLines.on("close", () => child.stdin.end());
+    clientLines.on("close", () => {
+      void clientQueue.finally(() => child.stdin.end());
+    });
 
     serverLines.on("line", (line) => {
       void this.#handleServerLine(line, child.stdin, output, errorOutput).catch((error) => {
@@ -191,6 +188,43 @@ export class ShimProxy {
     });
   }
 
+  async #handleClientLine(
+    line: string,
+    childInput: Writable,
+    output: Writable,
+  ): Promise<void> {
+    const message = parseRpcLine(line);
+    this.#remoteApprovalPolicies.observeClientMessage(message);
+    if (isRpcResponse(message) && this.#resolveApproval(message)) {
+      return;
+    }
+    if (this.#options.config && isBlockedLocalClientMessage(message)) {
+      await this.#audit.write({
+        hostId: this.#options.config.host,
+        workspaceRoot: this.#options.config.workspaceRoot,
+        operation: "local_core_request.blocked",
+        outcome: "failed",
+        details: { method: message.method },
+      });
+      if (isRpcRequest(message)) {
+        writeMessage(output, {
+          id: message.id,
+          error: {
+            code: -32003,
+            message: `Codex Remote Bridge blocked local Core request: ${message.method}`,
+          },
+        });
+      }
+      return;
+    }
+    const rewritten = rewriteClientMessage(
+      message,
+      this.#options.config,
+      this.#options.controlDir,
+    );
+    writeMessage(childInput, rewritten);
+  }
+
   async #handleServerLine(
     line: string,
     childInput: Writable,
@@ -208,6 +242,24 @@ export class ShimProxy {
 
     if (!isRpcRequest(message)) {
       writeMessage(output, projectServerMessage(message, this.#options.config));
+      return;
+    }
+
+    if (this.#options.config && isBlockedLocalServerApproval(message)) {
+      await this.#audit.write({
+        hostId: this.#options.config.host,
+        workspaceRoot: this.#options.config.workspaceRoot,
+        operation: "local_core_approval.blocked",
+        outcome: "failed",
+        details: { method: message.method },
+      });
+      writeMessage(childInput, {
+        id: message.id,
+        error: {
+          code: -32003,
+          message: `Codex Remote Bridge blocked local Core approval: ${message.method}`,
+        },
+      });
       return;
     }
 
