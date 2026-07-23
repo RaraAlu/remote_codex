@@ -8,6 +8,7 @@ import {
   REMOTE_EXECUTOR_COMMAND,
   REMOTE_EXECUTOR_PING_COMMAND,
   REMOTE_EXECUTOR_PROTOCOL_VERSION,
+  REMOTE_EXECUTOR_VERSION,
   REMOTE_OUTPUT_COMMAND,
   REMOTE_STDIO_MAX_FRAME_BYTES,
   type RemoteExecutorCommandRequest,
@@ -229,6 +230,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(REMOTE_EXECUTOR_COMMAND, executeRequest),
     vscode.commands.registerCommand(REMOTE_EXECUTOR_PING_COMMAND, () => ({
+      executorVersion: REMOTE_EXECUTOR_VERSION,
       protocolVersion: REMOTE_EXECUTOR_PROTOCOL_VERSION,
       remoteName: vscode.env.remoteName,
     })),

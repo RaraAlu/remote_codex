@@ -32,6 +32,7 @@ import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
 import {
   REMOTE_EXECUTOR_COMMAND,
   REMOTE_EXECUTOR_PING_COMMAND,
+  REMOTE_EXECUTOR_VERSION,
   REMOTE_OUTPUT_COMMAND,
   isRemoteExecutorPing,
 } from "../core/vscode-transport.js";
@@ -523,7 +524,7 @@ export class BridgeController implements vscode.Disposable {
     if (!installPlan.allowed) {
       throw new BridgeError(
         "REMOTE_TRANSPORT_DISCONNECTED",
-        `Remote Executor command is unavailable after ${installPlan.attempts} installation attempts; retry later or reinstall the Remote SSH window`,
+        `Compatible Remote Executor is unavailable after ${installPlan.attempts} installation attempts; retry later or reinstall the Remote SSH window`,
       );
     }
     const folder = vscode.workspace.workspaceFolders?.[0];
@@ -556,13 +557,27 @@ export class BridgeController implements vscode.Disposable {
       this.#log("Remote Executor command became available without a window reload");
       return;
     }
+    await this.#audit.write({
+      operation: "executor.reload",
+      outcome: "started",
+      hostId: this.#config?.host,
+      workspaceRoot: this.#config?.workspaceRoot,
+      details: {
+        automatic: true,
+        executorVersion: REMOTE_EXECUTOR_VERSION,
+        reason: "installed-executor-not-active",
+      },
+    });
+    this.#log(
+      `installed Remote Executor ${REMOTE_EXECUTOR_VERSION}; reloading the Remote SSH window automatically`,
+    );
     void vscode.window.showInformationMessage(
-      "Codex Bridge installed its Remote Executor. Reloading the Remote SSH window once.",
+      `Codex Bridge installed Remote Executor ${REMOTE_EXECUTOR_VERSION}. Reloading the Remote SSH window automatically.`,
     );
     await vscode.commands.executeCommand("workbench.action.reloadWindow");
     throw new BridgeError(
       "BRIDGE_NOT_READY",
-      "Remote Executor installation requires the in-progress window reload",
+      "Remote Executor installation triggered an automatic Remote SSH window reload",
     );
   }
 

@@ -2,7 +2,7 @@
   "name": "codex-remote-bridge-executor",
   "displayName": "Codex Remote Bridge Executor",
   "description": "Remote workspace executor for Codex Remote Bridge. This component does not contain Codex or credentials.",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "publisher": "zkbot",
   "license": "MIT",
   "engines": {
