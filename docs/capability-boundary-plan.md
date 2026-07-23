@@ -155,7 +155,9 @@ Shim 从受限运行时指针读取同一二进制并再次执行协议校验。
 
 边界：
 
-- `turn/start` 只重写本地 sandbox 和控制目录，不重复注入开发者提醒。
+- `turn/start` 没有独立的 `developerInstructions` 字段，不能沿用线程级注入方式。
+- `0.145.0-alpha.27` 的 `TurnStartParams.additionalContext` 可承载逐轮应用上下文；实施时
+  使用独立的 `codex-remote-bridge` 键合并提醒，不覆盖官方扩展已有上下文。
 - 提醒只能影响模型选择，不能阻止 Core 内置本地 Shell 或文件工具。
 - Shim 只接管 `item/tool/call` 中的 Bridge 动态工具；Core 内置工具不经过
   `DynamicToolRouter`。
@@ -174,8 +176,8 @@ Shim 从受限运行时指针读取同一二进制并再次执行协议校验。
 边界：
 
 - 本地 app-server 进程必须在本机存在的控制目录中启动。
-- 当前 `thread/start`、`thread/resume` 和 `turn/start` 都把 `cwd` 与
-  `runtimeWorkspaceRoots` 改成该本地控制目录。
+- 当前 `thread/start`、`thread/resume` 和 `turn/start` 仍把 `cwd` 与
+  `runtimeWorkspaceRoots` 都改成本地控制目录；阶段 2B 将只保留 `cwd` 为控制目录。
 - 远程根目录目前只存在于 Bridge 配置、提示和动态工具中，不是 Codex 线程的逻辑主根。
 - `localExecution` 仍固定为 `deny`；配置中的本地次级根没有选择入口或执行器，不能
   被工具访问。
@@ -187,8 +189,20 @@ Shim 从受限运行时指针读取同一二进制并再次执行协议校验。
 3. **次级工作目录**：用户显式授权的本地目录，只能通过带目标端的 Bridge 工具访问。
 
 不能把本机不存在的远程 POSIX 路径直接当作 app-server 进程 `cwd`，也不能改写或伪造
-VS Code 工作区 URI。`0.145.0` 的 `runtimeWorkspaceRoots` 是否能表达远程逻辑主根，
-必须先通过官方扩展新建、恢复和 turn 级实验确认。
+VS Code 工作区 URI。2026-07-22 对官方扩展内置 `0.145.0-alpha.27` app-server 的无副作用
+探针确认：
+
+- `initialize.capabilities.experimentalApi=true` 后，`thread/start` 接受
+  `/home/unitree/mimiclite-sim2real` 作为 `runtimeWorkspaceRoots`，同时保留本地控制目录
+  为 `cwd`；不要求该远程路径存在于本机。
+- `thread/resume` 接受同一组远程绝对路径并继续进入线程查找；临时探针线程没有 rollout，
+  因此恢复止于预期的 `no rollout found`，不是路径或协议拒绝。
+- `turn/start` 接受远程 `runtimeWorkspaceRoots`、本地只读 sandbox 和逐轮应用上下文，
+  并产生 `turn/started`；探针使用空白 `CODEX_HOME` 且立即结束，不访问模型或远端文件。
+
+因此阶段 2B 选定“本地控制目录作为进程 `cwd`，唯一 `remote/primary` 作为
+`runtimeWorkspaceRoots`”的双层语义，不采用工作区 URI 合成、路径伪装或远程路径作为
+本地进程目录。
 
 ### 3.4 远程文件和双端访问
 
@@ -427,9 +441,11 @@ Remote SSH 窗口进入 `ready`，官方 Codex 新任务通过
 6. 完成配置定向测试和 `npm run check` 后独立提交；工作区主次提示与 turn 级刷新留在
    阶段 2B，Core 防线探针留在阶段 2C。
 
-当前进度：阶段 2A 已实现。配置与持久化定向测试 30 项通过；全量门禁为 32 个测试
-文件通过、1 个真实远端条件测试文件跳过，129 项通过、5 项跳过。构建、Shim 冒烟和
-Linux x64 当前平台打包通过。阶段 2B/2C 尚未开始，配置中的本地次级根仍不可访问。
+当前进度：阶段 2A 和 2B 的实现已完成。全量门禁为 32 个测试文件通过、1 个真实远端
+条件测试文件跳过，130 项通过、5 项跳过。构建、Shim 冒烟、Linux x64 当前平台打包、
+官方 app-server 参数探针和活动 VS Code transport 的 `remote_exec(["pwd"])` 回环通过。
+官方 UI 的新建/恢复、附件和当前文件仍待补测；阶段 2C 尚未开始，配置中的本地次级根
+仍不可访问。
 
 阶段 2A 实机复核发现（2026-07-22）：
 
@@ -448,8 +464,9 @@ Linux x64 当前平台打包通过。阶段 2B/2C 尚未开始，配置中的本
 
 1. 在通过阶段 1 的官方扩展内置运行时候选上做三组真实实验：远程根写入
    `runtimeWorkspaceRoots`、远程根只作为 Bridge 逻辑主根、继续使用控制目录。分别
-   验证新建、恢复、turn、附件和当前文件。
-2. 选取不破坏官方工作区加载的方案；不得用 URI 合成或路径伪装通过项目校验。
+   验证新建、恢复和 turn；附件与当前文件保留为真实 UI 验收项。
+2. 选取不破坏官方工作区加载的方案；不得用 URI 合成或路径伪装通过项目校验。已选定
+   本地控制 `cwd` 加远程逻辑 `runtimeWorkspaceRoots`。
 3. 将配置升级为 v2，引入根目录记录：
    `id`、`target: local | remote`、`role: primary | secondary`、规范化路径和显示名。
 4. 固定当前 Remote SSH 根为唯一 `primary/remote`，并为 v1 配置提供无损迁移。
@@ -460,11 +477,28 @@ Linux x64 当前平台打包通过。阶段 2B/2C 尚未开始，配置中的本
 7. 使用本地同名诱饵目录执行负向测试，确认 Core 工具不能读取、写入或执行项目路径。
 8. 若仍存在 hook 或 sandbox 绕过路径，记录为阻塞项并评估 Core 修改或独立客户端。
 
+阶段 2B 详细实施顺序：
+
+1. 将 `TurnStartParams` 纳入受控生成协议，并用测试固定
+   `runtimeWorkspaceRoots`、`additionalContext` 这两个依赖字段。
+2. `thread/start`、`thread/resume` 和 `turn/start` 保留本地控制目录为 `cwd`，把唯一
+   `remote/primary.path` 写入 `runtimeWorkspaceRoots`。
+3. 在线程新建和恢复时合并完整远程策略；每次 turn 通过
+   `additionalContext.codex-remote-bridge` 刷新远程主根、主次身份和
+   `remote_exec` 命令路由，不覆盖客户端已有键。
+4. 诊断和 `shim.start` 审计同时记录本地控制目录与远程主根的身份；不得记录 transport
+   token 或其他凭据。
+5. 运行重写和协议定向测试、Shim 集成/冒烟、`npm run check` 和当前平台打包；安装候选
+   后在真实 Remote SSH 新建和恢复任务中检查 Codex 日志与 Bridge 审计。
+6. 若官方 UI 的附件、当前文件或任务创建仍把本地控制目录显示为项目根，保持候选状态并
+   记录 `待补测`，不回退到 URI 合成。
+
 验收：
 
-- 诊断和审计明确显示远程主根、本地控制目录及各自角色。
-- 新建、恢复和 turn 中远程主根保持一致。
-- 本地控制目录不被展示为项目根。
+- 诊断和审计明确显示远程主根、本地控制目录及各自角色。已通过自动化与回环审计。
+- 新建、恢复和 turn 中远程主根保持一致。app-server 参数链路和候选 Shim 回环已通过；
+  官方 UI 新建/恢复待补测。
+- 本地控制目录不被展示为项目根。协议层已分离；官方 UI 显示待补测。
 - 错误本地项目操作为 0；不能证明时不得进入双端写入。
 
 提交边界：
@@ -609,7 +643,8 @@ Linux x64 当前平台打包通过。阶段 2B/2C 尚未开始，配置中的本
 - Windows x64 实机链路当前不可由本次 Linux 环境替代。
 - Windows SEA Shim 与 Controller VSIX 不能由当前 Linux 构建生成；完整 `dist/` 需由
   Windows、Linux 两端产物收集后再验。
-- `runtimeWorkspaceRoots` 是否可安全承载远程逻辑主根需要真实官方扩展实验。
+- `runtimeWorkspaceRoots` 的 app-server 参数链路已经通过无副作用探针；官方 UI 的新建、
+  恢复、附件和当前文件显示仍需在安装候选后实测。
 - Core 本地工具是否能被 permission profile 与 hook 组合完全阻断尚未证明；官方文档
   明确 hook 不是所有专用工具的完整强制边界。
 

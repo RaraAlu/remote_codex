@@ -13,9 +13,9 @@
 | --- | --- | --- | --- |
 | VS Code | `1.130.0`（Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | 相对支持基线已变化；真实任务待补测 |
 | 官方 Codex 扩展 | 本次实测 `openai.chatgpt@26.715.61943` | 固定扩展 ID，不固定版本；使用 VS Code 当前实际加载版本 | 插件内置运行时自动化、恢复会话和 Remote SSH 新任务通过；本地窗口待补测 |
-| Bridge Controller | `0.2.7`，Windows x64、Linux x64 | 同一扩展 ID，分别发布 `win32-x64` 和 `linux-x64` VSIX | Linux 自动化、Shim 冒烟、包内容、候选安装、窗口重载和真实 Remote SSH 通过；Windows 待补测 |
+| Bridge Controller | `0.2.7`，Windows x64、Linux x64 | 同一扩展 ID，分别发布 `win32-x64` 和 `linux-x64` VSIX | Linux 自动化、Shim 冒烟、远程逻辑主根、逐轮路由、候选安装和活动 transport 回环通过；Windows 待补测 |
 | Remote Executor | `0.2.7`，Linux x64 | Workspace 扩展；通过当前 Remote SSH 通道自动部署，不含 Codex 或凭据 | 精确版本与协议 v4 握手、远端构建摘要、主根探针通过；适配器和八工具证据继承自相同协议的 `0.2.6` 基线 |
-| 官方扩展内置 Codex/app-server | `0.145.0-alpha.27` | 只从当前官方扩展安装目录启动；与生成协议精确匹配 | 协议门禁、真实 Shim、Remote SSH 新任务和远端工具调用通过；本地窗口待补测 |
+| 官方扩展内置 Codex/app-server | `0.145.0-alpha.27` | 只从当前官方扩展安装目录启动；与生成协议精确匹配 | 线程/turn 远程根参数探针、协议门禁、真实 Shim 和远端工具调用通过；官方 UI 显示与本地窗口待补测 |
 | 系统 Codex CLI | 任意或未安装 | 不发现、不选择、不透传、不回退 | 不属于运行依赖 |
 | Remote SSH | `0.124.0` | 使用 `remote.extensionKind` 探针设置 | 版本未变；新兼容集合的固定远端探针待补测 |
 | OpenSSH 客户端 | Linux `9.6p1`；Windows 支持基线 `9.5p2` | 严格主机校验、user/port/IdentityFile；ControlMaster 仅 Linux 启用 | 本次未触发 OpenSSH 回退实机链路 |
@@ -23,11 +23,14 @@
 完整的升级触发条件、硬门禁、量化指标和分平台声明规则见
 `docs/upgrade-tracking.md`。当前插件内置运行时候选证据见
 `docs/acceptance/2026-07-22-release-0.2.7.md`，MCP 适配跟进证据见
-`docs/acceptance/2026-07-22-release-0.2.7-mcp-adapter.md`；上一支持基线见
+`docs/acceptance/2026-07-22-release-0.2.7-mcp-adapter.md`，远程逻辑主根与逐轮路由见
+`docs/acceptance/2026-07-22-release-0.2.7-remote-primary-root.md`；上一支持基线见
 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 
 当前协议文件位于 `protocol/0.145.0-alpha.27/`。`ServerRequest.json` 的方法集合由自动化测试与
 Shim 的已知请求白名单逐项比对；出现新请求时测试失败，而不是静默转发潜在副作用。
+`ThreadStartParams`、`ThreadResumeParams` 和 `TurnStartParams` 固定远程逻辑主根与逐轮
+应用上下文所依赖的字段；本地 app-server 进程仍在本地控制目录启动。
 0.2.0 另外使用该版本的 `commandExecution` 项、命令审批请求、输出增量字段，以及
 `permissions=full-access`/`approvalPolicy=never` 权限语义，把 Bridge 工具投影成
 官方原生外观并同步审批行为；MCP 路由器仅在 Remote SSH 窗口内扫描本机配置，并可
