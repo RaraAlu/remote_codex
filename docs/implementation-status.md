@@ -9,20 +9,24 @@
 审计。详细边界、依赖顺序、分阶段实施内容与验收条件见
 `docs/capability-boundary-plan.md`。
 
-同日已将本机 Codex CLI/app-server 和仓库精确版本门禁升级到 `0.145.0`，生成
-`protocol/0.145.0/`，并安装 Linux x64 候选 VSIX。定向协议、重写和 Shim 集成测试
-11 项通过；`npm run check` 为 29 个测试文件通过、1 个真实远端条件文件跳过，
-108 项通过、5 项跳过、0 失败，真实 `0.145.0` Shim 冒烟和 Linux 打包通过。
+同日先完成外部稳定版 `0.145.0` 协议探针，随后按用户确认的边界将官方
+`openai.chatgpt` 扩展设为唯一运行时权威。当前源码只启动 VS Code 实际加载的
+`openai.chatgpt` 所内置的 Codex，实测组合为 `26.715.61943` /
+`0.145.0-alpha.27`。源码删除公开
+`codexExecutable` 设置、系统 CLI 发现和 PATH/`~/.local/bin` 回退；旧配置中的该字段
+会被忽略。官方扩展版本只用于诊断和证据，不固定为启动门禁；Controller 保存经过
+内置 app-server 协议校验的受限运行时指针，Shim 自身再次校验后才透传或代理。
 
-当前升级仍是候选状态：活动 Remote SSH 窗口尚未由用户重载并用
-`openai.chatgpt@26.715.61943` 新建任务，固定远端探针、MCP 和本地窗口透传也未按新
-兼容集合重跑。Linux 构建无法生成 Windows SEA Shim，`npm run package:all` 因缺少
-Windows 原生产物失败，双平台产物收集仍为待实施项。
+当前协议位于 `protocol/0.145.0-alpha.27/`，由插件内置二进制生成。定向运行时、配置
+迁移和协议测试 27 项通过；`npm run check` 为 30 个测试文件通过、1 个真实远端条件
+文件跳过，112 项通过、5 项跳过、0 失败，插件内置 app-server 的本地透传、远程窗口
+启动、线程创建冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、缺失或版本不再
+影响这些路径。
 
-用户随后明确将官方 `openai.chatgpt` 扩展设为版本权威，不再管理或依赖系统 Codex
-CLI。现有 `0.145.0` 稳定版候选只保留为已完成的协议探针，不作为最终运行时方案。
-下一候选必须只启动官方扩展内置 Codex，删除公开的 CLI 路径设置和本地 CLI 回退，并
-针对当前插件内置版本重新生成协议、自动化和实机证据。
+当前仍是候选状态：活动 Remote SSH 窗口尚未由用户重载并用当前候选新建任务，固定
+远端探针、MCP 和本地窗口透传也未在真实官方界面重跑。Linux 构建无法生成 Windows
+SEA Shim，`npm run package:all` 仍因缺少 Windows 原生产物失败，双平台产物收集仍为
+待实施项。
 
 ## 阶段 A：协议与运行位置探针
 
@@ -31,7 +35,9 @@ CLI。现有 `0.145.0` 稳定版候选只保留为已完成的协议探针，不
 | `chatgpt.cliExecutable` 入口 | 已实现配置、备份和恢复 | `OfficialSettingsManager` |
 | Remote SSH 自动配置与启动 | 已实现；首次设置变更自动重载一次 | `BridgeController.initialize` |
 | 本地窗口隔离 | 已实现；无 Remote SSH 会话标记时 Shim 完全透传 | `activeBridgeConfigPath` |
-| 本地 Codex 常见路径探测 | 已按 Windows/Linux 平台实现并测试 | `codexExecutableCandidates` |
+| 官方扩展内置运行时 | 只接受当前官方扩展目录中的平台二进制；系统 CLI 不参与 | `resolveOfficialCodexExecutable` |
+| 内置协议门禁 | Controller 与 Shim 校验插件内置 app-server 与生成协议；不固定插件版本 | `validateBundledCodexProtocol` |
+| 旧 CLI 配置迁移 | 已删除公开设置；旧配置字段被解析器忽略 | `parseBridgeConfig` |
 | Windows 原生 Shim | Node SEA `codex-bridge-shim.exe` 已构建并通过真实 Codex 冒烟 | `scripts/build.mjs` |
 | 双平台发布 | 同一扩展 ID 分别生成 `win32-x64` 和 `linux-x64` VSIX | `scripts/package.mjs` |
 | VS Code Remote 通道 | 已实现本机 IPC、远端 Workspace Executor 和内嵌 VSIX 自动部署；真实 Remote SSH 窗口只读回环已通过 | `VsCodeTransportServer` / `LocalProcessExecutor` |
@@ -94,7 +100,7 @@ CLI。现有 `0.145.0` 稳定版候选只保留为已完成的协议探针，不
 证据。0.2.7 首份基线位于 `docs/acceptance/2026-07-18-release-0.2.7.md`：Windows x64
 Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controller 仅完成打包和
 内容核对，本地 Extension Host、CJS Shim、官方任务及 Remote SSH 运行时仍为待补测。
-Codex `0.145.0` 候选证据位于
+官方扩展内置运行时候选证据位于
 `docs/acceptance/2026-07-22-release-0.2.7.md`，在真实任务门禁完成前不替代上一支持
 基线。
 
