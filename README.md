@@ -98,6 +98,10 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 - 为远程文件提供可打开的资源 URI、Diff 和文件跳转。
 - 建立 Windows/Linux 原生构建与受控产物收集流程，避免单端打包删除另一端产物。
 - 在目标 Remote SSH 主机和 MimicLite 仓库上的完整 P0 验收。
+- [ ] 最后实施本地外部 Codex CLI 介入：CLI 通过 Controller 提供的本地插件接口发现、
+  读取并续接 Remote Bridge 反代后的 Codex 对话，可向同一对话提交 turn，并通过
+  Bridge 已授权写入协议修改远程工作区；本地 VS Code 插件必须同步显示、仲裁和审计
+  外部 CLI 的介入性写入，不把系统 CLI 变成官方 app-server 的运行时来源或回退。
 
 Core 本地工具负测与完整 P0 验收仍是阶段 C 的安全门槛。当前 Shim 除了把 app-server
 放在本地控制目录并注入远程路由策略，还会强制本地拒绝权限配置、阻断已知本地客户端
@@ -180,6 +184,29 @@ SSH 认证，也不改写或伪造 VS Code 工作区 URI。以下项目均为 TO
 完成标准：同一任务可以分别读取和修改本地授权根目录与远程工作区内的文件；越界和
 过期写入被拒绝且原文件保持完整；默认远程路径只复用 VS Code Remote SSH transport；
 两端操作可从日志中区分并完成审计。
+
+## 最终待实现项：外部 Codex CLI 介入
+
+该功能排在全部现有阶段和 P0 收口之后实施。Codex CLI 只运行在本地，通过 Controller
+暴露的受控本地插件接口接入当前 Remote Bridge 会话；远端仍不安装 Codex。
+
+- [ ] 设计跨 Linux/Windows 的本地 IPC 接口和能力握手，不固定外部 Codex CLI 版本；
+  不向 CLI 暴露 OpenAI Token、Remote SSH 会话令牌或插件内部传输令牌。
+- [ ] 支持 CLI 发现、列出、只读回放并续接反代后的对话，稳定保留 thread、turn、
+  item、远程主根和来源客户端身份。
+- [ ] 支持 CLI 向同一对话提交 turn、取消请求和介入性回复；VS Code 插件实时显示外部
+  写入及其来源，不通过直接修改 rollout 文件伪造对话。
+- [ ] CLI 发起的项目文件写入必须复用 Bridge 的远程工具、授权根、`expectedHash`、
+  原子替换、审批、幂等和审计，不允许 CLI 直接绕过插件写远端工作区。
+- [ ] 为同一 thread 建立单写者租约或等价仲裁，处理 VS Code 与 CLI 同时提交、断线
+  重连、重复请求、顺序冲突和结果未知。
+- [ ] 外部 CLI 的接入、读取、turn 写入、项目写入、审批、取消和断开均记录来源客户端
+  与 operation ID；插件 UI 可见并可撤销接入权限。
+- [ ] 完成双客户端诱饵、并发、恢复、权限撤销、敏感信息和 Linux/Windows 实机验收，
+  再重新执行完整 P0 发布门禁。
+
+在该阶段开始前，仍须按“所有待实现功能的实施前置流程”重新汇总清单、探查官方
+app-server/扩展的多客户端能力边界，并先更新详细实施计划。
 
 ## 开发与自测
 
