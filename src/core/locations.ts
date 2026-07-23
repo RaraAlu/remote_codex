@@ -63,6 +63,10 @@ export function bridgeAuditPath(environment: NodeJS.ProcessEnv = process.env): s
   return join(bridgeStateDir(environment), "audit.jsonl");
 }
 
+export function officialCodexRuntimePath(environment: NodeJS.ProcessEnv = process.env): string {
+  return join(bridgeStateDir(environment), "official-codex-runtime.json");
+}
+
 export function bridgeControlDir(environment: NodeJS.ProcessEnv = process.env): string {
   return join(bridgeStateDir(environment), "control");
 }

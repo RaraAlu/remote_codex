@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
+import { loadOfficialCodexRuntime } from "../src/core/codex-runtime-store.js";
+import { officialCodexRuntimePath } from "../src/core/locations.js";
 import { OpenSshExecutor } from "../src/core/ssh-executor.js";
 import { ShimProxy } from "../src/shim/proxy.js";
 import { routeRemoteMcpServers } from "../src/shim/remote-mcp.js";
@@ -335,9 +337,10 @@ describe.skipIf(!enabled)("real OpenSSH bridge acceptance", () => {
         ...remoteConfig(),
         remoteMcpAccess: "all",
       });
+      const runtime = await loadOfficialCodexRuntime(officialCodexRuntimePath());
       const routing = await routeRemoteMcpServers({
         appServerArgs: ["app-server"],
-        codexExecutable: config.codexExecutable,
+        codexExecutable: runtime.executable,
         config,
       });
       expect(routing.remoteServers).toContain("codegraph");

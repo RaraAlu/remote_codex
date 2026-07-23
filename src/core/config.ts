@@ -3,7 +3,6 @@ import { BridgeError } from "./errors.js";
 import type { BridgeConfig } from "./types.js";
 
 const DEFAULTS = {
-  codexExecutable: "codex",
   commandTimeoutMs: 120_000,
   connectTimeoutSeconds: 10,
   maxOutputBytes: 10 * 1024 * 1024,
@@ -181,10 +180,6 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
     ...(sshUser ? { sshUser } : {}),
     ...(sshPort ? { sshPort } : {}),
     ...(identityFile ? { identityFile } : {}),
-    codexExecutable:
-      typeof input.codexExecutable === "string" && input.codexExecutable.trim()
-        ? input.codexExecutable
-        : DEFAULTS.codexExecutable,
     sshExecutable:
       typeof input.sshExecutable === "string" && input.sshExecutable.trim()
         ? input.sshExecutable

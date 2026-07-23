@@ -1,7 +1,17 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { findOfficialCodexRuntime } from "./official-codex.mjs";
+
+const officialRuntime = await findOfficialCodexRuntime();
+const bundledCodexVersion = execFileSync(
+  officialRuntime.executable,
+  ["--version"],
+  { encoding: "utf8" },
+)
+  .trim()
+  .replace(/^codex-cli\s+/, "");
 
 const appServerArgs = [
   "-c",
@@ -18,10 +28,26 @@ function appServerEnvironment(stateDir, codexHome, sessionConfigPath = null) {
   };
   delete environment.CODEX_BRIDGE_CONFIG;
   delete environment.CODEX_BRIDGE_SESSION_CONFIG;
+  delete environment.CODEX_BRIDGE_CODEX_EXECUTABLE;
+  delete environment.CODEX_BRIDGE_DEVELOPMENT_CODEX_EXECUTABLE;
   if (sessionConfigPath) {
     environment.CODEX_BRIDGE_SESSION_CONFIG = sessionConfigPath;
   }
   return environment;
+}
+
+async function writeRuntimeMetadata(stateDir) {
+  await mkdir(stateDir, { mode: 0o700, recursive: true });
+  await writeFile(
+    join(stateDir, "official-codex-runtime.json"),
+    `${JSON.stringify({
+      source: "official-extension",
+      executable: officialRuntime.executable,
+      extensionVersion: officialRuntime.extensionVersion,
+      codexVersion: bundledCodexVersion,
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
 }
 
 async function runHandshake(shim, environment, startThread = false) {
@@ -115,6 +141,27 @@ async function runHandshake(shim, environment, startThread = false) {
   return { messages, stdout };
 }
 
+async function assertMissingRuntimeFailsClosed(shim, stateDir, codexHome) {
+  const child = spawn(shim, ["--version"], {
+    env: appServerEnvironment(stateDir, codexHome),
+    stdio: "pipe",
+  });
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  const exitCode = await new Promise((resolveExit, reject) => {
+    child.once("error", reject);
+    child.once("close", (code) => resolveExit(code));
+  });
+  if (exitCode === 0 || !stderr.includes("runtime metadata is unavailable")) {
+    throw new Error(
+      `Shim did not fail closed without official runtime metadata: ${stderr}`,
+    );
+  }
+}
+
 function assertHandshake({ messages, stdout }) {
   const initialize = messages.find((message) => message.id === 1);
   if (!initialize?.result?.userAgent?.includes("codex_bridge_smoke")) {
@@ -141,8 +188,17 @@ const shim = resolve(
 );
 
 try {
+  const missingRuntimeHome = join(rootDir, "missing-runtime-codex-home");
+  await mkdir(missingRuntimeHome, { mode: 0o700, recursive: true });
+  await assertMissingRuntimeFailsClosed(
+    shim,
+    join(rootDir, "missing-runtime-state"),
+    missingRuntimeHome,
+  );
+
   const localStateDir = join(rootDir, "local-state");
   const localCodexHome = join(rootDir, "local-codex-home");
+  await writeRuntimeMetadata(localStateDir);
   await mkdir(localCodexHome, { mode: 0o700, recursive: true });
   const localHandshake = await runHandshake(
     shim,
@@ -164,6 +220,7 @@ try {
   const remoteStateDir = join(rootDir, "remote-state");
   const remoteCodexHome = join(rootDir, "remote-codex-home");
   const sessionConfigPath = join(remoteStateDir, "sessions", "smoke.json");
+  await writeRuntimeMetadata(remoteStateDir);
   await mkdir(remoteCodexHome, { mode: 0o700, recursive: true });
   await mkdir(join(remoteStateDir, "sessions"), { mode: 0o700, recursive: true });
   await writeFile(
@@ -177,7 +234,6 @@ try {
       remoteHelper: "none",
       remoteMcpRouting: "local",
       remoteMcpAccess: "enabled",
-      codexExecutable: "codex",
       commandTimeoutMs: 120_000,
       maxOutputBytes: 10 * 1024 * 1024,
       maxParallelReads: 8,
@@ -205,7 +261,7 @@ try {
     }
   }
   process.stdout.write(
-    "Shim smoke test passed: local passthrough plus remote-window startup and thread creation\n",
+    "Shim smoke test passed: missing metadata fails closed, official-runtime local passthrough, remote-window startup and thread creation\n",
   );
 } finally {
   await rm(rootDir, { force: true, recursive: true });

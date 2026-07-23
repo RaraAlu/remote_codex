@@ -2,11 +2,11 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { hostname } from "node:os";
-import { join } from "node:path";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
 import { AuditLog } from "../core/audit-log.js";
-import { codexExecutableCandidates, resolveCodexExecutable } from "../core/codex-executable.js";
+import { saveOfficialCodexRuntime } from "../core/codex-runtime-store.js";
+import { GENERATED_CODEX_APP_SERVER_VERSION } from "../core/compatibility.js";
 import { parseBridgeConfig } from "../core/config.js";
 import { loadBridgeConfig, saveBridgeConfig } from "../core/config-store.js";
 import { asBridgeError, BridgeError } from "../core/errors.js";
@@ -15,7 +15,14 @@ import {
   bridgeConfigPath,
   bridgeControlDir,
   bridgeSessionConfigPath,
+  officialCodexRuntimePath,
 } from "../core/locations.js";
+import {
+  OFFICIAL_CODEX_EXTENSION_ID,
+  resolveOfficialCodexExecutable,
+  validateBundledCodexProtocol,
+  type OfficialCodexRuntime,
+} from "../core/official-codex.js";
 import { redact } from "../core/redaction.js";
 import { OpenSshExecutor } from "../core/ssh-executor.js";
 import { resolveSshExecutable } from "../core/ssh-executable.js";
@@ -54,6 +61,8 @@ interface DiagnosticReport {
     extensionHostPid: number;
     extensionKind: string;
     vscodeRemoteName: string | null;
+    codexExecutable: string | null;
+    codexRuntimeSource: "official-extension" | null;
     codexVersion: string | null;
     codexExtensionVersion: string | null;
     shimPath: string;
@@ -134,18 +143,8 @@ export class BridgeController implements vscode.Disposable {
     this.#output = vscode.window.createOutputChannel("Codex Remote Bridge", { log: true });
     this.#settings = new OfficialSettingsManager(context);
     this.#transport = new VsCodeTransportServer(() => this.#sessionConfig ?? this.#config);
-    const officialCodex = vscode.extensions.getExtension("openai.chatgpt");
-    const bundledCodex = officialCodex
-      ? join(
-          officialCodex.extensionPath,
-          "bin",
-          process.platform === "win32" ? "windows-x86_64" : "linux-x86_64",
-          process.platform === "win32" ? "codex.exe" : "codex",
-        )
-      : undefined;
-    process.env.CODEX_BRIDGE_CODEX_EXECUTABLE ??= resolveCodexExecutable("codex", {
-      additionalCandidates: bundledCodex ? [bundledCodex] : [],
-    });
+    delete process.env.CODEX_BRIDGE_CODEX_EXECUTABLE;
+    delete process.env.CODEX_BRIDGE_DEVELOPMENT_CODEX_EXECUTABLE;
     this.#status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 30);
     this.#status.command = "codexRemoteBridge.diagnostics";
     this.#status.tooltip = "Codex Remote Bridge diagnostics";
@@ -198,6 +197,15 @@ export class BridgeController implements vscode.Disposable {
   }
 
   async #initializeOnce(): Promise<void> {
+    try {
+      await this.#refreshOfficialCodexRuntime();
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "PROTOCOL_MISMATCH");
+      this.#log(`official Codex runtime validation failed: ${bridgeError.message}`);
+      void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+      return;
+    }
+
     if (this.#settings.hasManagedExecutable()) {
       try {
         const shimPath = await installShimExecutable(this.#context);
@@ -241,7 +249,6 @@ export class BridgeController implements vscode.Disposable {
     this.#state.transition("configuring");
     try {
       const config = await this.#resolveCompatibleCodex(this.#currentRemoteConfig());
-      process.env.CODEX_BRIDGE_CODEX_EXECUTABLE = config.codexExecutable;
       const shimPath = await installShimExecutable(this.#context);
       if (interactive) {
         const confirmation = await vscode.window.showWarningMessage(
@@ -279,7 +286,7 @@ export class BridgeController implements vscode.Disposable {
       await this.#connect();
       if (interactive) {
         void vscode.window.showInformationMessage(
-          `Codex Bridge ready: local Codex -> ${config.host}`,
+          `Codex Bridge ready: official extension Codex -> ${config.host}`,
         );
       }
     } catch (error) {
@@ -303,17 +310,15 @@ export class BridgeController implements vscode.Disposable {
     this.#state.transition("connecting");
     try {
       const storedConfig = await loadBridgeConfig(bridgeConfigPath());
-      this.#config = {
+      this.#config = await this.#resolveCompatibleCodex({
         ...storedConfig,
-        codexExecutable: resolveCodexExecutable(storedConfig.codexExecutable),
         sshExecutable: resolveSshExecutable(storedConfig.sshExecutable),
-      };
-      process.env.CODEX_BRIDGE_CODEX_EXECUTABLE = this.#config.codexExecutable;
+      });
+      await saveBridgeConfig(bridgeConfigPath(), this.#config);
       await this.#saveWindowSession(this.#config);
-      await this.#verifyCodexVersion(this.#config);
       await this.#connect();
       void vscode.window.showInformationMessage(
-        `Codex Bridge ready: local Codex -> ${this.#config.host}`,
+        `Codex Bridge ready: official extension Codex -> ${this.#config.host}`,
       );
     } catch (error) {
       const bridgeError = asBridgeError(error, "SSH_DISCONNECTED");
@@ -427,7 +432,6 @@ export class BridgeController implements vscode.Disposable {
       sshUser: settings.get<string | null>("sshUser"),
       sshPort: settings.get<number | null>("sshPort"),
       identityFile: settings.get<string | null>("identityFile"),
-      codexExecutable: settings.get<string>("codexExecutable"),
       sshExecutable: resolveSshExecutable(settings.get<string>("sshExecutable", "ssh")),
       remoteMcpRouting: settings.get<"auto" | "local">("remoteMcpRouting", "auto"),
       remoteMcpAccess: settings.get<"enabled" | "all">("remoteMcpAccess", "enabled"),
@@ -580,12 +584,17 @@ export class BridgeController implements vscode.Disposable {
   async #diagnostics(): Promise<DiagnosticReport> {
     let config: BridgeConfig | null = this.#config;
     let configError: unknown = null;
+    let runtime: OfficialCodexRuntime | null = null;
+    try {
+      runtime = await this.#refreshOfficialCodexRuntime();
+    } catch (error) {
+      configError = asBridgeError(error, "PROTOCOL_MISMATCH").toPayload();
+    }
     if (!config) {
       try {
         const storedConfig = await loadBridgeConfig(bridgeConfigPath());
         config = {
           ...storedConfig,
-          codexExecutable: resolveCodexExecutable(storedConfig.codexExecutable),
           sshExecutable: resolveSshExecutable(storedConfig.sshExecutable),
         };
       } catch (error) {
@@ -624,7 +633,6 @@ export class BridgeController implements vscode.Disposable {
 
     const codexExtension = vscode.extensions.getExtension("openai.chatgpt");
     const ownExtension = vscode.extensions.getExtension("zkbot.codex-vscode-remote-bridge");
-    const codexVersion = config ? await this.#readCodexVersion(config.codexExecutable) : null;
     const shimPath = await installShimExecutable(this.#context);
     return {
       generatedAt: new Date().toISOString(),
@@ -641,7 +649,9 @@ export class BridgeController implements vscode.Disposable {
         extensionKind:
           ownExtension?.extensionKind === vscode.ExtensionKind.UI ? "ui" : "workspace-or-unknown",
         vscodeRemoteName: vscode.env.remoteName ?? null,
-        codexVersion,
+        codexExecutable: runtime?.executable ?? null,
+        codexRuntimeSource: runtime?.source ?? null,
+        codexVersion: runtime?.codexVersion ?? null,
         codexExtensionVersion:
           (codexExtension?.packageJSON.version as string | undefined) ?? null,
         shimPath,
@@ -656,66 +666,53 @@ export class BridgeController implements vscode.Disposable {
     };
   }
 
-  async #verifyCodexVersion(config: BridgeConfig): Promise<void> {
-    const actual = await this.#readCodexVersion(config.codexExecutable);
-    const expected = this.#context.extension.packageJSON.codexAppServerVersion as
-      | string
-      | undefined;
-    if (!actual) {
-      throw new BridgeError("PROTOCOL_MISMATCH", "Unable to determine local Codex version");
-    }
-    if (expected && actual !== expected) {
+  #officialCodexInstallation(): { executable: string; extensionVersion: string } {
+    const extension = vscode.extensions.getExtension(OFFICIAL_CODEX_EXTENSION_ID);
+    if (!extension) {
       throw new BridgeError(
         "PROTOCOL_MISMATCH",
-        `Codex ${actual} is incompatible with generated bridge protocol ${expected}`,
+        "The official OpenAI Codex extension is not installed",
       );
     }
+    const extensionVersion = extension.packageJSON.version;
+    if (typeof extensionVersion !== "string" || !extensionVersion) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "The official OpenAI Codex extension version is unavailable",
+      );
+    }
+    return {
+      executable: resolveOfficialCodexExecutable(extension.extensionPath),
+      extensionVersion,
+    };
   }
 
   async #resolveCompatibleCodex(config: BridgeConfig): Promise<BridgeConfig> {
-    const expected = this.#context.extension.packageJSON.codexAppServerVersion as
-      | string
-      | undefined;
-    let detectedVersion: string | null = null;
-    const officialCodex = vscode.extensions.getExtension("openai.chatgpt");
-    const bundledCodex = officialCodex
-      ? join(
-          officialCodex.extensionPath,
-          "bin",
-          process.platform === "win32" ? "windows-x86_64" : "linux-x86_64",
-          process.platform === "win32" ? "codex.exe" : "codex",
-        )
-      : undefined;
-    for (const executable of new Set(
-      codexExecutableCandidates(
-        config.codexExecutable,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        bundledCodex ? [bundledCodex] : [],
-      ),
-    )) {
-      const actual = await this.#readCodexVersion(executable);
-      if (!actual) {
-        continue;
-      }
-      detectedVersion ??= actual;
-      if (!expected || actual === expected) {
-        return {
-          ...config,
-          codexExecutable: executable,
-          sshExecutable: resolveSshExecutable(config.sshExecutable),
-        };
-      }
-    }
-    if (detectedVersion && expected) {
+    await this.#refreshOfficialCodexRuntime();
+    return {
+      ...config,
+      sshExecutable: resolveSshExecutable(config.sshExecutable),
+    };
+  }
+
+  async #refreshOfficialCodexRuntime(): Promise<OfficialCodexRuntime> {
+    const installation = this.#officialCodexInstallation();
+    const codexVersion = await this.#readCodexVersion(installation.executable);
+    if (!codexVersion) {
       throw new BridgeError(
         "PROTOCOL_MISMATCH",
-        `Codex ${detectedVersion} is incompatible with generated bridge protocol ${expected}`,
+        "Unable to determine the bundled Codex version from the official extension",
       );
     }
-    throw new BridgeError("PROTOCOL_MISMATCH", "Unable to determine local Codex version");
+    const runtime: OfficialCodexRuntime = {
+      source: "official-extension",
+      executable: installation.executable,
+      extensionVersion: installation.extensionVersion,
+      codexVersion,
+    };
+    validateBundledCodexProtocol(runtime, GENERATED_CODEX_APP_SERVER_VERSION);
+    await saveOfficialCodexRuntime(officialCodexRuntimePath(), runtime);
+    return runtime;
   }
 
   async #readCodexVersion(executable: string): Promise<string | null> {

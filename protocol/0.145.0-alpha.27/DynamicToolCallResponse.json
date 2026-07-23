@@ -59,26 +59,6 @@
             }
           },
           "title": "InputImageDynamicToolCallOutputContentItem"
-        },
-        {
-          "type": "object",
-          "required": [
-            "audioUrl",
-            "type"
-          ],
-          "properties": {
-            "audioUrl": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "inputAudio"
-              ],
-              "title": "InputAudioDynamicToolCallOutputContentItemType"
-            }
-          },
-          "title": "InputAudioDynamicToolCallOutputContentItem"
         }
       ]
     }

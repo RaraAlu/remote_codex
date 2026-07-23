@@ -40,7 +40,6 @@ export interface BridgeConfig {
   sshUser?: string;
   sshPort?: number;
   identityFile?: string;
-  codexExecutable: string;
   sshExecutable: string;
   remoteMcpRouting: "auto" | "local";
   remoteMcpAccess: "enabled" | "all";

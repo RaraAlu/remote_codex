@@ -70,12 +70,6 @@
           "scope": "window",
           "description": "Automatically configure and connect when a single VS Code Remote SSH workspace opens."
         },
-        "codexRemoteBridge.codexExecutable": {
-          "type": "string",
-          "default": "codex",
-          "scope": "window",
-          "description": "Local Codex CLI executable used by the shim."
-        },
         "codexRemoteBridge.sshExecutable": {
           "type": "string",
           "default": "ssh",
@@ -189,5 +183,5 @@
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   },
-  "codexAppServerVersion": "0.145.0"
+  "codexAppServerVersion": "0.145.0-alpha.27"
 }

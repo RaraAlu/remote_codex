@@ -85,7 +85,6 @@ function executorFor(request: RemoteExecutorCommandRequest): LocalProcessExecuto
     connectionMode: "vscode-remote",
     localExecution: "deny",
     remoteHelper: "vscode-extension",
-    codexExecutable: "codex",
     sshExecutable: "ssh",
     remoteMcpRouting: "local",
     remoteMcpAccess: "enabled",

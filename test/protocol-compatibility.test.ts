@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { GENERATED_CODEX_APP_SERVER_VERSION } from "../src/core/compatibility.js";
 import { KNOWN_SERVER_REQUESTS } from "../src/shim/proxy.js";
 
 interface ServerRequestSchema {
@@ -14,6 +15,7 @@ interface ServerRequestSchema {
 
 interface ProtocolManifest {
   codexVersion: string;
+  sourceExtensionVersion: string;
 }
 
 async function currentProtocolPath(relativePath: string): Promise<string> {
@@ -32,6 +34,10 @@ describe("generated app-server protocol compatibility", () => {
       await readFile(await currentProtocolPath("manifest.json"), "utf8"),
     ) as ProtocolManifest;
     expect(manifest.codexVersion).toBe(packageJson.codexAppServerVersion);
+    expect(manifest.sourceExtensionVersion).toMatch(/^\d+\./);
+    expect(GENERATED_CODEX_APP_SERVER_VERSION).toBe(
+      packageJson.codexAppServerVersion,
+    );
   });
 
   it("keeps the fail-closed server request allowlist synchronized", async () => {

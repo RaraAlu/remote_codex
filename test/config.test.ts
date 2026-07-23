@@ -16,7 +16,6 @@ describe("parseBridgeConfig", () => {
       connectionMode: "openssh",
       localExecution: "deny",
       remoteHelper: "none",
-      codexExecutable: "codex",
       sshExecutable: "ssh",
       remoteMcpRouting: "auto",
       remoteMcpAccess: "enabled",
@@ -26,6 +25,15 @@ describe("parseBridgeConfig", () => {
       maxParallelWrites: 1,
       connectTimeoutSeconds: 10,
     });
+  });
+
+  it("ignores the removed legacy Codex executable setting", () => {
+    expect(
+      parseBridgeConfig({
+        ...minimalConfig,
+        codexExecutable: "/usr/local/bin/codex",
+      }),
+    ).not.toHaveProperty("codexExecutable");
   });
 
   it("accepts explicit direct-host OpenSSH routing without reading the key", () => {

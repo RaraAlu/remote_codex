@@ -1,16 +1,19 @@
 import { spawn } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, normalize, resolve } from "node:path";
 import { AuditLog } from "../core/audit-log.js";
-import { resolveCodexExecutable } from "../core/codex-executable.js";
+import { GENERATED_CODEX_APP_SERVER_VERSION } from "../core/compatibility.js";
 import { loadBridgeConfig } from "../core/config-store.js";
+import { loadOfficialCodexRuntime } from "../core/codex-runtime-store.js";
 import { BridgeError } from "../core/errors.js";
 import { chmodIfSupported } from "../core/file-permissions.js";
 import {
   activeBridgeConfigPath,
   bridgeAuditPath,
   bridgeControlDir,
+  officialCodexRuntimePath,
 } from "../core/locations.js";
+import { validateBundledCodexProtocol } from "../core/official-codex.js";
 import type { BridgeConfig } from "../core/types.js";
 import { parseMcpProxyInvocation } from "./mcp-proxy-invocation.js";
 import { ShimProxy } from "./proxy.js";
@@ -50,7 +53,7 @@ function assertExecutableIsNotShim(executable: string): void {
   if (resolve(executable) === resolve(process.argv[1] ?? "")) {
     throw new BridgeError(
       "INVALID_CONFIG",
-      "CODEX_BRIDGE_CODEX_EXECUTABLE resolves to the shim itself",
+      "The selected official Codex executable resolves to the shim itself",
     );
   }
 }
@@ -81,12 +84,30 @@ async function waitForSessionConfig(path: string, timeoutMs = 5_000): Promise<vo
   }
 }
 
+async function selectedCodexExecutable(): Promise<string> {
+  const developmentOverride =
+    process.env.CODEX_BRIDGE_DEVELOPMENT_CODEX_EXECUTABLE;
+  if (developmentOverride) {
+    if (
+      !isAbsolute(developmentOverride) ||
+      normalize(developmentOverride) !== developmentOverride
+    ) {
+      throw new BridgeError(
+        "INVALID_CONFIG",
+        "CODEX_BRIDGE_DEVELOPMENT_CODEX_EXECUTABLE must be an absolute path",
+      );
+    }
+    return developmentOverride;
+  }
+  const runtime = await loadOfficialCodexRuntime(officialCodexRuntimePath());
+  validateBundledCodexProtocol(runtime, GENERATED_CODEX_APP_SERVER_VERSION);
+  return runtime.executable;
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const mcpProxy = parseMcpProxyInvocation(args);
-  const fallbackExecutable = resolveCodexExecutable(
-    process.env.CODEX_BRIDGE_CODEX_EXECUTABLE || "codex",
-  );
+  const fallbackExecutable = await selectedCodexExecutable();
   assertExecutableIsNotShim(fallbackExecutable);
   const configPath = mcpProxy?.configPath ?? activeBridgeConfigPath();
   if (!configPath) {
@@ -102,9 +123,7 @@ async function main(): Promise<number> {
     await waitForSessionConfig(configPath);
   }
   const config = await loadOptionalConfig(configPath, audit);
-  const codexExecutable = resolveCodexExecutable(
-    process.env.CODEX_BRIDGE_CODEX_EXECUTABLE || config?.codexExecutable || fallbackExecutable,
-  );
+  const codexExecutable = fallbackExecutable;
   assertExecutableIsNotShim(codexExecutable);
 
   if (mcpProxy) {
