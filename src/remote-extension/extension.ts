@@ -164,10 +164,18 @@ async function dispatch(
     }
     case "stdioStart": {
       await stdioSessions.start({
+        adapterId:
+          params.adapterId === null || params.adapterId === undefined
+            ? null
+            : stringValue(params.adapterId, "params.adapterId"),
         args: stringArray(params.args, "params.args"),
         executable: stringValue(params.executable, "params.executable"),
         id: request.id,
         maxFrameBytes: Math.min(request.policy.maxOutputBytes, REMOTE_STDIO_MAX_FRAME_BYTES),
+        serverName:
+          params.serverName === null || params.serverName === undefined
+            ? null
+            : stringValue(params.serverName, "params.serverName"),
         workspaceRoot: request.workspaceRoot,
       });
       return { started: true };

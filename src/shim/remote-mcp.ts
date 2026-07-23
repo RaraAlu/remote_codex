@@ -1,6 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
+  selectRemoteMcpAdapter,
+  type RemoteMcpAdapterId,
+} from "../core/remote-mcp-adapters.js";
+import {
   areRemoteMcpArgumentsSafe,
   remoteMcpExecutableName,
 } from "../core/remote-mcp-policy.js";
@@ -64,6 +68,7 @@ type McpConfigProperty =
   | "enabled";
 
 interface RemoteMcpRoute {
+  adapterId: RemoteMcpAdapterId | null;
   name: string;
   executable: string;
   args: string[];
@@ -285,7 +290,20 @@ export async function routeRemoteMcpServers(
       }
       const route = remoteArgs(server, options.config.workspaceRoot);
       if (await available(route.executable)) {
-        routes.push({ name: server.name, ...route });
+        const adapterId = selectRemoteMcpAdapter({
+          access: options.config.remoteMcpAccess,
+          executable: route.executable,
+          serverName: server.name,
+        });
+        if (adapterId && !options.relay) {
+          localServers.push(server.name);
+          return;
+        }
+        routes.push({
+          adapterId,
+          name: server.name,
+          ...route,
+        });
       } else {
         localServers.push(server.name);
       }
@@ -325,13 +343,17 @@ export async function routeRemoteMcpServers(
       : [];
   const routeGroups: McpOverrideGroup[] = routes.map((route) => {
     const launch =
-      options.config.connectionMode === "vscode-remote" && options.relay
+      options.relay &&
+      (options.config.connectionMode === "vscode-remote" || route.adapterId !== null)
         ? {
             args: [
               ...options.relay.args,
               "mcp-proxy",
               "--session-config",
               options.relay.sessionConfigPath,
+              ...(route.adapterId
+                ? ["--server-name", route.name, "--adapter", route.adapterId]
+                : []),
               route.executable,
               ...route.args,
             ],

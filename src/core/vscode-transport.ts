@@ -3,7 +3,7 @@ import type { BridgeErrorPayload } from "./types.js";
 export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
 export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
-export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 3;
+export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 4;
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 

@@ -6,6 +6,7 @@ import {
 import { realpath } from "node:fs/promises";
 import { BridgeError } from "../core/errors.js";
 import { remoteProcessEnvironment } from "../core/local-process-executor.js";
+import { resolveRemoteMcpLaunch } from "../core/remote-mcp-adapters.js";
 import {
   assertRemoteMcpLaunch,
   resolveRemoteMcpExecutable,
@@ -24,10 +25,12 @@ interface StdioSession {
 }
 
 export interface StartStdioRequest {
+  adapterId?: string | null;
   args: string[];
   executable: string;
   id: string;
   maxFrameBytes: number;
+  serverName?: string | null;
   workspaceRoot: string;
 }
 
@@ -52,7 +55,12 @@ export class RemoteStdioSessions {
     if (this.#sessions.has(request.id)) {
       throw new BridgeError("PROTOCOL_MISMATCH", "Duplicate remote stdio session id");
     }
-    assertRemoteMcpLaunch(request.executable, request.args, request.workspaceRoot);
+    const launch = resolveRemoteMcpLaunch({
+      ...request,
+      adapterId: request.adapterId ?? null,
+      serverName: request.serverName ?? null,
+    });
+    assertRemoteMcpLaunch(request.executable, launch.args, request.workspaceRoot);
     const [cwd, executable] = await Promise.all([
       realpath(request.workspaceRoot),
       this.#resolveExecutable(request.executable),
@@ -63,9 +71,9 @@ export class RemoteStdioSessions {
         `Remote MCP executable was not found: ${request.executable}`,
       );
     }
-    const child = this.#spawn(executable, request.args, {
+    const child = this.#spawn(executable, launch.args, {
       cwd,
-      env: remoteProcessEnvironment(undefined),
+      env: remoteProcessEnvironment(launch.environment),
       stdio: "pipe",
     });
     const session: StdioSession = { child, outputQueue: Promise.resolve() };

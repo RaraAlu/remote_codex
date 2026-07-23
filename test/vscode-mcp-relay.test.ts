@@ -91,12 +91,14 @@ describe("VsCodeMcpRelay", () => {
       },
     });
     const relay = new VsCodeMcpRelay({
-      args: ["serve", "--mcp"],
+      adapterId: "codegraph-all-tools-v1",
+      args: ["serve", "--mcp", "--path", "/workspace"],
       config,
       errorOutput,
-      executable: "index-mcp",
+      executable: "codegraph",
       input,
       output,
+      serverName: "codegraph",
     });
     const running = relay.run();
     input.end("request\n");
@@ -104,7 +106,12 @@ describe("VsCodeMcpRelay", () => {
     await expect(running).resolves.toBe(0);
     expect(observedStart).toMatchObject({
       operation: "stdioStart",
-      params: { args: ["serve", "--mcp"], executable: "index-mcp" },
+      params: {
+        adapterId: "codegraph-all-tools-v1",
+        args: ["serve", "--mcp", "--path", "/workspace"],
+        executable: "codegraph",
+        serverName: "codegraph",
+      },
     });
     expect(observedInput).toBe("request\n");
     expect(Buffer.concat(outputChunks).toString()).toBe("response\n");

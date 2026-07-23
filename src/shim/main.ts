@@ -16,6 +16,7 @@ import {
 import { validateBundledCodexProtocol } from "../core/official-codex.js";
 import type { BridgeConfig } from "../core/types.js";
 import { parseMcpProxyInvocation } from "./mcp-proxy-invocation.js";
+import { OpenSshMcpRelay } from "./openssh-mcp-relay.js";
 import { ShimProxy } from "./proxy.js";
 import { routeRemoteMcpServers } from "./remote-mcp.js";
 import { VsCodeMcpRelay } from "./vscode-mcp-relay.js";
@@ -127,14 +128,19 @@ async function main(): Promise<number> {
   assertExecutableIsNotShim(codexExecutable);
 
   if (mcpProxy) {
-    if (!config || config.connectionMode !== "vscode-remote") {
+    if (!config) {
       throw new BridgeError("INVALID_CONFIG", "Remote MCP relay configuration is unavailable");
     }
-    return await new VsCodeMcpRelay({
+    const relayOptions = {
+      adapterId: mcpProxy.adapterId,
       args: mcpProxy.args,
       config,
       executable: mcpProxy.executable,
-    }).run();
+      serverName: mcpProxy.serverName,
+    };
+    return config.connectionMode === "vscode-remote"
+      ? await new VsCodeMcpRelay(relayOptions).run()
+      : await new OpenSshMcpRelay(relayOptions).run();
   }
 
   if (!args.includes("app-server")) {

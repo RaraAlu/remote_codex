@@ -133,6 +133,11 @@ describe("remote MCP routing", () => {
       codexExecutable: "codex",
       config: allConfig,
       listServers: async () => [blender, codegraph],
+      relay: {
+        args: [],
+        command: "/bridge/codex-bridge-shim",
+        sessionConfigPath: "/bridge/sessions/123.json",
+      },
       remoteExecutableAvailable: async (executable) => executable === "codegraph",
       validateConfigOverrides: async () => true,
     });
@@ -149,8 +154,14 @@ describe("remote MCP routing", () => {
       );
     }
     expect(result.appServerArgs).toContain(
-      'mcp_servers.codegraph.command="ssh"',
+      'mcp_servers.codegraph.command="/bridge/codex-bridge-shim"',
     );
+    const routeArgs = result.appServerArgs.find((entry) =>
+      entry.startsWith("mcp_servers.codegraph.args="),
+    );
+    expect(routeArgs).toContain("--adapter");
+    expect(routeArgs).toContain("codegraph-all-tools-v1");
+    expect(routeArgs).not.toContain("search,callers,callees");
   });
 
   it("can enable all MCPs while keeping every server local", async () => {
@@ -184,6 +195,7 @@ describe("remote MCP routing", () => {
       host: "training-gpu",
       workspaceRoot: "/remote/workspace with spaces",
       connectionMode: "vscode-remote",
+      remoteMcpAccess: "all",
       remoteHelper: "vscode-extension",
       vscodeTransport: {
         endpoint: "local-endpoint",
@@ -218,6 +230,10 @@ describe("remote MCP routing", () => {
       "mcp-proxy",
       "--session-config",
       "C:\\bridge\\sessions\\123.json",
+      "--server-name",
+      "codegraph",
+      "--adapter",
+      "codegraph-all-tools-v1",
       "codegraph",
       "serve",
       "--mcp",

@@ -17,18 +17,53 @@ describe("parseMcpProxyInvocation", () => {
         "serve",
       ]),
     ).toEqual({
+      adapterId: null,
       args: ["serve"],
       configPath,
       executable: "index-mcp",
+      serverName: null,
     });
   });
 
   it("retains the environment-based form for existing launchers", () => {
     expect(parseMcpProxyInvocation(["mcp-proxy", "index-mcp", "serve"])).toEqual({
+      adapterId: null,
       args: ["serve"],
       configPath: null,
       executable: "index-mcp",
+      serverName: null,
     });
+  });
+
+  it("parses a generic registered adapter without carrying environment values", () => {
+    expect(
+      parseMcpProxyInvocation([
+        "mcp-proxy",
+        "--server-name",
+        "codegraph",
+        "--adapter",
+        "codegraph-all-tools-v1",
+        "codegraph",
+        "serve",
+      ]),
+    ).toEqual({
+      adapterId: "codegraph-all-tools-v1",
+      args: ["serve"],
+      configPath: null,
+      executable: "codegraph",
+      serverName: "codegraph",
+    });
+  });
+
+  it("requires a server name before an adapter", () => {
+    expect(() =>
+      parseMcpProxyInvocation([
+        "mcp-proxy",
+        "--adapter",
+        "codegraph-all-tools-v1",
+        "codegraph",
+      ]),
+    ).toThrow(/adapter is invalid/);
   });
 
   it("rejects a relative explicit session path", () => {

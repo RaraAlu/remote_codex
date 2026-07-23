@@ -13,6 +13,7 @@ import {
 } from "../core/vscode-transport.js";
 
 export interface VsCodeMcpRelayOptions {
+  adapterId?: string | null;
   args: readonly string[];
   config: BridgeConfig;
   connect?: typeof createConnection;
@@ -20,6 +21,7 @@ export interface VsCodeMcpRelayOptions {
   executable: string;
   input?: Readable;
   output?: Writable;
+  serverName?: string | null;
 }
 
 function writeFrame(socket: Socket, message: TransportRequest | TransportStdioInput): boolean {
@@ -53,8 +55,10 @@ export class VsCodeMcpRelay {
       operation: "stdioStart",
       outputCommand: REMOTE_OUTPUT_COMMAND,
       params: {
+        adapterId: this.#options.adapterId ?? null,
         args: [...this.#options.args],
         executable: this.#options.executable,
+        serverName: this.#options.serverName ?? null,
       },
       policy: {
         commandTimeoutMs: config.commandTimeoutMs,

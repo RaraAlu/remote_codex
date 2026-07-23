@@ -75,4 +75,40 @@ describe("RemoteStdioSessions", () => {
       { event: "exit", exitCode: 0, id: "session-1", signal: null },
     ]);
   });
+
+  it("applies a registered adapter only inside the remote process environment", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "codex-stdio-adapter-"));
+    temporaryDirectories.push(workspace);
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(() => true),
+    });
+    let spawnOptions: Record<string, unknown> | undefined;
+    const sessions = new RemoteStdioSessions(
+      async () => undefined,
+      (_command, _args, options) => {
+        spawnOptions = options as Record<string, unknown>;
+        queueMicrotask(() => child.emit("spawn"));
+        return child as never;
+      },
+      async () => "/remote/bin/codegraph",
+    );
+
+    await sessions.start({
+      adapterId: "codegraph-all-tools-v1",
+      args: ["serve", "--mcp", "--path", workspace],
+      executable: "codegraph",
+      id: "adapter-session",
+      maxFrameBytes: 1024,
+      serverName: "codegraph",
+      workspaceRoot: workspace,
+    });
+
+    expect((spawnOptions?.env as NodeJS.ProcessEnv).CODEGRAPH_MCP_TOOLS).toBe(
+      "search,callers,callees,impact,node,explore,status,files",
+    );
+    sessions.stop("adapter-session");
+  });
 });
