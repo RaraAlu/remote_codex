@@ -105,7 +105,9 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 官方扩展内置运行时候选证据位于
 `docs/acceptance/2026-07-22-release-0.2.7.md`，在真实任务门禁完成前不替代上一支持
 基线。通用 MCP 适配器、Executor `0.2.6` / 协议 v4 和本次 Linux Remote SSH 新任务
-证据位于 `docs/acceptance/2026-07-22-release-0.2.7-mcp-adapter.md`。
+证据位于 `docs/acceptance/2026-07-22-release-0.2.7-mcp-adapter.md`。Executor
+`0.2.7` 精确版本门禁、真实安装、摘要一致性和主根探针见
+`docs/acceptance/2026-07-22-release-0.2.7-executor-version-gate.md`。
 
 ## 本地 MCP 边界
 

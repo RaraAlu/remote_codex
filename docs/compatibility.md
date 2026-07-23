@@ -14,7 +14,7 @@
 | VS Code | `1.130.0`（Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | 相对支持基线已变化；真实任务待补测 |
 | 官方 Codex 扩展 | 本次实测 `openai.chatgpt@26.715.61943` | 固定扩展 ID，不固定版本；使用 VS Code 当前实际加载版本 | 插件内置运行时自动化、恢复会话和 Remote SSH 新任务通过；本地窗口待补测 |
 | Bridge Controller | `0.2.7`，Windows x64、Linux x64 | 同一扩展 ID，分别发布 `win32-x64` 和 `linux-x64` VSIX | Linux 自动化、Shim 冒烟、包内容、候选安装、窗口重载和真实 Remote SSH 通过；Windows 待补测 |
-| Remote Executor | `0.2.6`，Linux x64 | Workspace 扩展；通过当前 Remote SSH 通道自动部署，不含 Codex 或凭据 | 协议 v4 握手、适配器解析、通用 stdio MCP、八工具枚举和真实调用通过 |
+| Remote Executor | `0.2.7`，Linux x64 | Workspace 扩展；通过当前 Remote SSH 通道自动部署，不含 Codex 或凭据 | 精确版本与协议 v4 握手、远端构建摘要、主根探针通过；适配器和八工具证据继承自相同协议的 `0.2.6` 基线 |
 | 官方扩展内置 Codex/app-server | `0.145.0-alpha.27` | 只从当前官方扩展安装目录启动；与生成协议精确匹配 | 协议门禁、真实 Shim、Remote SSH 新任务和远端工具调用通过；本地窗口待补测 |
 | 系统 Codex CLI | 任意或未安装 | 不发现、不选择、不透传、不回退 | 不属于运行依赖 |
 | Remote SSH | `0.124.0` | 使用 `remote.extensionKind` 探针设置 | 版本未变；新兼容集合的固定远端探针待补测 |
