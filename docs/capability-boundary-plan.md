@@ -17,10 +17,10 @@
 | --- | --- | --- |
 | 本地平台 | Linux x64 | 可执行 Linux Controller 自动化与打包 |
 | VS Code | `1.130.0` | 相对发布基线已变化，真实任务链路需重跑 |
-| 官方 Codex 扩展 | `openai.chatgpt@26.715.61943` | 已启动 Shim 并恢复已有会话；新任务创建待补测 |
+| 官方 Codex 扩展 | `openai.chatgpt@26.715.61943` | 已用候选内置运行时启动 Shim 并恢复已有会话；新任务创建待补测 |
 | 官方扩展内置 Codex | `0.145.0-alpha.27` | 当前唯一 app-server 来源；内置协议门禁已同步 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于兼容集合，不参与发现、选择、透传或回退 |
-| Bridge Controller | `0.2.7` | 重构候选已安装；当前窗口重载待补测 |
+| Bridge Controller | `0.2.7` | 重构候选已安装并在 Remote SSH 窗口进入 `ready` |
 | Remote Executor | `0.2.5` / 协议 v3 | 当前远端工作区执行协议 |
 | Remote SSH | `0.124.0` | 当前存在活动的已认证 Remote SSH transport |
 
@@ -63,6 +63,17 @@ Shim 从受限运行时指针读取同一二进制并再次执行协议校验。
 本次没有由用户手动新建官方任务，也没有在当前窗口执行固定读、搜、Git、`pwd`、审批、
 取消和断线探针，因此这些项目不能从“窗口已连接”推定为通过。历史审计中存在成功的
 `remote_exec` 记录，但不能替代当前兼容集合的重新验收。
+
+候选安装并由用户重载后新增证据：
+
+- 新 Shim `0.2.7-066a75618d0e7650` 启动官方扩展目录中的内置 Codex
+  `0.145.0-alpha.27`，目标窗口没有使用系统 CLI。
+- Controller 复用活动 VS Code Remote transport，对
+  `/home/unitree/mimiclite-sim2real` 进入 `ready`，远端 Executor ping 和规范化根探针
+  通过。
+- 官方界面恢复已有会话成功；CodeGraph 通过本地 relay 在远端 Extension Host 启动。
+- 官方插件的本地 Git watcher 仍对远端 POSIX 根执行本地 `fs.watch` 并产生 `ENOENT`。
+  该错误尚未证明会阻止新任务，但属于阶段 2 的远程主工作目录边界。
 
 ### 1.4 外部 `0.145.0` 探针与插件内置协议
 

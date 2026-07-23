@@ -23,10 +23,12 @@
 启动、线程创建冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、缺失或版本不再
 影响这些路径。
 
-当前仍是候选状态：活动 Remote SSH 窗口尚未由用户重载并用当前候选新建任务，固定
-远端探针、MCP 和本地窗口透传也未在真实官方界面重跑。Linux 构建无法生成 Windows
-SEA Shim，`npm run package:all` 仍因缺少 Windows 原生产物失败，双平台产物收集仍为
-待实施项。
+当前仍是候选状态：用户已重载活动 Remote SSH 窗口，进程和运行时指针确认目标窗口只
+使用官方插件内置 Codex，Bridge 对规范化远端根进入 `ready`，已有会话恢复成功。
+新任务、固定远端操作、真实 MCP 调用和本地窗口透传仍待补测；官方插件的本地 Git
+watcher 对远端 POSIX 根记录 `ENOENT`，也需纳入远程主工作目录探针。Linux 构建无法
+生成 Windows SEA Shim，`npm run package:all` 仍因缺少 Windows 原生产物失败，双平台
+产物收集仍为待实施项。
 
 ## 阶段 A：协议与运行位置探针
 
