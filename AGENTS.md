@@ -7,6 +7,14 @@
 - After a fix passes its relevant tests, create an intentional Git commit for that fix instead of accumulating unrelated changes.
 - Use Chinese commit subjects and bodies. Include the behavioral change and verification performed; do not add signatures or sign-offs.
 - Do not push a fix until its real VS Code/Remote SSH behavior has been verified when the change affects that integration.
+- Version updates in the current `0.x` development series follow implementation scope rather than
+  generic stable-SemVer feature labels. Complete one independently verifiable implementation
+  target before incrementing the third segment (`0.x.1 -> 0.x.2`); complete a coherent batch of
+  targets before incrementing the second segment (`0.1.x -> 0.2.x`). Do not bump once per edit or
+  before the target is implemented. Update the matching lockfile and release evidence in the same
+  target commit, and never publish changed behavior under a previously used version. Bump
+  `remote-executor/package.json` only when the Remote Executor implementation or its protocol
+  changes; Controller/Shim-only targets bump the root package.
 
 ## Remote SSH Safety
 
