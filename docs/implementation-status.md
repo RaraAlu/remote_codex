@@ -9,11 +9,15 @@
 审计。详细边界、依赖顺序、分阶段实施内容与验收条件见
 `docs/capability-boundary-plan.md`。
 
-本次复核没有改变当前支持声明：仓库仍固定 Codex `0.144.5`；Linux 自动化与当前平台
-打包通过，活动 Remote SSH 窗口已到 `ready` 且已有会话恢复成功，但
-`openai.chatgpt@26.715.61943` 的新任务创建、当前窗口固定远端探针、取消、断线和写入
-仍为 `待补测` 或 `未实现`。Linux 构建无法生成 Windows SEA Shim，本次
-`npm run package:all` 因缺少 Windows 原生产物失败，双平台产物收集也列为待实施项。
+同日已将本机 Codex CLI/app-server 和仓库精确版本门禁升级到 `0.145.0`，生成
+`protocol/0.145.0/`，并安装 Linux x64 候选 VSIX。定向协议、重写和 Shim 集成测试
+11 项通过；`npm run check` 为 29 个测试文件通过、1 个真实远端条件文件跳过，
+108 项通过、5 项跳过、0 失败，真实 `0.145.0` Shim 冒烟和 Linux 打包通过。
+
+当前升级仍是候选状态：活动 Remote SSH 窗口尚未由用户重载并用
+`openai.chatgpt@26.715.61943` 新建任务，固定远端探针、MCP 和本地窗口透传也未按新
+兼容集合重跑。Linux 构建无法生成 Windows SEA Shim，`npm run package:all` 因缺少
+Windows 原生产物失败，双平台产物收集仍为待实施项。
 
 ## 阶段 A：协议与运行位置探针
 
@@ -85,6 +89,9 @@
 证据。0.2.7 首份基线位于 `docs/acceptance/2026-07-18-release-0.2.7.md`：Windows x64
 Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controller 仅完成打包和
 内容核对，本地 Extension Host、CJS Shim、官方任务及 Remote SSH 运行时仍为待补测。
+Codex `0.145.0` 候选证据位于
+`docs/acceptance/2026-07-22-release-0.2.7.md`，在真实任务门禁完成前不替代上一支持
+基线。
 
 ## 本地 MCP 边界
 
