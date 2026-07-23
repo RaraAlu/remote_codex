@@ -30,9 +30,19 @@ export const BRIDGE_ERROR_CODES = [
 
 export type BridgeErrorCode = (typeof BRIDGE_ERROR_CODES)[number];
 
+export interface WorkspaceRootConfig {
+  id: string;
+  target: "local" | "remote";
+  role: "primary" | "secondary";
+  path: string;
+  displayName: string;
+}
+
 export interface BridgeConfig {
-  version: 1;
+  version: 2;
   host: string;
+  roots: WorkspaceRootConfig[];
+  /** Runtime compatibility alias for the unique remote primary root. */
   workspaceRoot: string;
   connectionMode: "openssh" | "vscode-remote";
   localExecution: "deny";

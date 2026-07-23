@@ -7,7 +7,7 @@ import * as vscode from "vscode";
 import { AuditLog } from "../core/audit-log.js";
 import { saveOfficialCodexRuntime } from "../core/codex-runtime-store.js";
 import { GENERATED_CODEX_APP_SERVER_VERSION } from "../core/compatibility.js";
-import { parseBridgeConfig } from "../core/config.js";
+import { defaultRemotePrimaryRoot, parseBridgeConfig } from "../core/config.js";
 import { loadBridgeConfig, saveBridgeConfig } from "../core/config-store.js";
 import { asBridgeError, BridgeError } from "../core/errors.js";
 import {
@@ -423,9 +423,10 @@ export class BridgeController implements vscode.Disposable {
       "vscode-remote",
     );
     return parseBridgeConfig({
-      version: 1,
+      version: 2,
       host: remote.host,
       workspaceRoot: remote.workspaceRoot,
+      roots: [defaultRemotePrimaryRoot(remote.workspaceRoot)],
       connectionMode,
       localExecution: "deny",
       remoteHelper: connectionMode === "vscode-remote" ? "vscode-extension" : "none",

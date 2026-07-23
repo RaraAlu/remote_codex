@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -20,6 +20,32 @@ describe("local configuration and audit storage", () => {
     if (process.platform !== "win32") {
       expect((await stat(path)).mode & 0o777).toBe(0o600);
     }
+  });
+
+  it("loads a persisted v1 workspace as a v2 remote primary root", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-bridge-config-v1-"));
+    const path = join(directory, "config.json");
+    await writeFile(
+      path,
+      `${JSON.stringify({
+        version: 1,
+        host: "training-gpu",
+        workspaceRoot: "/remote/workspace",
+      })}\n`,
+    );
+
+    await expect(loadBridgeConfig(path)).resolves.toMatchObject({
+      version: 2,
+      workspaceRoot: "/remote/workspace",
+      roots: [
+        {
+          id: "remote-primary",
+          target: "remote",
+          role: "primary",
+          path: "/remote/workspace",
+        },
+      ],
+    });
   });
 
   it("writes redacted JSONL audit events with owner-only permissions", async () => {

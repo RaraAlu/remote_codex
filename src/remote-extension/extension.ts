@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { defaultRemotePrimaryRoot, parseBridgeConfig } from "../core/config.js";
 import { asBridgeError, BridgeError } from "../core/errors.js";
 import { LocalProcessExecutor } from "../core/local-process-executor.js";
 import type { ExecuteOptions } from "../core/ssh-executor.js";
@@ -78,10 +79,11 @@ function executorFor(request: RemoteExecutorCommandRequest): LocalProcessExecuto
   if (existing) {
     return existing;
   }
-  const config: BridgeConfig = {
-    version: 1,
+  const config: BridgeConfig = parseBridgeConfig({
+    version: 2,
     host: request.hostId,
     workspaceRoot: request.workspaceRoot,
+    roots: [defaultRemotePrimaryRoot(request.workspaceRoot)],
     connectionMode: "vscode-remote",
     localExecution: "deny",
     remoteHelper: "vscode-extension",
@@ -93,7 +95,7 @@ function executorFor(request: RemoteExecutorCommandRequest): LocalProcessExecuto
     maxParallelReads: 8,
     maxParallelWrites: 1,
     connectTimeoutSeconds: 10,
-  };
+  });
   const executor = new LocalProcessExecutor(config);
   executors.set(key, executor);
   return executor;

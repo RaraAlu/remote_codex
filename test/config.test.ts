@@ -8,10 +8,19 @@ const minimalConfig = {
 };
 
 describe("parseBridgeConfig", () => {
-  it("applies secure MVP defaults", () => {
+  it("migrates a v1 remote workspace and applies secure defaults", () => {
     expect(parseBridgeConfig(minimalConfig)).toEqual({
-      version: 1,
+      version: 2,
       host: "training-gpu",
+      roots: [
+        {
+          id: "remote-primary",
+          target: "remote",
+          role: "primary",
+          path: "/home/zkbot/work/train/MimicLite",
+          displayName: "MimicLite",
+        },
+      ],
       workspaceRoot: "/home/zkbot/work/train/MimicLite",
       connectionMode: "openssh",
       localExecution: "deny",
@@ -24,6 +33,68 @@ describe("parseBridgeConfig", () => {
       maxParallelReads: 8,
       maxParallelWrites: 1,
       connectTimeoutSeconds: 10,
+    });
+  });
+
+  it("accepts one remote primary root and an authorized local secondary root", () => {
+    expect(
+      parseBridgeConfig({
+        version: 2,
+        host: "training-gpu",
+        roots: [
+          {
+            id: "remote-primary",
+            target: "remote",
+            role: "primary",
+            path: "/remote/workspace",
+            displayName: "Remote project",
+          },
+          {
+            id: "local-reference",
+            target: "local",
+            role: "secondary",
+            path: "/home/user/reference",
+            displayName: "Local reference",
+          },
+        ],
+      }),
+    ).toMatchObject({
+      version: 2,
+      workspaceRoot: "/remote/workspace",
+      roots: [
+        { id: "remote-primary", target: "remote", role: "primary" },
+        { id: "local-reference", target: "local", role: "secondary" },
+      ],
+    });
+  });
+
+  it("normalizes Windows local secondary roots independently of the host platform", () => {
+    expect(
+      parseBridgeConfig({
+        version: 2,
+        host: "training-gpu",
+        roots: [
+          {
+            id: "remote-primary",
+            target: "remote",
+            role: "primary",
+            path: "/remote/workspace",
+            displayName: "Remote project",
+          },
+          {
+            id: "windows-reference",
+            target: "local",
+            role: "secondary",
+            path: "C:\\Users\\tester\\reference",
+            displayName: "Windows reference",
+          },
+        ],
+      }),
+    ).toMatchObject({
+      roots: [
+        { target: "remote", path: "/remote/workspace" },
+        { target: "local", path: "C:\\Users\\tester\\reference" },
+      ],
     });
   });
 
@@ -87,6 +158,86 @@ describe("parseBridgeConfig", () => {
     [{ ...minimalConfig, sshPort: 65_536 }, "sshPort"],
     [{ ...minimalConfig, identityFile: "id_rsa" }, "identityFile"],
     [{ ...minimalConfig, identityFile: "/home/user/../id_rsa" }, "identityFile"],
+    [{ ...minimalConfig, version: 3 }, "version"],
+    [{ ...minimalConfig, version: 2 }, "roots"],
+    [
+      {
+        ...minimalConfig,
+        version: 2,
+        roots: [
+          {
+            id: "local-primary",
+            target: "local",
+            role: "primary",
+            path: "/home/user/project",
+            displayName: "Local project",
+          },
+        ],
+      },
+      "remote primary",
+    ],
+    [
+      {
+        ...minimalConfig,
+        version: 2,
+        roots: [
+          {
+            id: "remote-primary",
+            target: "remote",
+            role: "primary",
+            path: "/different/workspace",
+            displayName: "Remote project",
+          },
+        ],
+      },
+      "workspaceRoot",
+    ],
+    [
+      {
+        ...minimalConfig,
+        version: 2,
+        roots: [
+          {
+            id: "duplicate",
+            target: "remote",
+            role: "primary",
+            path: "/home/zkbot/work/train/MimicLite",
+            displayName: "Remote project",
+          },
+          {
+            id: "duplicate",
+            target: "local",
+            role: "secondary",
+            path: "/home/user/reference",
+            displayName: "Local reference",
+          },
+        ],
+      },
+      "Duplicate root id",
+    ],
+    [
+      {
+        ...minimalConfig,
+        version: 2,
+        roots: [
+          {
+            id: "remote-primary",
+            target: "remote",
+            role: "primary",
+            path: "/home/zkbot/work/train/MimicLite",
+            displayName: "Remote project",
+          },
+          {
+            id: "local-root",
+            target: "local",
+            role: "secondary",
+            path: "/",
+            displayName: "Unsafe local root",
+          },
+        ],
+      },
+      "filesystem root",
+    ],
   ])("rejects unsafe configuration %#", (input, expectedText) => {
     expect(() => parseBridgeConfig(input)).toThrowError(BridgeError);
     expect(() => parseBridgeConfig(input)).toThrowError(expectedText);

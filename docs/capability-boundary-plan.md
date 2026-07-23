@@ -36,7 +36,7 @@ Shim 从受限运行时指针读取同一二进制并再次执行协议校验。
 
 - TypeScript 类型检查通过。
 - 32 个测试文件通过，1 个真实远端条件测试文件跳过。
-- 119 项测试通过，5 项真实远端条件测试跳过，0 项失败。
+- 128 项测试通过，5 项真实远端条件测试跳过，0 项失败。
 - Controller、Shim 和 Remote Executor 构建通过。
 - 插件内置 `0.145.0-alpha.27` 的本地透传、远程窗口启动和线程创建 Shim 冒烟通过；
   缺少受控运行时指针时，即使 PATH 存在系统 CLI 也失败关闭。
@@ -111,8 +111,8 @@ Shim 从受限运行时指针读取同一二进制并再次执行协议校验。
 | COMP-OFFICIAL | 验证 `openai.chatgpt@26.715.61943` | 部分验证 | Shim 启动、已有会话恢复、Remote SSH 新任务、Bridge `ready` | 本地窗口透传、审批和生命周期证据不足 |
 | ROUTE-EXEC | 强化 Remote SSH 下的 `remote_exec` 路由 | 部分实现 | 新建/恢复线程注入提醒，动态工具描述明确 | turn 级提醒未刷新，模型仍可能选择 Core 本地工具 |
 | MCP-ADAPTER | 通用远端 MCP 启动适配 | 已实施 | 受控适配器 ID、共享注册表、VS Code Remote/Remote Executor 与 OpenSSH stdin 控制头均已实现；CodeGraph 八工具实机通过 | 其他服务适配器和 OpenSSH 回退实机仍待按需补充 |
-| ROOT-PRIMARY | 远程工作区成为主工作目录 | 待实施 | 远程命令默认 `cwd` 是远程根目录 | Codex 线程仍以本地控制目录为 `cwd` 和 runtime root |
-| ROOT-SECONDARY | 定义本地次级授权目录 | 待实施 | 配置可持久化单个远程根目录 | 没有本地授权根、主次角色、选择和撤销协议 |
+| ROOT-PRIMARY | 远程工作区成为主工作目录 | 部分实施 | 配置 v2 已将当前 Remote SSH 根固定为唯一 `remote/primary`；远程命令默认 `cwd` 是该根目录 | Codex 线程仍以本地控制目录为 `cwd` 和 runtime root |
+| ROOT-SECONDARY | 定义本地次级授权目录 | 部分实施 | 配置 v2 已定义并校验 `local/secondary` 根记录，但尚未提供授权入口 | 没有本地根选择、执行器、访问和撤销协议 |
 | DUAL-READ | 双端目录读取、树、搜索和状态 | 待实施 | 远端只读工具完整；Remote Executor 有路径约束 | 工具没有 `target`；Controller 没有本地授权目录执行器 |
 | DUAL-WRITE | 双端写入、补丁、重命名和删除 | 待实施 | 读取结果已返回远端 SHA-256 | 没有写工具、`expectedHash`、原子替换或统一错误语义 |
 | LIFE-CANCEL | 运行中取消 | 待实施 | 执行器底层接受 `AbortSignal`，超时能终止子进程 | app-server `turn/interrupt` 没有传到活动远端请求 |
@@ -164,7 +164,10 @@ Shim 从受限运行时指针读取同一二进制并再次执行协议校验。
 
 已有：
 
-- `BridgeConfig.workspaceRoot` 是唯一的规范化远程 POSIX 根目录。
+- `BridgeConfig.roots` 记录稳定根 ID、目标端、主次角色、规范化路径和显示名。
+- 配置中必须且只能存在一个 `remote/primary`；`BridgeConfig.workspaceRoot` 是该主根的
+  运行期兼容别名，二者不一致时失败关闭。
+- v1 单远程根配置会无损迁移为 v2；v2 可记录但尚不能访问 `local/secondary`。
 - `remote_exec.cwd` 是远程工作区相对路径，缺省时由执行器落到远程根目录。
 - 远端文件、搜索、Git 和命令都在规范化远程根目录内执行。
 
@@ -174,8 +177,8 @@ Shim 从受限运行时指针读取同一二进制并再次执行协议校验。
 - 当前 `thread/start`、`thread/resume` 和 `turn/start` 都把 `cwd` 与
   `runtimeWorkspaceRoots` 改成该本地控制目录。
 - 远程根目录目前只存在于 Bridge 配置、提示和动态工具中，不是 Codex 线程的逻辑主根。
-- 配置版本仍为 v1，`localExecution` 固定为 `deny`，没有本地授权根或
-  `primary | secondary` 角色。
+- `localExecution` 仍固定为 `deny`；配置中的本地次级根没有选择入口或执行器，不能
+  被工具访问。
 
 实现“远程主工作目录”时必须区分：
 
@@ -410,6 +413,23 @@ Remote SSH 窗口进入 `ready`，官方 Codex 新任务通过
 ### 阶段 2：远程主工作目录、路由刷新与 Core 防线探针
 
 目标：建立主次目录语义，并在开放本地次级目录前证明项目操作默认只走远端。
+
+当前落实批次（阶段 2A，2026-07-22）：
+
+1. 先将持久化和窗口会话配置升级为 v2 根目录模型，不改变现有执行路由。
+2. 根记录包含稳定 `id`、`target`、`role`、规范化 `path` 和 `displayName`。
+3. v1 的 `workspaceRoot` 迁移为唯一 `remote/primary` 根；运行期继续提供
+   `workspaceRoot` 兼容字段，且必须与该主根一致，避免形成两个可分叉的项目身份。
+4. v2 允许记录 `local/secondary`，但本批次不提供选择入口、执行器或工具访问，因此
+   不会因为配置模型升级而扩大本地权限。
+5. 对根 ID 重复、多个主根、本地主根、非规范路径、`workspaceRoot` 与远端主根不一致
+   等情况失败关闭。
+6. 完成配置定向测试和 `npm run check` 后独立提交；工作区主次提示与 turn 级刷新留在
+   阶段 2B，Core 防线探针留在阶段 2C。
+
+当前进度：阶段 2A 已实现。配置与持久化定向测试 30 项通过；全量门禁为 32 个测试
+文件通过、1 个真实远端条件测试文件跳过，128 项通过、5 项跳过。构建、Shim 冒烟和
+Linux x64 当前平台打包通过。阶段 2B/2C 尚未开始，配置中的本地次级根仍不可访问。
 
 实施：
 

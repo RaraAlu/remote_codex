@@ -2,7 +2,10 @@
 
 ## 已强制执行
 
-- 项目身份由 `hostId + workspaceRoot + relativePath` 共同决定。
+- 项目身份由 `hostId + rootId + target + workspaceRoot + relativePath` 共同决定。
+- 配置 v2 必须且只能有一个 `remote/primary` 根；v1 的单远程根会迁移为该记录。
+  `workspaceRoot` 只是运行期兼容别名，不一致时失败关闭。本地根只能是
+  `local/secondary`，且在授权入口和本地执行器实现前无法被工具访问。
 - `localExecution` 固定为 `deny`，配置无法改成允许。
 - 默认 `vscode-remote` 模式只调用当前 Remote SSH 窗口中的 Workspace Executor，不读取
   密码、私钥或 VS Code Remote SSH 的底层连接凭据，也不建立第二条 SSH 连接。
