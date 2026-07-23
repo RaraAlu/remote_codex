@@ -181,7 +181,15 @@ async function main(): Promise<number> {
       appServerArgs,
       bridgeConfigured: true,
       controlDir,
+      controlDirectory: {
+        path: controlDir,
+        role: "control",
+        target: "local",
+      },
       localMcpServers,
+      primaryRoot: config.roots.find(
+        (root) => root.target === "remote" && root.role === "primary",
+      ),
       remoteMcpAccess: config.remoteMcpAccess,
       remoteMcpRouting: config.remoteMcpRouting,
       remoteMcpServers,

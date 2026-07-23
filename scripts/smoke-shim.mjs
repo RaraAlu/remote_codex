@@ -254,6 +254,27 @@ try {
   if (!remoteAudit.includes('"operation":"shim.start"')) {
     throw new Error("Remote window shim start was not recorded in the audit log");
   }
+  const shimStart = remoteAudit
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .find((entry) => entry.operation === "shim.start");
+  if (
+    shimStart?.details?.primaryRoot?.path !== "/tmp/remote-workspace" ||
+    shimStart?.details?.primaryRoot?.target !== "remote" ||
+    shimStart?.details?.primaryRoot?.role !== "primary"
+  ) {
+    throw new Error("Remote primary workspace identity is missing from the shim audit");
+  }
+  if (
+    typeof shimStart?.details?.controlDirectory?.path !== "string" ||
+    !shimStart.details.controlDirectory.path.endsWith("/remote-state/control") ||
+    shimStart?.details?.controlDirectory?.target !== "local" ||
+    shimStart?.details?.controlDirectory?.role !== "control"
+  ) {
+    throw new Error("Local control directory identity is missing from the shim audit");
+  }
   if (process.platform !== "win32") {
     const controlMode = (await stat(join(remoteStateDir, "control"))).mode & 0o777;
     if (controlMode !== 0o500) {

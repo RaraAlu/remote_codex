@@ -28,6 +28,7 @@ try {
     "v1/InitializeParams.json",
     "v2/ThreadStartParams.json",
     "v2/ThreadResumeParams.json",
+    "v2/TurnStartParams.json",
   ]) {
     await cp(join(tempDir, relativePath), join(outputDir, relativePath));
   }

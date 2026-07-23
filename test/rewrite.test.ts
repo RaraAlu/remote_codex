@@ -30,7 +30,7 @@ describe("app-server request rewriting", () => {
     });
   });
 
-  it("pins thread cwd locally and injects only remote project tools", () => {
+  it("keeps the process cwd local while assigning the remote primary root to the thread", () => {
     const rewritten = rewriteClientMessage(
       {
         id: 2,
@@ -45,7 +45,9 @@ describe("app-server request rewriting", () => {
       "/local/control",
     ) as { params: Record<string, unknown> };
     expect(rewritten.params.cwd).toBe("/local/control");
-    expect(rewritten.params.runtimeWorkspaceRoots).toEqual(["/local/control"]);
+    expect(rewritten.params.runtimeWorkspaceRoots).toEqual([
+      "/home/zkbot/work/train/MimicLite",
+    ]);
     expect(rewritten.params.sandbox).toBe("read-only");
     expect(rewritten.params).not.toHaveProperty("permissions");
     expect(rewritten.params.approvalPolicy).toBe("never");
@@ -54,6 +56,12 @@ describe("app-server request rewriting", () => {
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
       "Local MCP, app, and connector tools may be used",
+    );
+    expect(String(rewritten.params.developerInstructions)).toContain(
+      "Root id: remote-primary",
+    );
+    expect(String(rewritten.params.developerInstructions)).toContain(
+      "remote_exec is the project command runner",
     );
     const tools = rewritten.params.dynamicTools as Array<{ name: string }>;
     expect(tools.map((tool) => tool.name)).toEqual([
@@ -78,14 +86,14 @@ describe("app-server request rewriting", () => {
 
     expect(rewritten.params).toMatchObject({
       cwd: "/local/control",
-      runtimeWorkspaceRoots: ["/local/control"],
+      runtimeWorkspaceRoots: ["/home/zkbot/work/train/MimicLite"],
       sandbox: "read-only",
     });
     expect(rewritten.params).not.toHaveProperty("permissions");
     expect(rewritten.params.approvalPolicy).toBe("never");
   });
 
-  it("keeps turn-level full access for approvals while forcing local read-only safety", () => {
+  it("refreshes the remote primary root and remote_exec policy on every turn", () => {
     const rewritten = rewriteClientMessage(
       {
         id: 4,
@@ -96,6 +104,16 @@ describe("app-server request rewriting", () => {
           cwd: "/home/zkbot/work/train/MimicLite",
           permissions: "full-access",
           sandboxPolicy: { type: "dangerFullAccess" },
+          additionalContext: {
+            official: {
+              kind: "application",
+              value: "keep me",
+            },
+            "codex-remote-bridge": {
+              kind: "application",
+              value: "stale",
+            },
+          },
         },
       },
       config,
@@ -105,12 +123,31 @@ describe("app-server request rewriting", () => {
     expect(rewritten.params).toMatchObject({
       approvalPolicy: "never",
       cwd: "/local/control",
-      runtimeWorkspaceRoots: ["/local/control"],
+      runtimeWorkspaceRoots: ["/home/zkbot/work/train/MimicLite"],
       sandboxPolicy: {
         type: "readOnly",
         networkAccess: false,
       },
+      additionalContext: {
+        official: {
+          kind: "application",
+          value: "keep me",
+        },
+        "codex-remote-bridge": {
+          kind: "application",
+        },
+      },
     });
+    const additionalContext = rewritten.params.additionalContext as Record<
+      string,
+      { kind: string; value: string }
+    >;
+    const bridgeContext = additionalContext["codex-remote-bridge"]!;
+    expect(bridgeContext.value).toContain("Role: primary");
+    expect(bridgeContext.value).toContain(
+      "Use remote_exec for all project commands",
+    );
+    expect(bridgeContext.value).not.toContain("stale");
     expect(rewritten.params).not.toHaveProperty("permissions");
   });
 

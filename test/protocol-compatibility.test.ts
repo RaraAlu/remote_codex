@@ -18,6 +18,10 @@ interface ProtocolManifest {
   sourceExtensionVersion: string;
 }
 
+interface ObjectSchema {
+  properties: Record<string, unknown>;
+}
+
 async function currentProtocolPath(relativePath: string): Promise<string> {
   const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
     codexAppServerVersion: string;
@@ -48,5 +52,13 @@ describe("generated app-server protocol compatibility", () => {
       (entry) => entry.properties.method.enum[0],
     );
     expect([...KNOWN_SERVER_REQUESTS].sort()).toEqual(generatedMethods.sort());
+  });
+
+  it("tracks the turn fields used for remote workspace identity and reminders", async () => {
+    const schema = JSON.parse(
+      await readFile(await currentProtocolPath("v2/TurnStartParams.json"), "utf8"),
+    ) as ObjectSchema;
+    expect(schema.properties).toHaveProperty("runtimeWorkspaceRoots");
+    expect(schema.properties).toHaveProperty("additionalContext");
   });
 });

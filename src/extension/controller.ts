@@ -55,6 +55,14 @@ interface DiagnosticReport {
     state: BridgeState;
     configPath: string;
     controlDir: string;
+    workspaceSemantics: {
+      controlDirectory: {
+        path: string;
+        role: "control";
+        target: "local";
+      };
+      primaryRoot: BridgeConfig["roots"][number] | null;
+    };
   };
   local: {
     hostname: string;
@@ -657,6 +665,17 @@ export class BridgeController implements vscode.Disposable {
         state: this.#state.state,
         configPath: bridgeConfigPath(),
         controlDir: bridgeControlDir(),
+        workspaceSemantics: {
+          controlDirectory: {
+            path: bridgeControlDir(),
+            role: "control",
+            target: "local",
+          },
+          primaryRoot:
+            config?.roots.find(
+              (root) => root.target === "remote" && root.role === "primary",
+            ) ?? null,
+        },
       },
       local: {
         hostname: hostname(),
