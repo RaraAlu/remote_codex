@@ -98,10 +98,10 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 - 为远程文件提供可打开的资源 URI、Diff 和文件跳转。
 - 建立 Windows/Linux 原生构建与受控产物收集流程，避免单端打包删除另一端产物。
 - 在目标 Remote SSH 主机和 MimicLite 仓库上的完整 P0 验收。
-- [ ] 最后实施本地外部 Codex CLI 介入：CLI 通过 Controller 提供的本地插件接口发现、
-  读取并续接 Remote Bridge 反代后的 Codex 对话，可向同一对话提交 turn，并通过
-  Bridge 已授权写入协议修改远程工作区；本地 VS Code 插件必须同步显示、仲裁和审计
-  外部 CLI 的介入性写入，不把系统 CLI 变成官方 app-server 的运行时来源或回退。
+- [ ] 当前优先实施本地外部 Codex CLI 对话介入：先让 CLI 通过 Bridge 受控入口续接
+  官方扩展正在使用的 app-server，对同一 thread 执行 turn、steer 和 interrupt，并
+  继续经现有 `remote_exec` 路由操作远端；待通用写入协议完成后，再接入受控文件写入。
+  外部 CLI 不成为官方 app-server 的运行时来源或回退。
 
 Core 本地工具负测与完整 P0 验收仍是阶段 C 的安全门槛。当前 Shim 除了把 app-server
 放在本地控制目录并注入远程路由策略，还会强制本地拒绝权限配置、阻断已知本地客户端
@@ -188,34 +188,43 @@ SSH 认证，也不改写或伪造 VS Code 工作区 URI。以下项目均为 TO
 过期写入被拒绝且原文件保持完整；默认远程路径只复用 VS Code Remote SSH transport；
 两端操作可从日志中区分并完成审计。
 
-## 最终待实现项：外部 Codex CLI 介入
+## 当前优先项：外部 Codex CLI 介入
 
-该功能排在全部现有阶段和 P0 收口之后实施。Codex CLI 只运行在本地，通过 Controller
-暴露的受控本地插件接口接入当前 Remote Bridge 会话；远端仍不安装 Codex。
+该功能已提升为当前优先批次。Codex CLI 只运行在本地，通过 Bridge 受控入口接入
+官方扩展内置 Codex 所运行的当前 app-server；远端仍不安装 Codex。首批先交付对话
+续接和任意 turn 介入，项目文件写入仍复用后续统一写入协议，不临时增加旁路。
+
+2026-07-23 已完成官方能力探针：两个独立 WebSocket 客户端可同时初始化同一
+app-server；第二客户端能够恢复第一客户端创建的 thread，并对其活动 turn 成功执行
+`turn/steer` 和 `turn/interrupt`。因此 Bridge 不再自造对话协议或强制单写者租约，
+而是复用官方 thread/turn 并发语义、`expectedTurnId` 和事件广播；Bridge 只负责本机
+鉴权、每客户端请求改写、权限继承、远程工具路由和审计。
 
 权限以所接入 thread 的 Codex 权限模式为唯一操作权限来源，不另设 Bridge 权限等级。
 用户选择 `full-access` 时，外部 CLI 与 VS Code 插件都在已选目标端获得最大操作权限，
 写入和命令自动放行并保留审计；其他模式完全沿用 Codex 的分级和审批语义。目标端标识、
 并发顺序、幂等和传输路由属于正确性约束，不用于额外降低 `full-access` 权限。
 
-- [ ] 设计跨 Linux/Windows 的本地 IPC 接口和能力握手，不固定外部 Codex CLI 版本；
-  不向 CLI 暴露 OpenAI Token、Remote SSH 会话令牌或插件内部传输令牌。
-- [ ] 支持 CLI 发现、列出、只读回放并续接反代后的对话，稳定保留 thread、turn、
-  item、远程主根和来源客户端身份。
+- [x] 探查官方 app-server 多客户端、thread 恢复、turn 追加输入和取消能力；确认
+  `codex --remote` 可作为外部客户端入口，不固定外部 CLI 版本。
+- [ ] 建立仅本机可访问的共享 app-server 网关和短期凭证；外部客户端与官方扩展使用
+  独立上游连接，且都经过相同的请求改写、权限继承和远程工具路由。
+- [ ] 支持 CLI 发现并续接当前反代对话，稳定保留 thread、turn、item、远程主根和
+  来源客户端身份；不向 CLI 暴露 OpenAI Token 或 Remote SSH 会话令牌。
 - [ ] 支持 CLI 向同一对话提交 turn、取消请求和介入性回复；VS Code 插件实时显示外部
   写入及其来源，不通过直接修改 rollout 文件伪造对话。
 - [ ] CLI 发起的项目文件写入必须复用 Bridge 的远程工具、目标端、`expectedHash`、
   原子替换、幂等和审计；审批完全继承 thread 的 Codex 权限模式，`full-access` 不追加
   Bridge 二次确认，但不允许 CLI 绕过插件另开通道写远端工作区。
-- [ ] 为同一 thread 建立单写者租约或等价仲裁，处理 VS Code 与 CLI 同时提交、断线
-  重连、重复请求、顺序冲突和结果未知。
+- [ ] 保留并验证官方 `expectedTurnId`、turn 状态和事件顺序；Bridge 不另加会降低
+  `full-access` 能力的单写者租约，协议明确拒绝的并发冲突直接投影给两个客户端。
 - [ ] 外部 CLI 的接入、读取、turn 写入、项目写入、审批、取消和断开均记录来源客户端
   与 operation ID；插件 UI 可见并可撤销接入权限。
 - [ ] 完成双客户端诱饵、并发、恢复、权限撤销、敏感信息和 Linux/Windows 实机验收，
   再重新执行完整 P0 发布门禁。
 
-在该阶段开始前，仍须按“所有待实现功能的实施前置流程”重新汇总清单、探查官方
-app-server/扩展的多客户端能力边界，并先更新详细实施计划。
+本批次已经按“所有待实现功能的实施前置流程”重新汇总清单并完成能力探查；详细首批
+实现和验收顺序见 `docs/capability-boundary-plan.md` 的阶段 2D。
 
 ## 开发与自测
 
