@@ -5,10 +5,17 @@ const mock = vi.hoisted(() => ({
     initialize: ReturnType<typeof vi.fn>;
   },
   configurationListener: null as null | ((event: { affectsConfiguration(key: string): boolean }) => void),
+  extensionsListener: null as null | (() => void),
   workspaceListener: null as null | (() => void),
 }));
 
 vi.mock("vscode", () => ({
+  extensions: {
+    onDidChange: (listener: () => void) => {
+      mock.extensionsListener = listener;
+      return { dispose: vi.fn() };
+    },
+  },
   workspace: {
     onDidChangeConfiguration: (
       listener: (event: { affectsConfiguration(key: string): boolean }) => void,
@@ -43,10 +50,11 @@ describe("extension activation", () => {
   beforeEach(() => {
     mock.controller = null;
     mock.configurationListener = null;
+    mock.extensionsListener = null;
     mock.workspaceListener = null;
   });
 
-  it("initializes immediately and retries when the remote workspace or bridge settings change", () => {
+  it("initializes immediately and retries when workspace, settings, or extensions change", () => {
     const subscriptions: unknown[] = [];
     activate({ subscriptions } as never);
 
@@ -57,6 +65,8 @@ describe("extension activation", () => {
       affectsConfiguration: (key) => key === "codexRemoteBridge",
     });
     expect(mock.controller?.initialize).toHaveBeenCalledTimes(3);
-    expect(subscriptions).toHaveLength(3);
+    mock.extensionsListener?.();
+    expect(mock.controller?.initialize).toHaveBeenCalledTimes(4);
+    expect(subscriptions).toHaveLength(4);
   });
 });

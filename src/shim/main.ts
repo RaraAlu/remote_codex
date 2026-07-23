@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
-import { isAbsolute, normalize, resolve } from "node:path";
+import { basename, isAbsolute, normalize, resolve } from "node:path";
 import { AuditLog } from "../core/audit-log.js";
 import { GENERATED_CODEX_APP_SERVER_VERSION } from "../core/compatibility.js";
 import { loadBridgeConfig } from "../core/config-store.js";
@@ -15,11 +15,18 @@ import {
 } from "../core/locations.js";
 import { validateBundledCodexProtocol } from "../core/official-codex.js";
 import type { BridgeConfig } from "../core/types.js";
+import {
+  automaticExternalCliAttachOptions,
+  configuredCodexExecutable,
+  runExternalCliAttach,
+  type ExternalCliAttachOptions,
+} from "./external-cli-attach.js";
+import { runExternalMcpServer } from "./external-mcp.js";
 import { parseMcpProxyInvocation } from "./mcp-proxy-invocation.js";
 import { OpenSshMcpRelay } from "./openssh-mcp-relay.js";
 import { withRemoteCorePolicy } from "./local-core-policy.js";
-import { ShimProxy } from "./proxy.js";
 import { routeRemoteMcpServers } from "./remote-mcp.js";
+import { SharedAppServer } from "./shared-app-server.js";
 import { VsCodeMcpRelay } from "./vscode-mcp-relay.js";
 
 async function loadOptionalConfig(path: string, audit: AuditLog): Promise<BridgeConfig | null> {
@@ -106,8 +113,90 @@ async function selectedCodexExecutable(): Promise<string> {
   return runtime.executable;
 }
 
+function invocationNames(): string[] {
+  return [process.argv[1], process.execPath]
+    .filter((entry): entry is string => Boolean(entry))
+    .map((entry) => basename(entry).toLowerCase());
+}
+
+function isManagedExternalCliLauncher(): boolean {
+  return invocationNames().some(
+    (name) => name === "codex-vscode" || name === "codex-vscode.exe",
+  );
+}
+
+function isManagedAutomaticCliLauncher(): boolean {
+  return invocationNames().some(
+    (name) => name === "codex" || name === "codex.exe",
+  );
+}
+
+function parseExternalCliAttachOptions(args: readonly string[]): ExternalCliAttachOptions {
+  const options: ExternalCliAttachOptions = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const name = args[index];
+    const value = args[index + 1];
+    if (
+      name === undefined ||
+      ![
+        "--codex-executable",
+        "--host",
+        "--session-pid",
+        "--thread-id",
+        "--workspace-root",
+      ].includes(name) ||
+      value === undefined
+    ) {
+      throw new BridgeError("INVALID_CONFIG", `Unknown attach-cli argument: ${name}`);
+    }
+    index += 1;
+    if (name === "--codex-executable") {
+      options.codexExecutable = value;
+    } else if (name === "--host") {
+      options.host = value;
+    } else if (name === "--thread-id") {
+      options.threadId = value;
+    } else if (name === "--workspace-root") {
+      options.workspaceRoot = value;
+    } else {
+      const pid = Number(value);
+      if (!Number.isSafeInteger(pid) || pid <= 0) {
+        throw new BridgeError("INVALID_CONFIG", "--session-pid must be a positive integer");
+      }
+      options.sessionPid = pid;
+    }
+  }
+  return options;
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
+  const attachArgs =
+    args[0] === "attach-cli"
+      ? args.slice(1)
+      : isManagedExternalCliLauncher()
+        ? args
+        : null;
+  if (attachArgs) {
+    return await runExternalCliAttach(parseExternalCliAttachOptions(attachArgs));
+  }
+  if (isManagedAutomaticCliLauncher()) {
+    const codexExecutable = await configuredCodexExecutable(true);
+    assertExecutableIsNotShim(codexExecutable);
+    if (args.length === 0) {
+      const options = await automaticExternalCliAttachOptions();
+      if (options) {
+        return await runExternalCliAttach({
+          ...options,
+          codexExecutable,
+        });
+      }
+    }
+    return await passthrough(codexExecutable, args);
+  }
+  if (args[0] === "external-mcp") {
+    return await runExternalMcpServer();
+  }
   const mcpProxy = parseMcpProxyInvocation(args);
   const fallbackExecutable = await selectedCodexExecutable();
   assertExecutableIsNotShim(fallbackExecutable);
@@ -116,15 +205,17 @@ async function main(): Promise<number> {
     if (mcpProxy) {
       throw new BridgeError("INVALID_CONFIG", "Remote MCP relay has no active Bridge session");
     }
-    return await passthrough(fallbackExecutable, args);
+    if (!args.includes("app-server")) {
+      return await passthrough(fallbackExecutable, args);
+    }
   }
 
   const auditPath = bridgeAuditPath();
   const audit = new AuditLog(auditPath);
-  if (process.env.CODEX_BRIDGE_SESSION_CONFIG) {
+  if (configPath && process.env.CODEX_BRIDGE_SESSION_CONFIG) {
     await waitForSessionConfig(configPath);
   }
-  const config = await loadOptionalConfig(configPath, audit);
+  const config = configPath ? await loadOptionalConfig(configPath, audit) : null;
   const codexExecutable = fallbackExecutable;
   assertExecutableIsNotShim(codexExecutable);
 
@@ -147,61 +238,63 @@ async function main(): Promise<number> {
   if (!args.includes("app-server")) {
     return await passthrough(codexExecutable, args);
   }
-  if (!config) {
-    return await passthrough(codexExecutable, args);
-  }
 
-  const controlDir = bridgeControlDir();
-  await mkdir(controlDir, { mode: 0o500, recursive: true });
-  await chmodIfSupported(controlDir, 0o500);
+  const controlDir = config ? bridgeControlDir() : process.cwd();
+  if (config) {
+    await mkdir(controlDir, { mode: 0o500, recursive: true });
+    await chmodIfSupported(controlDir, 0o500);
+  }
   let appServerArgs = [...args];
   let localMcpServers: string[] = [];
   let remoteMcpServers: string[] = [];
   let skippedMcpAccessServers: string[] = [];
   let mcpRoutingError: string | undefined;
-  try {
-    const routing = await routeRemoteMcpServers({
-      appServerArgs: args,
-      codexExecutable,
-      config,
-      relay: currentShimRelayLaunch(configPath),
-    });
-    appServerArgs = routing.appServerArgs;
-    localMcpServers = routing.localServers;
-    remoteMcpServers = routing.remoteServers;
-    skippedMcpAccessServers = routing.skippedAccessServers;
-  } catch (error) {
-    mcpRoutingError = error instanceof Error ? error.message : String(error);
+  if (config) {
+    try {
+      const routing = await routeRemoteMcpServers({
+        appServerArgs: args,
+        codexExecutable,
+        config,
+        relay: currentShimRelayLaunch(configPath!),
+      });
+      appServerArgs = routing.appServerArgs;
+      localMcpServers = routing.localServers;
+      remoteMcpServers = routing.remoteServers;
+      skippedMcpAccessServers = routing.skippedAccessServers;
+    } catch (error) {
+      mcpRoutingError = error instanceof Error ? error.message : String(error);
+    }
+    appServerArgs = withRemoteCorePolicy(appServerArgs);
   }
-  appServerArgs = withRemoteCorePolicy(appServerArgs);
   await audit.write({
     operation: "shim.start",
     outcome: "started",
-    hostId: config.host,
-    workspaceRoot: config.workspaceRoot,
+    hostId: config?.host ?? "local",
+    workspaceRoot: config?.workspaceRoot ?? process.cwd(),
     details: {
       appServerArgs,
-      bridgeConfigured: true,
+      bridgeConfigured: config !== null,
       controlDir,
       controlDirectory: {
         path: controlDir,
-        role: "control",
+        role: config ? "control" : "workspace",
         target: "local",
       },
       localMcpServers,
-      primaryRoot: config.roots.find(
+      primaryRoot: config?.roots.find(
         (root) => root.target === "remote" && root.role === "primary",
-      ),
-      remoteMcpAccess: config.remoteMcpAccess,
-      remoteMcpRouting: config.remoteMcpRouting,
+      ) ?? null,
+      remoteMcpAccess: config?.remoteMcpAccess ?? null,
+      remoteMcpRouting: config?.remoteMcpRouting ?? "local",
       remoteMcpServers,
       skippedMcpAccessServers,
       ...(mcpRoutingError ? { mcpRoutingError } : {}),
     },
   });
 
-  const proxy = new ShimProxy({
+  const proxy = new SharedAppServer({
     appServerArgs,
+    appServerCwd: controlDir,
     auditPath,
     codexExecutable,
     config,

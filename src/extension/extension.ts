@@ -16,6 +16,9 @@ export function activate(context: vscode.ExtensionContext): void {
         void controller?.initialize();
       }
     }),
+    vscode.extensions.onDidChange(() => {
+      void controller?.initialize();
+    }),
   );
   void controller.initialize();
 }

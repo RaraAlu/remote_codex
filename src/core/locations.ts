@@ -70,3 +70,34 @@ export function officialCodexRuntimePath(environment: NodeJS.ProcessEnv = proces
 export function bridgeControlDir(environment: NodeJS.ProcessEnv = process.env): string {
   return join(bridgeStateDir(environment), "control");
 }
+
+export function bridgeExternalCliDir(environment: NodeJS.ProcessEnv = process.env): string {
+  return join(bridgeStateDir(environment), "external-cli");
+}
+
+export function bridgeExternalCliIntegrationPath(
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(bridgeExternalCliDir(environment), "integration.json");
+}
+
+export function bridgeExternalCliSessionPath(
+  shimPid = process.pid,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(bridgeExternalCliDir(environment), `${shimPid}.json`);
+}
+
+export function bridgeExternalCliTokenPath(
+  shimPid = process.pid,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(bridgeExternalCliDir(environment), `${shimPid}.token`);
+}
+
+export function bridgeUpstreamTokenPath(
+  shimPid = process.pid,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return join(bridgeExternalCliDir(environment), `${shimPid}.upstream.token`);
+}

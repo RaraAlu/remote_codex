@@ -40,6 +40,14 @@ import { detectRemoteWorkspace } from "./remote-context.js";
 import { planRemoteExecutorInstall } from "./remote-executor-install.js";
 import { installShimExecutable } from "./shim-executable.js";
 import {
+  reconcileExternalCliLauncher,
+  reconcileExternalMcp,
+  removeExternalCliLauncher,
+  removeExternalMcp,
+  resolveExternalCliExecutable,
+  shouldReconcileExternalCliIntegration,
+} from "./external-cli-integration.js";
+import {
   OfficialSettingsManager,
   type OfficialSettingsStatus,
 } from "./settings-manager.js";
@@ -180,6 +188,12 @@ export class BridgeController implements vscode.Disposable {
       vscode.commands.registerCommand("codexRemoteBridge.stop", () => this.stop()),
       vscode.commands.registerCommand("codexRemoteBridge.diagnostics", () => this.showDiagnostics()),
       vscode.commands.registerCommand("codexRemoteBridge.showAuditLog", () => this.showAuditLog()),
+      vscode.commands.registerCommand("codexRemoteBridge.enableExternalCliMcp", () =>
+        this.enableExternalCliMcp(),
+      ),
+      vscode.commands.registerCommand("codexRemoteBridge.disableExternalCliMcp", () =>
+        this.disableExternalCliMcp(),
+      ),
       vscode.commands.registerCommand("codexRemoteBridge.restoreSettings", () =>
         this.restoreOfficialSettings(),
       ),
@@ -228,6 +242,18 @@ export class BridgeController implements vscode.Disposable {
         this.#log(`managed launcher repair failed: ${bridgeError.message}`);
         void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
         return;
+      }
+    }
+
+    if (
+      shouldReconcileExternalCliIntegration(
+        this.#context.globalState.get<boolean>("codexRemoteBridge.externalMcpEnabled"),
+      )
+    ) {
+      try {
+        await this.#reconcileExternalCliMcp();
+      } catch (error) {
+        this.#log(`automatic external CLI integration skipped: ${String(error)}`);
       }
     }
 
@@ -373,6 +399,49 @@ export class BridgeController implements vscode.Disposable {
     await vscode.window.showTextDocument(document, { preview: false });
   }
 
+  async enableExternalCliMcp(): Promise<void> {
+    try {
+      const result = await this.#reconcileExternalCliMcp();
+      await this.#context.globalState.update(
+        "codexRemoteBridge.externalMcpEnabled",
+        true,
+      );
+      void vscode.window.showInformationMessage(
+        `Codex Bridge automatic CLI integration enabled. MCP: ${result.mcp}; live-thread launcher: ${result.launcher.result} at ${result.launcher.launcherPath}; plain codex: ${result.launcher.automaticLauncher?.result ?? "not managed"}. Restart an existing Codex CLI process once to join the active VS Code thread automatically.`,
+      );
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "INVALID_CONFIG");
+      this.#log(`external CLI MCP installation failed: ${bridgeError.message}`);
+      void vscode.window.showErrorMessage(
+        `Codex Bridge could not configure the current Codex CLI: ${bridgeError.message}`,
+      );
+    }
+  }
+
+  async disableExternalCliMcp(): Promise<void> {
+    try {
+      const resolved = await resolveExternalCliExecutable(
+        this.#externalCliExecutable(),
+      );
+      const removed = await removeExternalMcp(resolved.executablePath);
+      const launcherRemoved = await removeExternalCliLauncher();
+      await this.#context.globalState.update(
+        "codexRemoteBridge.externalMcpEnabled",
+        false,
+      );
+      void vscode.window.showInformationMessage(
+        removed || launcherRemoved
+          ? "Codex Bridge disabled automatic CLI integration and removed its managed files. Restart Codex CLI to unload MCP tools."
+          : "Codex Bridge automatic CLI integration is disabled.",
+      );
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "INVALID_CONFIG");
+      void vscode.window.showErrorMessage(
+        `Codex Bridge could not remove the current Codex CLI integration: ${bridgeError.message}`,
+      );
+    }
+  }
+
   async restoreOfficialSettings(): Promise<void> {
     await this.stop();
     await vscode.workspace
@@ -386,6 +455,40 @@ export class BridgeController implements vscode.Disposable {
     } else {
       void vscode.window.showInformationMessage("Codex Bridge has no saved settings to restore.");
     }
+  }
+
+  async #reconcileExternalCliMcp(): Promise<{
+    launcher: Awaited<ReturnType<typeof reconcileExternalCliLauncher>>;
+    mcp: "installed" | "updated" | "unchanged";
+  }> {
+    const shimPath = await installShimExecutable(this.#context);
+    const resolved = await resolveExternalCliExecutable(
+      this.#externalCliExecutable(),
+    );
+    const mcp = await reconcileExternalMcp(resolved.executablePath, shimPath);
+    const launcher = await reconcileExternalCliLauncher(
+      resolved.executablePath,
+      shimPath,
+      { automaticLauncherPath: resolved.automaticLauncherPath },
+    );
+    await this.#audit.write({
+      operation: "external_cli.integration",
+      outcome: "succeeded",
+      details: {
+        launcherPath: launcher.launcherPath,
+        launcherResult: launcher.result,
+        automaticLauncherPath: launcher.automaticLauncher?.launcherPath ?? null,
+        automaticLauncherResult: launcher.automaticLauncher?.result ?? null,
+        mcpResult: mcp,
+      },
+    });
+    return { launcher, mcp };
+  }
+
+  #externalCliExecutable(): string {
+    return vscode.workspace
+      .getConfiguration("codexRemoteBridge")
+      .get<string>("externalCliExecutable", "codex");
   }
 
   dispose(): void {

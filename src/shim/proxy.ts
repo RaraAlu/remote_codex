@@ -54,6 +54,9 @@ export interface ShimProxyOptions {
   input?: Readable;
   output?: Writable;
   errorOutput?: Writable;
+  approvalPolicies?: RemoteApprovalPolicyTracker;
+  observeApprovalPolicy?: boolean;
+  rewriteClientMessages?: boolean;
   spawnCodex?: (
     command: string,
     args: readonly string[],
@@ -65,6 +68,8 @@ export interface ShimProxyOptions {
 function writeMessage(stream: Writable, message: unknown): void {
   stream.write(`${JSON.stringify(message)}\n`);
 }
+
+export type RpcMessageWriter = (message: unknown) => void;
 
 function isRemoteToolCall(request: RpcRequest): boolean {
   return (
@@ -105,13 +110,15 @@ export class ShimProxy {
   readonly #audit: AuditLog;
   readonly #executor: OpenSshExecutor | null;
   readonly #router: DynamicToolRouter | null;
-  readonly #remoteApprovalPolicies = new RemoteApprovalPolicyTracker();
+  readonly #remoteApprovalPolicies: RemoteApprovalPolicyTracker;
   readonly #pendingApprovals = new Map<RpcId, PendingApproval>();
   #child: ChildProcessWithoutNullStreams | null = null;
 
   constructor(options: ShimProxyOptions) {
     this.#options = options;
     this.#audit = new AuditLog(options.auditPath);
+    this.#remoteApprovalPolicies =
+      options.approvalPolicies ?? new RemoteApprovalPolicyTracker();
     this.#executor = options.config
       ? options.config.connectionMode === "vscode-remote"
         ? new VsCodeRemoteExecutor(options.config)
@@ -146,7 +153,13 @@ export class ShimProxy {
 
     clientLines.on("line", (line) => {
       clientQueue = clientQueue
-        .then(() => this.#handleClientLine(line, child.stdin, output))
+        .then(() =>
+          this.handleClientMessage(
+            parseRpcLine(line),
+            (message) => writeMessage(child.stdin, message),
+            (message) => writeMessage(output, message),
+          ),
+        )
         .catch((error) => {
           errorOutput.write(`codex-bridge: invalid client JSON-RPC: ${String(error)}\n`);
         });
@@ -156,14 +169,25 @@ export class ShimProxy {
     });
 
     serverLines.on("line", (line) => {
-      void this.#handleServerLine(line, child.stdin, output, errorOutput).catch((error) => {
+      let message: RpcMessage;
+      try {
+        message = parseRpcLine(line);
+      } catch (error) {
+        errorOutput.write(`codex-bridge: invalid server JSON-RPC: ${String(error)}\n`);
+        return;
+      }
+      void this.handleServerMessage(
+        message,
+        (message) => writeMessage(child.stdin, message),
+        (message) => writeMessage(output, message),
+      ).catch((error) => {
         errorOutput.write(`codex-bridge: server request handling failed: ${String(error)}\n`);
       });
     });
 
     const forwardSignal = (signal: NodeJS.Signals): void => {
       child.kill(signal);
-      this.#executor?.close();
+      this.closeSession();
     };
     const onSigInt = (): void => forwardSignal("SIGINT");
     const onSigTerm = (): void => forwardSignal("SIGTERM");
@@ -177,8 +201,7 @@ export class ShimProxy {
         process.removeListener("SIGTERM", onSigTerm);
         clientLines.close();
         serverLines.close();
-        this.#cancelApprovals();
-        this.#executor?.close();
+        this.closeSession();
         if (signal) {
           resolve(128);
         } else {
@@ -188,13 +211,14 @@ export class ShimProxy {
     });
   }
 
-  async #handleClientLine(
-    line: string,
-    childInput: Writable,
-    output: Writable,
+  async handleClientMessage(
+    message: RpcMessage,
+    writeServer: RpcMessageWriter,
+    writeClient: RpcMessageWriter,
   ): Promise<void> {
-    const message = parseRpcLine(line);
-    this.#remoteApprovalPolicies.observeClientMessage(message);
+    if (this.#options.observeApprovalPolicy !== false) {
+      this.#remoteApprovalPolicies.observeClientMessage(message);
+    }
     if (isRpcResponse(message) && this.#resolveApproval(message)) {
       return;
     }
@@ -207,7 +231,7 @@ export class ShimProxy {
         details: { method: message.method },
       });
       if (isRpcRequest(message)) {
-        writeMessage(output, {
+        writeClient({
           id: message.id,
           error: {
             code: -32003,
@@ -217,31 +241,26 @@ export class ShimProxy {
       }
       return;
     }
-    const rewritten = rewriteClientMessage(
-      message,
-      this.#options.config,
-      this.#options.controlDir,
-    );
-    writeMessage(childInput, rewritten);
+    const rewritten =
+      this.#options.rewriteClientMessages === false
+        ? message
+        : rewriteClientMessage(
+            message,
+            this.#options.config,
+            this.#options.controlDir,
+          );
+    writeServer(rewritten);
   }
 
-  async #handleServerLine(
-    line: string,
-    childInput: Writable,
-    output: Writable,
-    errorOutput: Writable,
+  async handleServerMessage(
+    message: RpcMessage,
+    writeServer: RpcMessageWriter,
+    writeClient: RpcMessageWriter,
   ): Promise<void> {
-    let message: RpcMessage;
-    try {
-      message = parseRpcLine(line);
-    } catch (error) {
-      errorOutput.write(`codex-bridge: invalid server JSON-RPC: ${String(error)}\n`);
-      return;
-    }
     this.#remoteApprovalPolicies.observeServerMessage(message);
 
     if (!isRpcRequest(message)) {
-      writeMessage(output, projectServerMessage(message, this.#options.config));
+      writeClient(projectServerMessage(message, this.#options.config));
       return;
     }
 
@@ -253,7 +272,7 @@ export class ShimProxy {
         outcome: "failed",
         details: { method: message.method },
       });
-      writeMessage(childInput, {
+      writeServer({
         id: message.id,
         error: {
           code: -32003,
@@ -265,7 +284,7 @@ export class ShimProxy {
 
     if (isRemoteToolCall(message)) {
       if (!this.#router) {
-        writeMessage(childInput, {
+        writeServer({
           id: message.id,
           error: {
             code: -32002,
@@ -283,14 +302,14 @@ export class ShimProxy {
           );
           if (
             requiresApproval &&
-            !(await this.#requestRemoteCommandApproval(context, output))
+            !(await this.#requestRemoteCommandApproval(context, writeClient))
           ) {
             const result = await this.#router.decline(
               message.id,
               message.params,
               "Remote command execution was declined by the user",
             );
-            writeMessage(childInput, { id: message.id, result });
+            writeServer({ id: message.id, result });
             return;
           }
           if (!requiresApproval) {
@@ -311,7 +330,7 @@ export class ShimProxy {
         const result = await this.#router.handle(message.id, message.params, {
           onOutput: context
             ? (delta) => {
-                writeMessage(output, {
+                writeClient({
                   method: "item/commandExecution/outputDelta",
                   params: {
                     delta,
@@ -323,9 +342,9 @@ export class ShimProxy {
               }
             : undefined,
         });
-        writeMessage(childInput, { id: message.id, result });
+        writeServer({ id: message.id, result });
       } catch (error) {
-        writeMessage(childInput, {
+        writeServer({
           id: message.id,
           error: {
             code: -32602,
@@ -342,7 +361,7 @@ export class ShimProxy {
         outcome: "failed",
         details: { method: message.method },
       });
-      writeMessage(childInput, {
+      writeServer({
         id: message.id,
         error: {
           code: -32601,
@@ -352,7 +371,7 @@ export class ShimProxy {
       return;
     }
 
-    writeMessage(output, projectServerMessage(message, this.#options.config));
+    writeClient(projectServerMessage(message, this.#options.config));
   }
 
   #remoteExecContext(request: RpcRequest): RemoteExecContext {
@@ -384,7 +403,7 @@ export class ShimProxy {
 
   async #requestRemoteCommandApproval(
     context: RemoteExecContext,
-    output: Writable,
+    writeClient: RpcMessageWriter,
   ): Promise<boolean> {
     const config = this.#options.config;
     if (!config) {
@@ -399,7 +418,7 @@ export class ShimProxy {
       timeout.unref();
       this.#pendingApprovals.set(approvalId, { resolve, timeout });
     });
-    writeMessage(output, {
+    writeClient({
       id: approvalId,
       method: "item/commandExecution/requestApproval",
       params: {
@@ -438,5 +457,10 @@ export class ShimProxy {
       pending.resolve(false);
     }
     this.#pendingApprovals.clear();
+  }
+
+  closeSession(): void {
+    this.#cancelApprovals();
+    this.#executor?.close();
   }
 }
