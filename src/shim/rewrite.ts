@@ -4,16 +4,18 @@ import { REMOTE_PERMISSION_PROFILE_ID } from "./local-core-policy.js";
 import { isRecord, type RpcMessage } from "./rpc.js";
 
 const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
-- The project exists only on the configured remote Ubuntu host.
-- Use remote_* dynamic tools for project files, search, Git, tests, and commands.
-- For project overviews, prefer one remote_list_tree call before focused directory listings.
+- The project primary root exists on the configured remote Ubuntu host.
+- Use workspace_* dynamic tools for file reads, directory views, literal search, and Git status.
+- Omitting target and rootId selects the remote primary root.
+- Access a local secondary root only through workspace_* with its explicit target="local" and rootId.
+- For project overviews, prefer one workspace_list_tree call before focused directory listings.
 - At the start of every turn, remember that remote_exec is the project command runner.
 - Use remote_exec for all project commands. Its approval behavior follows the active Codex permission mode.
 - Local MCP, app, and connector tools may be used for complementary capabilities.
-- A local MCP tool must not read, write, or execute project paths unless it explicitly supports the configured remote target.
-- Never use local shell or local filesystem tools for project operations.
+- A local MCP tool must not read, write, or execute workspace paths unless it explicitly supports the selected Bridge target and root.
+- Never use built-in local shell or filesystem tools to bypass Bridge workspace tools.
 - The local cwd is an empty control directory and is not the project.
-- When a required remote capability is unavailable, stop and report that the bridge does not support it. Never fall back to local execution.`;
+- When a required capability is unavailable, stop and report that the bridge does not support it. Never fall back to unapproved local execution.`;
 
 const REMOTE_TURN_CONTEXT_KEY = "codex-remote-bridge";
 
@@ -28,16 +30,16 @@ function remotePrimaryRoot(config: BridgeConfig): WorkspaceRootConfig {
 }
 
 function remotePolicy(config: BridgeConfig): string {
-  const primaryRoot = remotePrimaryRoot(config);
-  const target = [
-    "Remote workspace identity:",
+  remotePrimaryRoot(config);
+  const roots = [
+    "Authorized workspace roots:",
     `- Host: ${config.host}`,
-    `- Root id: ${primaryRoot.id}`,
-    "- Target: remote",
-    "- Role: primary",
-    `- Path: ${primaryRoot.path}`,
+    ...config.roots.map(
+      (root) =>
+        `- Root id: ${root.id}; target: ${root.target}; role: ${root.role}; path: ${root.path}`,
+    ),
   ].join("\n");
-  return [REMOTE_INSTRUCTIONS, target].join("\n\n");
+  return [REMOTE_INSTRUCTIONS, roots].join("\n\n");
 }
 
 function mergeInstructions(existing: unknown, config: BridgeConfig): string {

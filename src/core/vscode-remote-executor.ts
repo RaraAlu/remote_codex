@@ -21,6 +21,8 @@ import {
 } from "./types.js";
 import {
   REMOTE_OUTPUT_COMMAND,
+  type ControllerWorkspaceClient,
+  type ControllerWorkspaceOperation,
   type RemoteExecutorOperation,
   type TransportMessage,
   type TransportRequest,
@@ -48,7 +50,10 @@ function errorCode(value: string): BridgeErrorCode {
     : "REMOTE_TRANSPORT_DISCONNECTED";
 }
 
-export class VsCodeRemoteExecutor extends OpenSshExecutor {
+export class VsCodeRemoteExecutor
+  extends OpenSshExecutor
+  implements ControllerWorkspaceClient
+{
   readonly #activeSockets = new Set<Socket>();
   #closed = false;
 
@@ -127,6 +132,14 @@ export class VsCodeRemoteExecutor extends OpenSshExecutor {
     });
   }
 
+  async requestControllerWorkspace<T>(
+    operation: ControllerWorkspaceOperation,
+    rootId: string,
+    params: Record<string, unknown> = {},
+  ): Promise<T> {
+    return await this.#request<T>(operation, { ...params, rootId });
+  }
+
   override close(): void {
     if (this.#closed) {
       return;
@@ -140,7 +153,7 @@ export class VsCodeRemoteExecutor extends OpenSshExecutor {
   }
 
   async #request<T>(
-    operation: RemoteExecutorOperation,
+    operation: ControllerWorkspaceOperation | RemoteExecutorOperation,
     params: Record<string, unknown>,
     observer: RequestObserver = {},
   ): Promise<T> {

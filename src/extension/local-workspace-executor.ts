@@ -14,6 +14,7 @@ import type {
   RemoteFileRead,
   WorkspaceRootConfig,
 } from "../core/types.js";
+import type { WorkspaceExecutor } from "../core/workspace-executor.js";
 
 export interface LocalWorkspaceExecutorOptions {
   commandTimeoutMs: number;
@@ -75,7 +76,7 @@ function gitEnvironment(): NodeJS.ProcessEnv {
   return environment;
 }
 
-export class LocalWorkspaceExecutor {
+export class LocalWorkspaceExecutor implements WorkspaceExecutor {
   readonly rootId: string;
   readonly #commandTimeoutMs: number;
   readonly #maxDirectoryEntries: number;
@@ -286,7 +287,9 @@ export class LocalWorkspaceExecutor {
       throw new BridgeError("COMMAND_DENIED", "Search query must be a non-empty NUL-free string");
     }
     const safeMaxResults = Math.max(1, Math.min(Math.floor(maxResults), 1_000));
-    const files = await this.#searchFiles(inputPaths);
+    const files = await this.#searchFiles(
+      inputPaths.length > 0 ? inputPaths : ["."],
+    );
     const matches: SearchMatch[] = [];
     let scannedBytes = 0;
     for (const file of files) {

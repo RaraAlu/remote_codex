@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run check` 为 37 个测试文件通过、1 个真实远端条件文件跳过，160 项通过、5 项
+`npm run check` 为 45 个测试文件通过、1 个真实远端条件文件跳过，176 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -93,14 +93,16 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 远端 `realpath` 与符号链接防逃逸 | 已用仓库内指向 `/root/.local` 的真实符号链接验证 |
 | 独立本地审计日志和脱敏 | 已实现并测试 |
 | 远程逻辑主根 | 唯一 `remote/primary` 已写入线程和每轮 `runtimeWorkspaceRoots`；活动 transport 的 `pwd` 回环通过 |
-| 工具根身份 | `0.3.12` 已让请求、结果和审计携带根 ID、目标端、角色与根路径；本地根执行仍失败关闭 |
+| 工具根身份 | 请求、结果和审计携带根 ID、目标端、角色与根路径；省略目标仍默认远程主根 |
 | 本地次级根授权 | `0.3.13` 已提供显式选择、持久化、撤销和诊断；最多 15 个规范化 `local/secondary` 根 |
-| Controller 本地只读执行器 | `0.3.13` 已实现读取、目录、树、字面搜索和 Git 状态，并覆盖父路径、符号链接、根替换与撤销防线；双端路由未接入 |
-| Bridge 工具原生界面投影 | 已实现并测试；当前支持组合仍缺独立的真实窗口界面观感证据 |
+| Controller 本地只读执行器 | `0.3.13` 已实现读取、目录、树、字面搜索和 Git 状态，并覆盖父路径、符号链接、根替换与撤销防线 |
+| 双端只读路由 | `0.3.14` 已通过统一 `workspace_*` 工具按显式目标和根 ID 路由；本地请求只经已认证 Controller transport，远端维持现有执行器路径 |
+| Bridge 工具原生界面投影 | `0.3.14` 已按本地/远程根显示目标、根 ID、规范化路径和 `cwd`；真实候选窗口观感待补测 |
 | 远程 URI、Diff 和文件跳转 | 未实现 |
 
-阶段 B 的执行器与 Shim 动态只读工具已通过真实 SSH 验收。尚缺 VS Code 当前文件、
-远程链接和本地同名诱饵文件的界面侧验收，因此阶段 B 仍未整体关闭。
+阶段 B 的远端执行器与 Shim 动态只读工具已通过真实 SSH 验收，双端路由已通过自动化。
+尚缺候选 VSIX 中的本地同名诱饵、VS Code 当前文件、远程链接和界面侧验收，因此阶段 B
+仍未整体关闭。
 
 ## 阶段 C：远程命令与写入
 
@@ -279,8 +281,17 @@ Windows 实机仍待补测。
 规范化 `local/secondary` 根持久化到扩展全局状态，并同步进入 Bridge 配置和活动窗口
 会话配置。诊断报告会逐根运行本地执行器的规范路径探针。本地执行器只开放限额读取、
 目录、目录树、字面文本搜索和固定的只读 Git 状态，逐次查询当前授权；父路径、符号链接
-逃逸、授权根被重定向及撤销后的已有执行器请求都会失败关闭。现有动态工具仍不接受
-`target="local"`，双端统一路由和原生工具投影留在下一独立提交。
+逃逸、授权根被重定向及撤销后的已有执行器请求都会失败关闭。该提交尚未让动态工具
+接受 `target="local"`，避免在执行边界验证前扩大访问面。
+
+`0.3.14` 完成双端只读路由和原生工具投影提交。Shim 公开统一的 `workspace_*` 读取、
+目录、目录树、字面搜索和 Git 状态工具，远程主根保持默认目标，本地目标必须显式提供
+当前授权的次级根 ID。Shim 通过现有窗口级认证 transport 把本地请求交还 Controller，
+Controller 再次核对会话配置与实时授权；请求不会到达 Remote Executor，也不开放任意
+本地命令。旧 `remote_*` 只读工具名继续兼容且只能访问远程主根。两端的结果、审计与
+原生命令项均保留目标端、根 ID、角色、规范化路径和正确 `cwd`；候选 VSIX 的同任务
+交替读取和界面观感仍待实机补测。远端搜索同时从正则匹配统一为大小写敏感的字面
+匹配，因此 Remote Executor 实现版本升到 `0.2.9`；能力集合和协议形状保持不变。
 
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
@@ -313,7 +324,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-23-release-0.3.10-staged-reconfigure.md`；历史 thread 恢复见
 `docs/acceptance/2026-07-23-release-0.3.11-historical-thread-resume.md`；工具根身份见
 `docs/acceptance/2026-07-23-release-0.3.12-root-identity-protocol.md`；本地根授权执行器见
-`docs/acceptance/2026-07-23-release-0.3.13-local-root-authority.md`。
+`docs/acceptance/2026-07-23-release-0.3.13-local-root-authority.md`；双端只读路由见
+`docs/acceptance/2026-07-23-release-0.3.14-dual-read-routing.md`。
 
 ## 本地 MCP 边界
 

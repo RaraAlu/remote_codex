@@ -8,46 +8,81 @@ import type {
   ToolResult,
   WorkspaceRootConfig,
 } from "../core/types.js";
+import type { ControllerWorkspaceClient } from "../core/vscode-transport.js";
+import type { WorkspaceExecutor } from "../core/workspace-executor.js";
+import { ControllerWorkspaceExecutor } from "./controller-workspace-executor.js";
 import { isRecord, type RpcId } from "./rpc.js";
 import { parseRemoteExecArguments } from "./remote-command.js";
 
+const LEGACY_REMOTE_TOOL_ALIASES: ReadonlyMap<string, string> = new Map([
+  ["remote_read_file", "workspace_read_file"],
+  ["remote_list_directory", "workspace_list_directory"],
+  ["remote_list_tree", "workspace_list_tree"],
+  ["remote_search", "workspace_search"],
+  ["remote_git_status", "workspace_git_status"],
+] as const);
+
+export const WORKSPACE_TOOL_NAMES = new Set([
+  "workspace_read_file",
+  "workspace_list_directory",
+  "workspace_list_tree",
+  "workspace_search",
+  "workspace_git_status",
+]);
+
 export const REMOTE_TOOL_NAMES = new Set([
-  "remote_read_file",
-  "remote_list_directory",
-  "remote_list_tree",
-  "remote_search",
-  "remote_git_status",
+  ...WORKSPACE_TOOL_NAMES,
+  ...LEGACY_REMOTE_TOOL_ALIASES.keys(),
   "remote_exec",
 ]);
 
-const REMOTE_ROOT_INPUT_PROPERTIES = {
+export function normalizeWorkspaceToolName(tool: string): string {
+  return LEGACY_REMOTE_TOOL_ALIASES.get(tool) ?? tool;
+}
+
+const ROOT_INPUT_PROPERTIES = {
   target: {
     type: "string",
-    enum: ["remote"],
-    description: "Execution target. Remote tools currently accept only remote.",
+    enum: ["local", "remote"],
+    description: "Explicit workspace target. Defaults to the remote primary root.",
   },
   rootId: {
     type: "string",
     minLength: 1,
     maxLength: 64,
     pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
-    description: "Configured remote root ID. Omit to use the unique remote primary root.",
+    description: "Configured root ID. Required when target is local.",
+  },
+} as const;
+
+const REMOTE_ROOT_INPUT_PROPERTIES = {
+  target: {
+    type: "string",
+    enum: ["remote"],
+    description: "Remote command target.",
+  },
+  rootId: {
+    type: "string",
+    minLength: 1,
+    maxLength: 64,
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+    description: "Configured remote primary root ID.",
   },
 } as const;
 
 export const REMOTE_DYNAMIC_TOOLS = [
   {
     type: "function",
-    name: "remote_read_file",
+    name: "workspace_read_file",
     description:
-      "Read a file only from the configured offline remote Ubuntu workspace. Returns base64 content and verified remote metadata.",
+      "Read a file from an explicitly selected authorized local or remote workspace root. Returns base64 content and verified metadata.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["path"],
       properties: {
-        ...REMOTE_ROOT_INPUT_PROPERTIES,
-        path: { type: "string", description: "Workspace-relative remote POSIX path." },
+        ...ROOT_INPUT_PROPERTIES,
+        path: { type: "string", description: "Path within the selected workspace root." },
         limitBytes: {
           type: "integer",
           minimum: 1,
@@ -59,31 +94,31 @@ export const REMOTE_DYNAMIC_TOOLS = [
   },
   {
     type: "function",
-    name: "remote_list_directory",
+    name: "workspace_list_directory",
     description:
-      "List direct children only in the configured offline remote Ubuntu workspace. Use for focused follow-up after remote_list_tree.",
+      "List direct children in an explicitly selected authorized local or remote workspace root.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["path"],
       properties: {
-        ...REMOTE_ROOT_INPUT_PROPERTIES,
-        path: { type: "string", description: "Workspace-relative remote directory." },
+        ...ROOT_INPUT_PROPERTIES,
+        path: { type: "string", description: "Directory within the selected workspace root." },
       },
     },
   },
   {
     type: "function",
-    name: "remote_list_tree",
+    name: "workspace_list_tree",
     description:
-      "Inspect a bounded remote workspace directory tree in one call. Prefer this before making repeated remote_list_directory calls.",
+      "Inspect a bounded directory tree in an explicitly selected authorized local or remote workspace root.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["path"],
       properties: {
-        ...REMOTE_ROOT_INPUT_PROPERTIES,
-        path: { type: "string", description: "Workspace-relative remote directory." },
+        ...ROOT_INPUT_PROPERTIES,
+        path: { type: "string", description: "Directory within the selected workspace root." },
         depth: {
           type: "integer",
           minimum: 1,
@@ -101,16 +136,16 @@ export const REMOTE_DYNAMIC_TOOLS = [
   },
   {
     type: "function",
-    name: "remote_search",
+    name: "workspace_search",
     description:
-      "Search text with ripgrep only in the configured offline remote Ubuntu workspace.",
+      "Search for literal text in an explicitly selected authorized local or remote workspace root.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       required: ["query"],
       properties: {
-        ...REMOTE_ROOT_INPUT_PROPERTIES,
-        query: { type: "string" },
+        ...ROOT_INPUT_PROPERTIES,
+        query: { type: "string", description: "Case-sensitive literal text." },
         paths: {
           type: "array",
           items: { type: "string" },
@@ -126,14 +161,14 @@ export const REMOTE_DYNAMIC_TOOLS = [
   },
   {
     type: "function",
-    name: "remote_git_status",
+    name: "workspace_git_status",
     description:
-      "Run read-only git status in the configured offline remote Ubuntu workspace.",
+      "Run fixed read-only Git status in an explicitly selected authorized local or remote workspace root.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        ...REMOTE_ROOT_INPUT_PROPERTIES,
+        ...ROOT_INPUT_PROPERTIES,
       },
     },
   },
@@ -216,14 +251,27 @@ function requiredPath(args: Record<string, unknown>): string {
   return args.path;
 }
 
+function isControllerWorkspaceClient(value: unknown): value is ControllerWorkspaceClient {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "requestControllerWorkspace" in value &&
+    typeof value.requestControllerWorkspace === "function"
+  );
+}
+
 export class DynamicToolRouter {
   readonly #audit: AuditLog;
   readonly #config: BridgeConfig;
+  readonly #controllerWorkspace: ControllerWorkspaceClient | null;
   readonly #executor: OpenSshExecutor;
 
   constructor(config: BridgeConfig, executor: OpenSshExecutor, audit: AuditLog) {
     this.#config = config;
     this.#executor = executor;
+    this.#controllerWorkspace = isControllerWorkspaceClient(executor)
+      ? executor
+      : null;
     this.#audit = audit;
   }
 
@@ -238,7 +286,7 @@ export class DynamicToolRouter {
     }
     const args = argumentObject(call.arguments);
     const root = this.#requestedRoot(args);
-    const context = this.#toolContext(root);
+    const context = this.#toolContext(root, false);
 
     const requestId = call.callId || `req_${randomUUID()}`;
     const startedAt = performance.now();
@@ -264,6 +312,7 @@ export class DynamicToolRouter {
         ok: true,
         requestId,
         ...context,
+        rootPath: root.path,
         remoteCwd: root.target === "remote" ? root.path : null,
         data,
         truncated,
@@ -324,7 +373,7 @@ export class DynamicToolRouter {
     const call = parseToolCall(rawParams);
     const args = argumentObject(call.arguments);
     const root = this.#requestedRoot(args);
-    const context = this.#toolContext(root);
+    const context = this.#toolContext(root, false);
     const requestId = call.callId || `req_${randomUUID()}`;
     const error = new BridgeError("COMMAND_DENIED", reason);
     const result: ToolResult<never> = {
@@ -362,18 +411,42 @@ export class DynamicToolRouter {
     root: WorkspaceRootConfig,
     observer: DynamicToolObserver,
   ): Promise<unknown> {
-    this.#assertRemotePrimaryRoot(root);
-    switch (tool) {
-      case "remote_read_file": {
+    if (tool === "remote_exec") {
+      this.#assertRemotePrimaryRoot(root);
+      const request = parseRemoteExecArguments(args);
+      return await this.#executor.execute(request.argv, {
+        cwd: request.cwd,
+        env: request.env,
+        timeoutMs: request.timeoutMs,
+        sideEffect: true,
+        onStdout: observer.onOutput,
+        onStderr: observer.onOutput,
+      });
+    }
+
+    const normalizedTool = normalizeWorkspaceToolName(tool);
+    const legacyResult = LEGACY_REMOTE_TOOL_ALIASES.has(tool);
+    if (legacyResult) {
+      this.#assertRemotePrimaryRoot(root);
+    }
+    const executor = this.#workspaceExecutor(root);
+    switch (normalizedTool) {
+      case "workspace_read_file": {
         const limitBytes =
           typeof args.limitBytes === "number" && Number.isInteger(args.limitBytes)
             ? Math.min(args.limitBytes, 5_242_880)
             : undefined;
-        return await this.#executor.readFile(requiredPath(args), limitBytes);
+        return await executor.readFile(requiredPath(args), limitBytes);
       }
-      case "remote_list_directory":
-        return await this.#executor.listDirectory(requiredPath(args));
-      case "remote_list_tree": {
+      case "workspace_list_directory": {
+        const path = requiredPath(args);
+        const [canonicalPath, entries] = await Promise.all([
+          executor.canonicalPath(path),
+          executor.listDirectory(path),
+        ]);
+        return legacyResult ? entries : { canonicalPath, entries, truncated: false };
+      }
+      case "workspace_list_tree": {
         const depth =
           typeof args.depth === "number" && Number.isInteger(args.depth)
             ? Math.max(1, Math.min(args.depth, 4))
@@ -382,44 +455,56 @@ export class DynamicToolRouter {
           typeof args.maxEntries === "number" && Number.isInteger(args.maxEntries)
             ? Math.max(1, Math.min(args.maxEntries, 2_000))
             : 400;
-        return await this.#executor.listTree(requiredPath(args), depth, maxEntries);
+        const path = requiredPath(args);
+        const [canonicalPath, listing] = await Promise.all([
+          executor.canonicalPath(path),
+          executor.listTree(path, depth, maxEntries),
+        ]);
+        return legacyResult ? listing : { canonicalPath, ...listing };
       }
-      case "remote_search": {
+      case "workspace_search": {
         if (typeof args.query !== "string") {
           throw new BridgeError("PROTOCOL_MISMATCH", "query must be a string");
         }
-        const paths = Array.isArray(args.paths)
-          ? args.paths.filter((entry): entry is string => typeof entry === "string")
-          : ["."];
+        if (
+          args.paths !== undefined &&
+          (!Array.isArray(args.paths) ||
+            args.paths.length > 32 ||
+            !args.paths.every((entry) => typeof entry === "string"))
+        ) {
+          throw new BridgeError(
+            "PROTOCOL_MISMATCH",
+            "paths must contain at most 32 strings",
+          );
+        }
+        const paths =
+          Array.isArray(args.paths) && args.paths.length > 0
+            ? (args.paths as string[])
+            : ["."];
         const maxResults =
           typeof args.maxResults === "number" && Number.isInteger(args.maxResults)
             ? Math.max(1, Math.min(args.maxResults, 1_000))
             : 200;
-        return await this.#executor.search(args.query, paths, maxResults);
+        const matches = await executor.search(args.query, paths, maxResults);
+        return legacyResult
+          ? matches
+          : {
+              matches,
+              truncated: matches.length >= maxResults,
+            };
       }
-      case "remote_git_status": {
-        const result = await this.#executor.execute(["git", "status", "--short", "--branch"]);
+      case "workspace_git_status": {
+        const result = await executor.gitStatus();
         if (result.exitCode !== 0) {
-          throw new BridgeError("COMMAND_DENIED", "Remote git status failed", {
+          throw new BridgeError("COMMAND_DENIED", "Workspace git status failed", {
             exitCode: result.exitCode,
             stderr: result.stderr,
           });
         }
         return result;
       }
-      case "remote_exec": {
-        const request = parseRemoteExecArguments(args);
-        return await this.#executor.execute(request.argv, {
-          cwd: request.cwd,
-          env: request.env,
-          timeoutMs: request.timeoutMs,
-          sideEffect: true,
-          onStdout: observer.onOutput,
-          onStderr: observer.onOutput,
-        });
-      }
       default:
-        throw new BridgeError("COMMAND_DENIED", `Unsupported remote tool: ${tool}`);
+        throw new BridgeError("COMMAND_DENIED", `Unsupported workspace tool: ${tool}`);
     }
   }
 
@@ -431,6 +516,12 @@ export class DynamicToolRouter {
     const defaultRoot = this.#config.roots.find(
       (root) => root.target === "remote" && root.role === "primary",
     );
+    if (target === "local" && args.rootId === undefined) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "rootId is required when target is local",
+      );
+    }
     const rootId = args.rootId ?? defaultRoot?.id;
     if (typeof rootId !== "string" || rootId.length === 0) {
       throw new BridgeError("PROTOCOL_MISMATCH", "rootId must be a non-empty string");
@@ -447,6 +538,28 @@ export class DynamicToolRouter {
     return root;
   }
 
+  #workspaceExecutor(root: WorkspaceRootConfig): WorkspaceExecutor {
+    if (root.target === "remote") {
+      this.#assertRemotePrimaryRoot(root);
+      return this.#executor;
+    }
+    if (root.role !== "secondary") {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Local workspace tools can access only an authorized secondary root",
+        { rootId: root.id },
+      );
+    }
+    if (!this.#controllerWorkspace) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Local workspace access requires the active VS Code Remote transport",
+        { rootId: root.id },
+      );
+    }
+    return new ControllerWorkspaceExecutor(root.id, this.#controllerWorkspace);
+  }
+
   #assertRemotePrimaryRoot(root: WorkspaceRootConfig): void {
     if (!this.#isRemotePrimaryRoot(root)) {
       throw new BridgeError(
@@ -457,13 +570,17 @@ export class DynamicToolRouter {
     }
   }
 
-  #toolContext(root: WorkspaceRootConfig): Omit<ToolRequestContext, "requestId"> {
+  #toolContext(
+    root: WorkspaceRootConfig,
+    revealLocalPath: boolean,
+  ): Omit<ToolRequestContext, "requestId"> {
     return {
       connectionId: this.#executor.connectionId,
       hostId: this.#config.host,
       rootId: root.id,
       rootRole: root.role,
-      rootPath: this.#isRemotePrimaryRoot(root) ? root.path : null,
+      rootPath:
+        root.target === "remote" || revealLocalPath ? root.path : null,
       target: root.target,
     };
   }

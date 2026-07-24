@@ -101,6 +101,35 @@ describe("VsCodeRemoteExecutor", () => {
     executor.close();
   });
 
+  it("routes an authorized local workspace request through the Controller transport", async () => {
+    let observed: TransportRequest | undefined;
+    const pipe = await listen((request, write) => {
+      observed = request;
+      write({
+        id: request.id,
+        result: { canonicalPath: "/local/reference/notes.md" },
+        type: "response",
+      });
+    });
+    const executor = new VsCodeRemoteExecutor(config(pipe));
+
+    await expect(
+      executor.requestControllerWorkspace(
+        "localReadFile",
+        "local-reference",
+        { path: "notes.md" },
+      ),
+    ).resolves.toEqual({ canonicalPath: "/local/reference/notes.md" });
+    expect(observed).toMatchObject({
+      operation: "localReadFile",
+      params: {
+        path: "notes.md",
+        rootId: "local-reference",
+      },
+    });
+    executor.close();
+  });
+
   it("preserves Bridge errors returned by the remote executor", async () => {
     const pipe = await listen((request, write) => {
       write({

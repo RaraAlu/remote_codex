@@ -1,7 +1,18 @@
-import { basename } from "node:path";
-import type { BridgeConfig } from "../core/types.js";
+import {
+  basename,
+  isAbsolute,
+  posix,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
+import type { BridgeConfig, WorkspaceRootConfig } from "../core/types.js";
 import { normalizeRemotePath } from "../core/path-policy.js";
-import { REMOTE_TOOL_NAMES } from "./dynamic-tools.js";
+import {
+  normalizeWorkspaceToolName,
+  REMOTE_TOOL_NAMES,
+  WORKSPACE_TOOL_NAMES,
+} from "./dynamic-tools.js";
 import { formatRemoteExecRequest, parseRemoteExecArguments } from "./remote-command.js";
 import { isRecord } from "./rpc.js";
 
@@ -26,19 +37,68 @@ function toolArguments(value: unknown): Record<string, unknown> {
   return {};
 }
 
-function displayPath(config: BridgeConfig, value: unknown): string {
+function selectedRoot(
+  config: BridgeConfig,
+  tool: string,
+  args: Record<string, unknown>,
+): WorkspaceRootConfig {
+  const primary = config.roots.find(
+    (root) => root.target === "remote" && root.role === "primary",
+  );
+  if (!primary) {
+    throw new TypeError("Bridge configuration has no remote primary root");
+  }
+  if (!WORKSPACE_TOOL_NAMES.has(tool)) {
+    return primary;
+  }
+  const target = args.target === "local" ? "local" : "remote";
+  const rootId = typeof args.rootId === "string" ? args.rootId : primary.id;
+  return (
+    config.roots.find((root) => root.id === rootId && root.target === target) ??
+    primary
+  );
+}
+
+function displayPath(root: WorkspaceRootConfig, value: unknown): string {
   if (typeof value !== "string") {
-    return config.workspaceRoot;
+    return root.path;
   }
   try {
-    return normalizeRemotePath(config.workspaceRoot, value).absolutePath;
+    if (root.target === "remote") {
+      return normalizeRemotePath(root.path, value).absolutePath;
+    }
+    const path = resolve(root.path, value || ".");
+    const child = relative(root.path, path);
+    if (
+      child !== "" &&
+      (child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child))
+    ) {
+      return root.path;
+    }
+    return path;
   } catch {
-    return config.workspaceRoot;
+    return root.path;
   }
 }
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\"'\"'`)}'`;
+}
+
+function workspaceCommand(
+  root: WorkspaceRootConfig,
+  operation: string,
+  values: readonly string[] = [],
+): string {
+  return [
+    "codex-bridge",
+    operation,
+    "--target",
+    root.target,
+    "--root",
+    shellQuote(root.id),
+    ...values,
+  ].join(" ");
 }
 
 function commandPresentation(
@@ -47,64 +107,81 @@ function commandPresentation(
   config: BridgeConfig,
 ): NativeCommandPresentation {
   const args = toolArguments(rawArguments);
-  const path = displayPath(config, args.path);
+  const normalizedTool = normalizeWorkspaceToolName(tool);
+  const root = selectedRoot(config, tool, args);
+  const path = displayPath(root, args.path);
 
-  switch (tool) {
-    case "remote_read_file": {
-      const command = `sed -n '1,240p' -- ${shellQuote(path)}`;
+  switch (normalizedTool) {
+    case "workspace_read_file": {
+      const command = workspaceCommand(root, "read", ["--", shellQuote(path)]);
       return {
         command,
         commandActions: [
           {
             type: "read",
             command,
-            name: basename(path),
+            name: root.target === "remote" ? posix.basename(path) : basename(path),
             path,
           },
         ],
+        cwd: root.path,
       };
     }
-    case "remote_list_directory": {
-      const command = `find ${shellQuote(path)} -maxdepth 1 -mindepth 1`;
+    case "workspace_list_directory": {
+      const command = workspaceCommand(root, "list", ["--", shellQuote(path)]);
       return {
         command,
         commandActions: [{ type: "listFiles", command, path }],
+        cwd: root.path,
       };
     }
-    case "remote_list_tree": {
+    case "workspace_list_tree": {
       const depth =
         typeof args.depth === "number" && Number.isInteger(args.depth)
           ? Math.max(1, Math.min(args.depth, 4))
           : 2;
-      const command = `find ${shellQuote(path)} -maxdepth ${depth} -mindepth 1`;
+      const command = workspaceCommand(root, "tree", [
+        "--depth",
+        String(depth),
+        "--",
+        shellQuote(path),
+      ]);
       return {
         command,
         commandActions: [{ type: "listFiles", command, path }],
+        cwd: root.path,
       };
     }
-    case "remote_search": {
+    case "workspace_search": {
       const query = typeof args.query === "string" ? args.query : "";
       const paths = Array.isArray(args.paths)
-        ? args.paths.map((entry) => displayPath(config, entry))
-        : [config.workspaceRoot];
-      const command = `rg -n -- ${shellQuote(query)} ${paths.map(shellQuote).join(" ")}`;
+        ? args.paths.map((entry) => displayPath(root, entry))
+        : [root.path];
+      const command = workspaceCommand(root, "search", [
+        "--literal",
+        shellQuote(query),
+        "--",
+        ...paths.map(shellQuote),
+      ]);
       return {
         command,
         commandActions: [
           {
             type: "search",
             command,
-            path: paths.length === 1 ? paths[0] : config.workspaceRoot,
+            path: paths.length === 1 ? paths[0] : root.path,
             query,
           },
         ],
+        cwd: root.path,
       };
     }
-    case "remote_git_status": {
-      const command = "git status --short --branch";
+    case "workspace_git_status": {
+      const command = workspaceCommand(root, "status");
       return {
         command,
         commandActions: [{ type: "unknown", command }],
+        cwd: root.path,
       };
     }
     case "remote_exec": {
@@ -114,7 +191,7 @@ function commandPresentation(
         return {
           command,
           commandActions: [{ type: "unknown", command }],
-          cwd: displayPath(config, request.cwd),
+          cwd: displayPath(root, request.cwd),
         };
       } catch {
         const command = "remote command";
@@ -164,21 +241,27 @@ function readableFileOutput(data: Record<string, unknown>): string | null {
 }
 
 function formatToolOutput(tool: string, item: Record<string, unknown>): string | null {
+  const normalizedTool = normalizeWorkspaceToolName(tool);
   const result = textResult(item);
   if (!isRecord(result)) {
     return typeof result === "string" ? result : null;
   }
   if (result.ok === false) {
     const error = isRecord(result.error) ? result.error : null;
-    return typeof error?.message === "string" ? error.message : "Remote operation failed";
+    return typeof error?.message === "string" ? error.message : "Workspace operation failed";
   }
 
   const data = result.data;
-  if (tool === "remote_read_file" && isRecord(data)) {
+  if (normalizedTool === "workspace_read_file" && isRecord(data)) {
     return readableFileOutput(data);
   }
-  if (tool === "remote_list_directory" && Array.isArray(data)) {
-    return data
+  if (normalizedTool === "workspace_list_directory") {
+    const entries = Array.isArray(data)
+      ? data
+      : isRecord(data) && Array.isArray(data.entries)
+        ? data.entries
+        : [];
+    return entries
       .filter(isRecord)
       .map((entry) => {
         const name = typeof entry.name === "string" ? entry.name : "";
@@ -187,7 +270,11 @@ function formatToolOutput(tool: string, item: Record<string, unknown>): string |
       .filter(Boolean)
       .join("\n");
   }
-  if (tool === "remote_list_tree" && isRecord(data) && Array.isArray(data.entries)) {
+  if (
+    normalizedTool === "workspace_list_tree" &&
+    isRecord(data) &&
+    Array.isArray(data.entries)
+  ) {
     return data.entries
       .filter(isRecord)
       .map((entry) => {
@@ -197,8 +284,13 @@ function formatToolOutput(tool: string, item: Record<string, unknown>): string |
       .filter(Boolean)
       .join("\n");
   }
-  if (tool === "remote_search" && Array.isArray(data)) {
-    return data
+  if (normalizedTool === "workspace_search") {
+    const matches = Array.isArray(data)
+      ? data
+      : isRecord(data) && Array.isArray(data.matches)
+        ? data.matches
+        : [];
+    return matches
       .filter(isRecord)
       .map((match) => {
         const path = typeof match.path === "string" ? match.path : "";
@@ -208,12 +300,12 @@ function formatToolOutput(tool: string, item: Record<string, unknown>): string |
       })
       .join("\n");
   }
-  if (tool === "remote_git_status" && isRecord(data)) {
+  if (normalizedTool === "workspace_git_status" && isRecord(data)) {
     const stdout = typeof data.stdout === "string" ? data.stdout : "";
     const stderr = typeof data.stderr === "string" ? data.stderr : "";
     return `${stdout}${stderr}`;
   }
-  if (tool === "remote_exec" && isRecord(data)) {
+  if (normalizedTool === "remote_exec" && isRecord(data)) {
     const stdout = typeof data.stdout === "string" ? data.stdout : "";
     const stderr = typeof data.stderr === "string" ? data.stderr : "";
     return `${stdout}${stderr}`;
@@ -225,13 +317,16 @@ function completedCommandState(
   tool: string,
   item: Record<string, unknown>,
 ): { exitCode: number | null; failed: boolean } {
+  const normalizedTool = normalizeWorkspaceToolName(tool);
   const result = textResult(item);
   const resultRecord = isRecord(result) ? result : null;
   const data = resultRecord && isRecord(resultRecord.data) ? resultRecord.data : null;
   const error = resultRecord && isRecord(resultRecord.error) ? resultRecord.error : null;
   const details = error && isRecord(error.details) ? error.details : null;
   const commandResult =
-    tool === "remote_exec" || tool === "remote_git_status" ? (data ?? details) : null;
+    normalizedTool === "remote_exec" || normalizedTool === "workspace_git_status"
+      ? (data ?? details)
+      : null;
 
   let exitCode: number | null | undefined;
   if (commandResult && "exitCode" in commandResult) {

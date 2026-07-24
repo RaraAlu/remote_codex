@@ -1,13 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
-import { REMOTE_TOOL_NAMES } from "../src/shim/dynamic-tools.js";
+import { REMOTE_DYNAMIC_TOOLS } from "../src/shim/dynamic-tools.js";
 import { REMOTE_PERMISSION_PROFILE_ID } from "../src/shim/local-core-policy.js";
 import { isUnknownServerRequest } from "../src/shim/proxy.js";
 import { rewriteClientMessage } from "../src/shim/rewrite.js";
 
 const config = parseBridgeConfig({
+  version: 2,
   host: "training-gpu",
-  workspaceRoot: "/home/zkbot/work/train/MimicLite",
+  roots: [
+    {
+      id: "remote-primary",
+      target: "remote",
+      role: "primary",
+      path: "/home/zkbot/work/train/MimicLite",
+      displayName: "MimicLite",
+    },
+    {
+      id: "local-reference",
+      target: "local",
+      role: "secondary",
+      path: "/home/zkbot/reference",
+      displayName: "Reference",
+    },
+  ],
 });
 
 describe("app-server request rewriting", () => {
@@ -56,7 +72,7 @@ describe("app-server request rewriting", () => {
     expect(rewritten.params).not.toHaveProperty("config");
     expect(rewritten.params).not.toHaveProperty("sandbox");
     expect(String(rewritten.params.developerInstructions)).toContain(
-      "Never fall back to local execution",
+      "Never fall back to unapproved local execution",
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
       "Local MCP, app, and connector tools may be used",
@@ -65,12 +81,15 @@ describe("app-server request rewriting", () => {
       "Root id: remote-primary",
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
+      "Root id: local-reference; target: local; role: secondary",
+    );
+    expect(String(rewritten.params.developerInstructions)).toContain(
       "remote_exec is the project command runner",
     );
     const tools = rewritten.params.dynamicTools as Array<{ name: string }>;
     expect(tools.map((tool) => tool.name)).toEqual([
       "existing",
-      ...REMOTE_TOOL_NAMES,
+      ...REMOTE_DYNAMIC_TOOLS.map((tool) => tool.name),
     ]);
   });
 
@@ -148,7 +167,7 @@ describe("app-server request rewriting", () => {
       { kind: string; value: string }
     >;
     const bridgeContext = additionalContext["codex-remote-bridge"]!;
-    expect(bridgeContext.value).toContain("Role: primary");
+    expect(bridgeContext.value).toContain("role: primary");
     expect(bridgeContext.value).toContain(
       "Use remote_exec for all project commands",
     );
@@ -204,7 +223,7 @@ describe("app-server request rewriting", () => {
     });
     expect(String(fork.params.developerInstructions)).toContain("keep me");
     expect(String(fork.params.developerInstructions)).toContain(
-      "Never fall back to local execution",
+      "Never fall back to unapproved local execution",
     );
     expect(fork.params).not.toHaveProperty("config");
     expect(fork.params).not.toHaveProperty("sandbox");

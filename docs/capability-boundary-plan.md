@@ -20,8 +20,8 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.13` 自动化候选 | 无版本值门禁；本地次级根授权、撤销、诊断和只读执行器已实现，双端路由、候选 VSIX 安装与 Windows 实机待补测 |
-| Remote Executor | `0.2.8` 候选 | 按所需能力集合握手；远端命令、读取和 stdio CodeGraph 已实测 |
+| Bridge Controller | `0.3.14` 自动化候选 | 无版本值门禁；本地次级根与远程主根的统一只读路由和原生 UI 投影已实现，候选 VSIX 安装与 Windows 实机待补测 |
+| Remote Executor | `0.2.9` 自动化候选 | 搜索统一为大小写敏感的字面匹配；能力集合和协议形状未变，候选实机待补测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
 仓库不固定或门禁任何组件版本；当前生成协议记录的来源扩展为 `26.721.30844`，诊断
@@ -35,8 +35,8 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 2026-07-23 在 Linux x64 本机执行 `npm run check`：
 
 - TypeScript 类型检查通过。
-- 40 个测试文件通过，1 个真实远端条件测试文件跳过。
-- 166 项测试通过，6 项条件测试跳过，0 项失败。
+- 45 个测试文件通过，1 个真实远端条件测试文件跳过。
+- 176 项测试通过，6 项条件测试跳过，0 项失败。
 - Controller、Shim 和 Remote Executor 构建通过。
 - 插件内置 `0.146.0-alpha.3` 的本地透传、远程窗口启动和线程创建 Shim 冒烟通过；
   缺少受控运行时指针时，即使 PATH 存在系统 CLI 也失败关闭。
@@ -44,7 +44,7 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 
 这些结果证明当前源码自动化基线与 Linux 包构造可用；真实窗口另外证明了官方面板
 与外部 CLI 发起的 Remote SSH 任务、25 个固定远端探针和 CodeGraph。它们仍不证明
-远程命令取消、断线恢复、双端读写或完整生命周期。
+远程命令取消、断线恢复、双端写入、双端读取真实窗口链路或完整生命周期。
 
 `0.3.5` 使用校验过 SHA-256 的官方 Node `24.18.0` Windows x64 归档在 Linux 生成
 SEA Shim，`npm run package:all` 已成功。该结果证明跨平台构包和内容隔离，不替代
@@ -114,7 +114,7 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 | MCP-ADAPTER | 通用远端 MCP 启动适配 | 已实施 | 受控适配器 ID、共享注册表、VS Code Remote/Remote Executor 与 OpenSSH stdin 控制头均已实现；CodeGraph 八工具实机通过 | 其他服务适配器和 OpenSSH 回退实机仍待按需补充 |
 | ROOT-PRIMARY | 远程工作区成为主工作目录 | 已实施并限定实测 | 配置 v2 固定唯一 `remote/primary`；线程以本地控制目录为物理 `cwd`，以远程主根为逻辑 `runtimeWorkspaceRoots`；外部 CLI 新建同步 thread 的命令和读取默认落到远程主根 | 官方面板新建/恢复、附件和当前文件仍待补测 |
 | ROOT-SECONDARY | 定义本地次级授权目录 | 已实施（自动化） | 命令面板可显式选择和撤销本地目录；授权持久化为规范化次级根，诊断报告可见，撤销后既有执行器立即拒绝 | 候选 VSIX 的真实选择器和重载体验待补测 |
-| DUAL-READ | 双端目录读取、树、搜索和状态 | 部分实施 | 远端工具已有显式根身份；Controller 本地只读执行器具备读取、目录、树、字面文本搜索、Git 状态及词法/真实路径边界 | 双端统一工具路由和原生 UI 投影未接入 |
+| DUAL-READ | 双端目录读取、树、搜索和状态 | 已实施（自动化） | `workspace_*` 工具按显式目标和根 ID 路由；本地请求经已认证 Controller transport 执行，远端请求保持 Remote Executor/OpenSSH 路径；结果、审计和原生 UI 均保留根身份 | 候选 VSIX 的同任务双端读取与界面观感待实机补测 |
 | DUAL-WRITE | 双端写入、补丁、重命名和删除 | 待实施 | 读取结果已返回远端 SHA-256 | 没有写工具、`expectedHash`、原子替换或统一错误语义 |
 | LIFE-CANCEL | 运行中取消 | 待实施 | 执行器底层接受 `AbortSignal`，超时能终止子进程 | app-server `turn/interrupt` 没有传到活动远端请求 |
 | LIFE-IDEMP | 幂等和断线结果确认 | 部分实施 | 同一 app-server 内广播的 `threadId + turnId + callId` 已协调为单次执行；有 `requestId`、`connectionId` 和 `RESULT_UNKNOWN` | 没有跨重连幂等账本、结果查询或重连确认 |
@@ -172,7 +172,8 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 - `BridgeConfig.roots` 记录稳定根 ID、目标端、主次角色、规范化路径和显示名。
 - 配置中必须且只能存在一个 `remote/primary`；`BridgeConfig.workspaceRoot` 是该主根的
   运行期兼容别名，二者不一致时失败关闭。
-- v1 单远程根配置会无损迁移为 v2；v2 可记录但尚不能访问 `local/secondary`。
+- v1 单远程根配置会无损迁移为 v2；v2 的 `local/secondary` 只能在用户授权后通过显式
+  `workspace_*` 目标和根 ID 访问。
 - `remote_exec.cwd` 是远程工作区相对路径，缺省时由执行器落到远程根目录。
 - 远端文件、搜索、Git 和命令都在规范化远程根目录内执行。
 
@@ -182,8 +183,8 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 - 当前 `thread/start`、`thread/resume` 和 `turn/start` 仍把 `cwd` 与
   `runtimeWorkspaceRoots` 都改成本地控制目录；阶段 2B 将只保留 `cwd` 为控制目录。
 - 远程根目录目前只存在于 Bridge 配置、提示和动态工具中，不是 Codex 线程的逻辑主根。
-- `localExecution` 仍固定为 `deny`；配置中的本地次级根没有选择入口或执行器，不能
-  被工具访问。
+- `localExecution` 仍固定为 `deny`；本地次级根不开放任意命令或内置本地文件旁路，
+  只允许 Controller 的有界只读操作。
 
 实现“远程主工作目录”时必须区分：
 
@@ -215,13 +216,16 @@ VS Code 工作区 URI。2026-07-22 对官方扩展内置 `0.145.0-alpha.27` app-
 - 目录、目录树、搜索和 Git 状态均有结构化工具。
 - 词法路径与远端 `realpath` 双重校验，能拒绝符号链接逃逸。
 - 默认 `vscode-remote` 模式通过 Remote Extension Host 执行，不发起第二次 SSH 登录。
+- `workspace_*` 统一只读工具按 `target` 和根 ID 路由：远端保持 Remote Executor
+  路径，本地通过同一已认证 Controller transport 返回授权根内的结果。
+- 本地执行器逐次核对当前授权，并执行词法、真实路径、符号链接、文件大小、目录项和
+  搜索限额检查；原生 UI 投影显示真实目标端、根 ID、规范化路径和对应 `cwd`。
 
 边界：
 
-- `REMOTE_DYNAMIC_TOOLS` 全部是 `remote_*`，没有统一的 `target: local | remote`。
-- `LocalProcessExecutor` 名称中的“Local”是指在远端 Extension Host 本机执行，不是
-  Controller 本地主机的授权目录执行器。
-- Controller 仅为安装 Executor 使用 `vscode.workspace.fs`，没有通用本地文件工具。
+- `remote_exec` 仍只允许远程主根；本地根没有任意命令入口。
+- `openssh` 回退只用于远程目标；本地根访问必须有活动的 VS Code Remote Controller
+  transport，否则失败关闭。
 - 没有写入、补丁、创建目录、重命名、删除和哈希冲突处理。
 
 ### 3.5 命令、审批和输出
@@ -466,12 +470,12 @@ Remote SSH 窗口进入 `ready`，官方 Codex 新任务通过
 6. 完成配置定向测试和 `npm run check` 后独立提交；工作区主次提示与 turn 级刷新留在
    阶段 2B，Core 防线探针留在阶段 2C。
 
-当前进度：阶段 2A 和 2B 的实现已完成；阶段 2C 已部分实施并保持待补测。全量门禁为
+阶段 2 批次完成时，2A 和 2B 的实现已完成，2C 已部分实施并保持待补测。其当时门禁为
 33 个测试文件通过、1 个真实远端条件测试文件跳过，139 项通过、5 项跳过。构建、
 Shim 冒烟、Linux x64 当前平台打包、官方 app-server 的专用权限配置激活和活动
 VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地客户端请求的
 协议诱饵测试及五类 Core 本地审批负测通过；官方 UI 新建/恢复、附件、当前文件和真实
-模型专用工具诱饵仍待补测，配置中的本地次级根仍不可访问。
+模型专用工具诱饵仍待补测；当时配置中的本地次级根尚不可访问，后续由阶段 3 开放。
 
 阶段 2A 实机复核发现（2026-07-22）：
 
@@ -607,8 +611,14 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 扩展全局状态持久化最多 15 个规范化 `local/secondary` 根，并同步到无凭据的 Bridge
 配置和窗口会话配置。Controller 本地只读执行器逐次校验授权是否仍存在，同时执行词法、
 真实路径和符号链接边界检查；支持限额读取、目录、目录树、字面文本搜索和只读 Git
-状态。诊断会探测每个授权根，撤销后已有执行器立即返回 `COMMAND_DENIED`。双端工具路由
-与原生 UI 投影仍待第三个独立提交。
+状态。诊断会探测每个授权根，撤销后已有执行器立即返回 `COMMAND_DENIED`；该提交没有
+提前开放双端路由。
+
+第三个“双端只读路由和 UI 投影”提交已完成自动化。Shim 公开统一的 `workspace_*`
+读取、目录、目录树、字面搜索和 Git 状态工具，省略目标时仍默认远程主根；本地目标
+必须显式提供授权根 ID，并经当前已认证 VS Code transport 返回 Controller 执行。
+旧 `remote_*` 只读工具名继续兼容但只允许远程主根。统一结果、任务上下文、审计和
+原生命令项均保留目标端、根 ID、角色与规范化路径；真实候选窗口仍待用户安装后补测。
 
 验收：
 

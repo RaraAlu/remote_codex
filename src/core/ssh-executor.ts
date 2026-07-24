@@ -590,13 +590,14 @@ export class OpenSshExecutor {
       throw new BridgeError("COMMAND_DENIED", "Search query must be a non-empty NUL-free string");
     }
     const canonicalPaths: string[] = [];
-    for (const inputPath of inputPaths) {
+    for (const inputPath of inputPaths.length > 0 ? inputPaths : ["."]) {
       const canonical = await this.canonicalPath(inputPath);
       canonicalPaths.push(canonical);
     }
     const result = await this.execute([
       "rg",
       "--json",
+      "--fixed-strings",
       "--max-count",
       String(Math.max(1, Math.min(maxResults, 5_000))),
       "--",
@@ -642,6 +643,18 @@ export class OpenSshExecutor {
     return matches;
   }
 
+  async gitStatus(): Promise<RemoteCommandResult> {
+    return await this.execute([
+      "git",
+      "--no-optional-locks",
+      "-c",
+      "core.fsmonitor=false",
+      "status",
+      "--short",
+      "--branch",
+    ]);
+  }
+
   async #searchWithGrep(
     query: string,
     canonicalPaths: readonly string[],
@@ -654,7 +667,7 @@ export class OpenSshExecutor {
       "--exclude-dir=.git",
       "--max-count",
       String(Math.max(1, Math.min(maxResults, 5_000))),
-      "-E",
+      "-F",
       "--",
       query,
       ...canonicalPaths,

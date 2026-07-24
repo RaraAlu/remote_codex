@@ -54,6 +54,7 @@ import {
   LocalRootAuthority,
   type LocalRootDiagnostic,
 } from "./local-root-authority.js";
+import { ControllerWorkspaceDispatcher } from "./controller-workspace-dispatcher.js";
 import { LocalWorkspaceExecutor } from "./local-workspace-executor.js";
 import { repairCodexViewLocation } from "./view-location.js";
 import { VsCodeTransportServer } from "./vscode-transport-server.js";
@@ -166,7 +167,14 @@ export class BridgeController implements vscode.Disposable {
     this.#output = vscode.window.createOutputChannel("Codex Remote Bridge", { log: true });
     this.#localRoots = new LocalRootAuthority(context.globalState);
     this.#settings = new OfficialSettingsManager(context);
-    this.#transport = new VsCodeTransportServer(() => this.#sessionConfig ?? this.#config);
+    const workspaceDispatcher = new ControllerWorkspaceDispatcher(
+      () => this.#sessionConfig ?? this.#config,
+      (rootId) => this.#localRoots.find(rootId),
+    );
+    this.#transport = new VsCodeTransportServer(
+      () => this.#sessionConfig ?? this.#config,
+      (request) => workspaceDispatcher.execute(request),
+    );
     delete process.env.CODEX_BRIDGE_CODEX_EXECUTABLE;
     delete process.env.CODEX_BRIDGE_DEVELOPMENT_CODEX_EXECUTABLE;
     this.#status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 30);

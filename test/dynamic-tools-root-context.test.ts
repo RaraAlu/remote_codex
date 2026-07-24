@@ -19,9 +19,11 @@ function parseResult(response: unknown): Record<string, unknown> {
 
 describe("dynamic tool root context", () => {
   it("exposes remote root selectors and returns an explicit root identity", async () => {
-    const readTool = REMOTE_DYNAMIC_TOOLS.find((tool) => tool.name === "remote_read_file");
+    const readTool = REMOTE_DYNAMIC_TOOLS.find(
+      (tool) => tool.name === "workspace_read_file",
+    );
     expect(readTool?.inputSchema.properties).toMatchObject({
-      target: { enum: ["remote"] },
+      target: { enum: ["local", "remote"] },
       rootId: { type: "string" },
     });
 
@@ -57,9 +59,19 @@ describe("dynamic tool root context", () => {
         size: 6,
         truncated: false,
       }));
+      const requestControllerWorkspace = vi.fn(async () => ({
+        canonicalPath: "/local/reference/notes.md",
+        contentBase64: "bG9jYWw=",
+        hash: "b".repeat(64),
+        mode: "81a4",
+        modifiedAtMs: 2,
+        size: 5,
+        truncated: false,
+      }));
       const executor = {
         connectionId: "conn-test",
         readFile,
+        requestControllerWorkspace,
       } as unknown as OpenSshExecutor;
       const router = new DynamicToolRouter(config, executor, new AuditLog(auditPath));
 
@@ -118,9 +130,41 @@ describe("dynamic tool root context", () => {
       });
       expect(readFile).toHaveBeenCalledTimes(2);
 
+      const local = await router.handle(4, {
+        arguments: {
+          path: "notes.md",
+          rootId: "local-reference",
+          target: "local",
+        },
+        callId: "call-local-workspace",
+        tool: "workspace_read_file",
+      });
+      expect(local).toMatchObject({ success: true });
+      expect(parseResult(local)).toMatchObject({
+        ok: true,
+        remoteCwd: null,
+        rootId: "local-reference",
+        rootPath: "/local/reference",
+        rootRole: "secondary",
+        target: "local",
+      });
+      expect(requestControllerWorkspace).toHaveBeenCalledWith(
+        "localReadFile",
+        "local-reference",
+        { path: "notes.md" },
+      );
+
       const events = (await readFileText(auditPath)).map((line) => JSON.parse(line));
       expect(events).toEqual(
         expect.arrayContaining([
+          expect.objectContaining({
+            operation: "workspace_read_file",
+            outcome: "succeeded",
+            rootId: "local-reference",
+            rootRole: "secondary",
+            rootPath: "/local/reference",
+            target: "local",
+          }),
           expect.objectContaining({
             operation: "remote_read_file",
             outcome: "succeeded",

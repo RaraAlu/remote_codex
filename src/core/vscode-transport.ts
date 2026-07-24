@@ -4,9 +4,21 @@ export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
 export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
 export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 4;
-export const REMOTE_EXECUTOR_VERSION = "0.2.8";
+export const REMOTE_EXECUTOR_VERSION = "0.2.9";
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
+
+export const CONTROLLER_WORKSPACE_OPERATIONS = [
+  "localCanonicalPath",
+  "localGitStatus",
+  "localListDirectory",
+  "localListTree",
+  "localReadFile",
+  "localSearch",
+] as const;
+
+export type ControllerWorkspaceOperation =
+  (typeof CONTROLLER_WORKSPACE_OPERATIONS)[number];
 
 export const REMOTE_EXECUTOR_CAPABILITIES = [
   "canonicalPath",
@@ -63,6 +75,26 @@ export interface RemoteExecutorCommandResponse {
   result?: unknown;
 }
 
+export interface ControllerWorkspaceRequest {
+  hostId: string;
+  id: string;
+  operation: ControllerWorkspaceOperation;
+  policy: {
+    commandTimeoutMs: number;
+    maxOutputBytes: number;
+  };
+  params: Record<string, unknown>;
+  workspaceRoot: string;
+}
+
+export interface ControllerWorkspaceClient {
+  requestControllerWorkspace<T>(
+    operation: ControllerWorkspaceOperation,
+    rootId: string,
+    params?: Record<string, unknown>,
+  ): Promise<T>;
+}
+
 export interface RemoteOutputEvent {
   channel: "stderr" | "stdout";
   chunk: string;
@@ -83,8 +115,18 @@ export type RemoteStdioEvent =
       signal: string | null;
     };
 
-export interface TransportRequest extends RemoteExecutorCommandRequest {
+export interface TransportRequest {
+  hostId: string;
+  id: string;
+  operation: ControllerWorkspaceOperation | RemoteExecutorOperation;
+  outputCommand: string;
+  policy: {
+    commandTimeoutMs: number;
+    maxOutputBytes: number;
+  };
+  params: Record<string, unknown>;
   token: string;
+  workspaceRoot: string;
 }
 
 export type TransportStdioInput =
@@ -166,6 +208,15 @@ export function isRemoteExecutorPing(value: unknown): value is RemoteExecutorPin
   );
 }
 
+export function isControllerWorkspaceOperation(
+  value: unknown,
+): value is ControllerWorkspaceOperation {
+  return (
+    typeof value === "string" &&
+    CONTROLLER_WORKSPACE_OPERATIONS.includes(value as ControllerWorkspaceOperation)
+  );
+}
+
 export function isTransportRequest(value: unknown): value is TransportRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -190,6 +241,7 @@ export function isTransportRequest(value: unknown): value is TransportRequest {
       "readFile",
       "search",
       "stdioStart",
+      ...CONTROLLER_WORKSPACE_OPERATIONS,
     ].includes(request.operation) &&
     Boolean(request.params) &&
     typeof request.params === "object" &&

@@ -9,18 +9,24 @@ import { chmodIfSupported } from "../core/file-permissions.js";
 import { bridgeStateDir } from "../core/locations.js";
 import type { BridgeConfig, VsCodeTransportDescriptor } from "../core/types.js";
 import {
+  isControllerWorkspaceOperation,
   isRemoteOutputEvent,
   isRemoteStdioEvent,
   isTransportStdioInput,
   isTransportRequest,
   REMOTE_EXECUTOR_COMMAND,
   REMOTE_OUTPUT_COMMAND,
+  type ControllerWorkspaceRequest,
   type RemoteExecutorCommandRequest,
   type RemoteExecutorCommandResponse,
   type RemoteOutputEvent,
   type RemoteStdioEvent,
   type TransportMessage,
 } from "../core/vscode-transport.js";
+
+export type ControllerWorkspaceHandler = (
+  request: ControllerWorkspaceRequest,
+) => Promise<unknown>;
 
 interface StdioSocket {
   request: RemoteExecutorCommandRequest;
@@ -49,6 +55,7 @@ function tokenMatches(expected: string, actual: string): boolean {
 
 export class VsCodeTransportServer implements vscode.Disposable {
   readonly #config: () => BridgeConfig | null;
+  readonly #controllerWorkspace: ControllerWorkspaceHandler | null;
   readonly #pending = new Map<string, Socket>();
   readonly #sockets = new Set<Socket>();
   readonly #stdioSockets = new Map<string, StdioSocket>();
@@ -56,8 +63,12 @@ export class VsCodeTransportServer implements vscode.Disposable {
   #server: Server | null = null;
   #starting: Promise<VsCodeTransportDescriptor> | null = null;
 
-  constructor(config: () => BridgeConfig | null) {
+  constructor(
+    config: () => BridgeConfig | null,
+    controllerWorkspace: ControllerWorkspaceHandler | null = null,
+  ) {
     this.#config = config;
+    this.#controllerWorkspace = controllerWorkspace;
   }
 
   async start(): Promise<VsCodeTransportDescriptor> {
@@ -234,16 +245,35 @@ export class VsCodeTransportServer implements vscode.Disposable {
         throw new BridgeError("PROTOCOL_MISMATCH", "Duplicate VS Code transport request id");
       }
       this.#pending.set(id, socket);
+      const policy = {
+        commandTimeoutMs: config.commandTimeoutMs,
+        maxOutputBytes: config.maxOutputBytes,
+      };
+      if (isControllerWorkspaceOperation(parsed.operation)) {
+        if (!this.#controllerWorkspace) {
+          throw new BridgeError(
+            "COMMAND_DENIED",
+            "Controller workspace execution is unavailable",
+          );
+        }
+        const result = await this.#controllerWorkspace({
+          hostId: parsed.hostId,
+          id,
+          operation: parsed.operation,
+          params: parsed.params,
+          policy,
+          workspaceRoot: parsed.workspaceRoot,
+        });
+        writeMessage(socket, { id, result, type: "response" });
+        return null;
+      }
       const request: RemoteExecutorCommandRequest = {
         hostId: parsed.hostId,
         id,
         operation: parsed.operation,
         outputCommand: REMOTE_OUTPUT_COMMAND,
         params: parsed.params,
-        policy: {
-          commandTimeoutMs: config.commandTimeoutMs,
-          maxOutputBytes: config.maxOutputBytes,
-        },
+        policy,
         workspaceRoot: parsed.workspaceRoot,
       };
       if (request.operation === "stdioStart") {

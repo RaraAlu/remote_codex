@@ -7,6 +7,27 @@ const config = parseBridgeConfig({
   workspaceRoot: "/remote/workspace",
 });
 
+const dualConfig = parseBridgeConfig({
+  version: 2,
+  host: "training-gpu",
+  roots: [
+    {
+      id: "remote-primary",
+      target: "remote",
+      role: "primary",
+      path: "/remote/workspace",
+      displayName: "Remote workspace",
+    },
+    {
+      id: "local-reference",
+      target: "local",
+      role: "secondary",
+      path: "/local/reference",
+      displayName: "Local reference",
+    },
+  ],
+});
+
 describe("native Codex tool presentation", () => {
   it("projects a remote file read into the native command execution shape", () => {
     const projected = projectServerMessage(
@@ -44,6 +65,44 @@ describe("native Codex tool presentation", () => {
           type: "read",
           name: "index.ts",
           path: "/remote/workspace/src/index.ts",
+        },
+      ],
+    });
+  });
+
+  it("projects an authorized local read with its local root identity and cwd", () => {
+    const projected = projectServerMessage(
+      {
+        method: "item/started",
+        params: {
+          item: {
+            id: "item-local",
+            type: "dynamicToolCall",
+            tool: "workspace_read_file",
+            arguments: {
+              path: "notes.md",
+              rootId: "local-reference",
+              target: "local",
+            },
+            status: "inProgress",
+          },
+        },
+      },
+      dualConfig,
+    ) as unknown as {
+      params: { item: Record<string, unknown> };
+    };
+
+    expect(projected.params.item).toMatchObject({
+      type: "commandExecution",
+      command:
+        "codex-bridge read --target local --root 'local-reference' -- '/local/reference/notes.md'",
+      cwd: "/local/reference",
+      commandActions: [
+        {
+          type: "read",
+          name: "notes.md",
+          path: "/local/reference/notes.md",
         },
       ],
     });
@@ -150,7 +209,7 @@ describe("native Codex tool presentation", () => {
 
     expect(projected.result.thread.turns[0]?.items[0]).toMatchObject({
       type: "commandExecution",
-      command: "git status --short --branch",
+      command: "codex-bridge status --target remote --root 'remote-primary'",
       status: "failed",
       exitCode: 1,
       aggregatedOutput: "SSH disconnected",
