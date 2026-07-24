@@ -30,10 +30,13 @@ export const BRIDGE_ERROR_CODES = [
 
 export type BridgeErrorCode = (typeof BRIDGE_ERROR_CODES)[number];
 
+export type WorkspaceTarget = "local" | "remote";
+export type WorkspaceRootRole = "primary" | "secondary";
+
 export interface WorkspaceRootConfig {
   id: string;
-  target: "local" | "remote";
-  role: "primary" | "secondary";
+  target: WorkspaceTarget;
+  role: WorkspaceRootRole;
   path: string;
   displayName: string;
 }
@@ -78,6 +81,10 @@ export interface ToolRequestContext {
   requestId: string;
   connectionId: string;
   hostId: string;
+  rootId: string;
+  rootRole: WorkspaceRootRole;
+  rootPath: string | null;
+  target: WorkspaceTarget;
 }
 
 export interface BridgeErrorPayload {
@@ -89,7 +96,7 @@ export interface BridgeErrorPayload {
 
 export interface ToolResult<T> extends ToolRequestContext {
   ok: boolean;
-  remoteCwd: string;
+  remoteCwd: string | null;
   data: T | null;
   truncated: boolean;
   error: BridgeErrorPayload | null;
@@ -126,6 +133,10 @@ export interface AuditEvent {
   hostId?: string;
   workspaceRoot?: string;
   remoteCwd?: string;
+  rootId?: string;
+  rootRole?: WorkspaceRootRole;
+  rootPath?: string;
+  target?: WorkspaceTarget;
   operation: string;
   state?: BridgeState;
   outcome: "started" | "succeeded" | "failed" | "cancelled" | "unknown";

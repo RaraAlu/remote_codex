@@ -93,6 +93,7 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 远端 `realpath` 与符号链接防逃逸 | 已用仓库内指向 `/root/.local` 的真实符号链接验证 |
 | 独立本地审计日志和脱敏 | 已实现并测试 |
 | 远程逻辑主根 | 唯一 `remote/primary` 已写入线程和每轮 `runtimeWorkspaceRoots`；活动 transport 的 `pwd` 回环通过 |
+| 工具根身份 | `0.3.12` 已让请求、结果和审计携带根 ID、目标端、角色与根路径；本地根执行仍失败关闭 |
 | Bridge 工具原生界面投影 | 已实现并测试；当前支持组合仍缺独立的真实窗口界面观感证据 |
 | 远程 URI、Diff 和文件跳转 | 未实现 |
 
@@ -266,6 +267,12 @@ Codex。
 `HISTORICAL_THREAD_INTERVENE_0311_OK`。候选 VSIX 安装后的 Remote SSH 工具回归和
 Windows 实机仍待补测。
 
+`0.3.12` 开始阶段 3 的协议和类型提交。全部 `remote_*` 动态工具 Schema 现在接受可选
+`rootId` 和固定远端 `target`；省略时保持唯一远端主根的原行为。工具结果与审计显式
+记录根 ID、目标端、主次角色和规范化根路径，为后续本地次级根执行器提供稳定身份。
+直接请求配置中的本地根会返回 `COMMAND_DENIED`，不调用远端执行器，工具结果也不暴露
+本地路径。本地目录选择、授权撤销、Controller 本地执行器和双端 UI 投影仍待后续提交。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -295,7 +302,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-23-release-0.3.6-graceful-gateway-close.md`；设置恢复空闲态见
 `docs/acceptance/2026-07-23-release-0.3.8-settings-restore-idle.md`；分阶段重新配置见
 `docs/acceptance/2026-07-23-release-0.3.10-staged-reconfigure.md`；历史 thread 恢复见
-`docs/acceptance/2026-07-23-release-0.3.11-historical-thread-resume.md`。
+`docs/acceptance/2026-07-23-release-0.3.11-historical-thread-resume.md`；工具根身份见
+`docs/acceptance/2026-07-23-release-0.3.12-root-identity-protocol.md`。
 
 ## 本地 MCP 边界
 

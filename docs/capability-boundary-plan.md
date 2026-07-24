@@ -20,7 +20,7 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.11` 候选 | 无版本值门禁；Linux Remote SSH 官方任务、设置恢复和历史 thread 源码级接管通过，候选 VSIX 安装与 Windows 实机待补测 |
+| Bridge Controller | `0.3.12` 自动化候选 | 无版本值门禁；远端工具根身份与本地根失败关闭已实现，候选 VSIX 安装、真实显式根选择与 Windows 实机待补测 |
 | Remote Executor | `0.2.8` 候选 | 按所需能力集合握手；远端命令、读取和 stdio CodeGraph 已实测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
@@ -114,7 +114,7 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 | MCP-ADAPTER | 通用远端 MCP 启动适配 | 已实施 | 受控适配器 ID、共享注册表、VS Code Remote/Remote Executor 与 OpenSSH stdin 控制头均已实现；CodeGraph 八工具实机通过 | 其他服务适配器和 OpenSSH 回退实机仍待按需补充 |
 | ROOT-PRIMARY | 远程工作区成为主工作目录 | 已实施并限定实测 | 配置 v2 固定唯一 `remote/primary`；线程以本地控制目录为物理 `cwd`，以远程主根为逻辑 `runtimeWorkspaceRoots`；外部 CLI 新建同步 thread 的命令和读取默认落到远程主根 | 官方面板新建/恢复、附件和当前文件仍待补测 |
 | ROOT-SECONDARY | 定义本地次级授权目录 | 部分实施 | 配置 v2 已定义并校验 `local/secondary` 根记录，但尚未提供授权入口 | 没有本地根选择、执行器、访问和撤销协议 |
-| DUAL-READ | 双端目录读取、树、搜索和状态 | 待实施 | 远端只读工具完整；Remote Executor 有路径约束 | 工具没有 `target`；Controller 没有本地授权目录执行器 |
+| DUAL-READ | 双端目录读取、树、搜索和状态 | 部分实施 | 远端工具请求、结果和审计已有显式根 ID、目标端、角色与路径；旧请求默认远端主根，本地根访问失败关闭 | 没有本地授权入口、Controller 本地执行器、双端统一工具和 UI 投影 |
 | DUAL-WRITE | 双端写入、补丁、重命名和删除 | 待实施 | 读取结果已返回远端 SHA-256 | 没有写工具、`expectedHash`、原子替换或统一错误语义 |
 | LIFE-CANCEL | 运行中取消 | 待实施 | 执行器底层接受 `AbortSignal`，超时能终止子进程 | app-server `turn/interrupt` 没有传到活动远端请求 |
 | LIFE-IDEMP | 幂等和断线结果确认 | 部分实施 | 同一 app-server 内广播的 `threadId + turnId + callId` 已协调为单次执行；有 `requestId`、`connectionId` 和 `RESULT_UNKNOWN` | 没有跨重连幂等账本、结果查询或重连确认 |
@@ -596,6 +596,12 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 5. 本地与远端都执行词法、真实路径和符号链接边界检查。
 6. 对两端设置文件大小、目录项、树深、搜索结果和并行读取上限。
 7. 更新原生 UI 投影，使命令项和审计能区分本地次级与远程主目录。
+
+当前进度：第一个“协议和类型”提交已完成。现有 `remote_*` 工具可显式携带
+`rootId` 和固定的 `target="remote"`；结果与审计返回根 ID、目标端、主次角色和规范化
+根路径，省略选择器仍默认唯一远端主根。配置中的本地次级根在本地执行器交付前返回
+`COMMAND_DENIED`，不会调用远端执行器或向工具结果暴露本地路径。第 1-2、4-7 项的本地
+授权和双端实现仍待后续独立提交。
 
 验收：
 

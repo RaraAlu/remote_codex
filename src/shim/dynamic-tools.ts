@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { asBridgeError, BridgeError } from "../core/errors.js";
 import type { AuditLog } from "../core/audit-log.js";
 import type { OpenSshExecutor } from "../core/ssh-executor.js";
-import type { BridgeConfig, ToolResult } from "../core/types.js";
+import type {
+  BridgeConfig,
+  ToolRequestContext,
+  ToolResult,
+  WorkspaceRootConfig,
+} from "../core/types.js";
 import { isRecord, type RpcId } from "./rpc.js";
 import { parseRemoteExecArguments } from "./remote-command.js";
 
@@ -15,6 +20,21 @@ export const REMOTE_TOOL_NAMES = new Set([
   "remote_exec",
 ]);
 
+const REMOTE_ROOT_INPUT_PROPERTIES = {
+  target: {
+    type: "string",
+    enum: ["remote"],
+    description: "Execution target. Remote tools currently accept only remote.",
+  },
+  rootId: {
+    type: "string",
+    minLength: 1,
+    maxLength: 64,
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+    description: "Configured remote root ID. Omit to use the unique remote primary root.",
+  },
+} as const;
+
 export const REMOTE_DYNAMIC_TOOLS = [
   {
     type: "function",
@@ -26,6 +46,7 @@ export const REMOTE_DYNAMIC_TOOLS = [
       additionalProperties: false,
       required: ["path"],
       properties: {
+        ...REMOTE_ROOT_INPUT_PROPERTIES,
         path: { type: "string", description: "Workspace-relative remote POSIX path." },
         limitBytes: {
           type: "integer",
@@ -46,6 +67,7 @@ export const REMOTE_DYNAMIC_TOOLS = [
       additionalProperties: false,
       required: ["path"],
       properties: {
+        ...REMOTE_ROOT_INPUT_PROPERTIES,
         path: { type: "string", description: "Workspace-relative remote directory." },
       },
     },
@@ -60,6 +82,7 @@ export const REMOTE_DYNAMIC_TOOLS = [
       additionalProperties: false,
       required: ["path"],
       properties: {
+        ...REMOTE_ROOT_INPUT_PROPERTIES,
         path: { type: "string", description: "Workspace-relative remote directory." },
         depth: {
           type: "integer",
@@ -86,6 +109,7 @@ export const REMOTE_DYNAMIC_TOOLS = [
       additionalProperties: false,
       required: ["query"],
       properties: {
+        ...REMOTE_ROOT_INPUT_PROPERTIES,
         query: { type: "string" },
         paths: {
           type: "array",
@@ -108,7 +132,9 @@ export const REMOTE_DYNAMIC_TOOLS = [
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      properties: {},
+      properties: {
+        ...REMOTE_ROOT_INPUT_PROPERTIES,
+      },
     },
   },
   {
@@ -121,6 +147,7 @@ export const REMOTE_DYNAMIC_TOOLS = [
       additionalProperties: false,
       required: ["argv"],
       properties: {
+        ...REMOTE_ROOT_INPUT_PROPERTIES,
         argv: {
           type: "array",
           minItems: 1,
@@ -209,6 +236,9 @@ export class DynamicToolRouter {
     if (!REMOTE_TOOL_NAMES.has(call.tool)) {
       throw new BridgeError("COMMAND_DENIED", `Unknown remote tool: ${call.tool}`);
     }
+    const args = argumentObject(call.arguments);
+    const root = this.#requestedRoot(args);
+    const context = this.#toolContext(root);
 
     const requestId = call.callId || `req_${randomUUID()}`;
     const startedAt = performance.now();
@@ -217,21 +247,24 @@ export class DynamicToolRouter {
       connectionId: this.#executor.connectionId,
       hostId: this.#config.host,
       workspaceRoot: this.#config.workspaceRoot,
-      remoteCwd: this.#config.workspaceRoot,
+      ...(root.target === "remote" ? { remoteCwd: root.path } : {}),
+      rootId: root.id,
+      rootRole: root.role,
+      rootPath: root.path,
+      target: root.target,
       operation: call.tool,
       outcome: "started",
       details: { rpcId },
     });
 
     try {
-      const data = await this.#execute(call.tool, call.arguments, observer);
+      const data = await this.#execute(call.tool, args, root, observer);
       const truncated = isRecord(data) && data.truncated === true;
       const result: ToolResult<unknown> = {
         ok: true,
         requestId,
-        connectionId: this.#executor.connectionId,
-        hostId: this.#config.host,
-        remoteCwd: this.#config.workspaceRoot,
+        ...context,
+        remoteCwd: root.target === "remote" ? root.path : null,
         data,
         truncated,
         error: null,
@@ -241,7 +274,11 @@ export class DynamicToolRouter {
         connectionId: this.#executor.connectionId,
         hostId: this.#config.host,
         workspaceRoot: this.#config.workspaceRoot,
-        remoteCwd: this.#config.workspaceRoot,
+        ...(root.target === "remote" ? { remoteCwd: root.path } : {}),
+        rootId: root.id,
+        rootRole: root.role,
+        rootPath: root.path,
+        target: root.target,
         operation: call.tool,
         outcome: "succeeded",
         durationMs: Math.round(performance.now() - startedAt),
@@ -255,9 +292,8 @@ export class DynamicToolRouter {
       const result: ToolResult<never> = {
         ok: false,
         requestId,
-        connectionId: this.#executor.connectionId,
-        hostId: this.#config.host,
-        remoteCwd: this.#config.workspaceRoot,
+        ...context,
+        remoteCwd: root.target === "remote" ? root.path : null,
         data: null,
         truncated: bridgeError.code === "OUTPUT_TRUNCATED",
         error: bridgeError.toPayload(),
@@ -267,7 +303,11 @@ export class DynamicToolRouter {
         connectionId: this.#executor.connectionId,
         hostId: this.#config.host,
         workspaceRoot: this.#config.workspaceRoot,
-        remoteCwd: this.#config.workspaceRoot,
+        ...(root.target === "remote" ? { remoteCwd: root.path } : {}),
+        rootId: root.id,
+        rootRole: root.role,
+        rootPath: root.path,
+        target: root.target,
         operation: call.tool,
         outcome: bridgeError.code === "RESULT_UNKNOWN" ? "unknown" : "failed",
         durationMs: Math.round(performance.now() - startedAt),
@@ -282,14 +322,16 @@ export class DynamicToolRouter {
 
   async decline(rpcId: RpcId, rawParams: unknown, reason: string): Promise<unknown> {
     const call = parseToolCall(rawParams);
+    const args = argumentObject(call.arguments);
+    const root = this.#requestedRoot(args);
+    const context = this.#toolContext(root);
     const requestId = call.callId || `req_${randomUUID()}`;
     const error = new BridgeError("COMMAND_DENIED", reason);
     const result: ToolResult<never> = {
       ok: false,
       requestId,
-      connectionId: this.#executor.connectionId,
-      hostId: this.#config.host,
-      remoteCwd: this.#config.workspaceRoot,
+      ...context,
+      remoteCwd: root.target === "remote" ? root.path : null,
       data: null,
       truncated: false,
       error: error.toPayload(),
@@ -299,7 +341,11 @@ export class DynamicToolRouter {
       connectionId: this.#executor.connectionId,
       hostId: this.#config.host,
       workspaceRoot: this.#config.workspaceRoot,
-      remoteCwd: this.#config.workspaceRoot,
+      ...(root.target === "remote" ? { remoteCwd: root.path } : {}),
+      rootId: root.id,
+      rootRole: root.role,
+      rootPath: root.path,
+      target: root.target,
       operation: call.tool,
       outcome: "cancelled",
       details: { rpcId, reason },
@@ -312,10 +358,11 @@ export class DynamicToolRouter {
 
   async #execute(
     tool: string,
-    rawArguments: unknown,
+    args: Record<string, unknown>,
+    root: WorkspaceRootConfig,
     observer: DynamicToolObserver,
   ): Promise<unknown> {
-    const args = argumentObject(rawArguments);
+    this.#assertRemotePrimaryRoot(root);
     switch (tool) {
       case "remote_read_file": {
         const limitBytes =
@@ -374,5 +421,58 @@ export class DynamicToolRouter {
       default:
         throw new BridgeError("COMMAND_DENIED", `Unsupported remote tool: ${tool}`);
     }
+  }
+
+  #requestedRoot(args: Record<string, unknown>): WorkspaceRootConfig {
+    const target = args.target ?? "remote";
+    if (target !== "local" && target !== "remote") {
+      throw new BridgeError("PROTOCOL_MISMATCH", "target must be local or remote");
+    }
+    const defaultRoot = this.#config.roots.find(
+      (root) => root.target === "remote" && root.role === "primary",
+    );
+    const rootId = args.rootId ?? defaultRoot?.id;
+    if (typeof rootId !== "string" || rootId.length === 0) {
+      throw new BridgeError("PROTOCOL_MISMATCH", "rootId must be a non-empty string");
+    }
+    const root = this.#config.roots.find(
+      (candidate) => candidate.id === rootId && candidate.target === target,
+    );
+    if (!root) {
+      throw new BridgeError("COMMAND_DENIED", "The requested workspace root is not configured", {
+        rootId,
+        target,
+      });
+    }
+    return root;
+  }
+
+  #assertRemotePrimaryRoot(root: WorkspaceRootConfig): void {
+    if (!this.#isRemotePrimaryRoot(root)) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Remote tools can access only the configured remote primary root",
+        { rootId: root.id, target: root.target },
+      );
+    }
+  }
+
+  #toolContext(root: WorkspaceRootConfig): Omit<ToolRequestContext, "requestId"> {
+    return {
+      connectionId: this.#executor.connectionId,
+      hostId: this.#config.host,
+      rootId: root.id,
+      rootRole: root.role,
+      rootPath: this.#isRemotePrimaryRoot(root) ? root.path : null,
+      target: root.target,
+    };
+  }
+
+  #isRemotePrimaryRoot(root: WorkspaceRootConfig): boolean {
+    return (
+      root.target === "remote" &&
+      root.role === "primary" &&
+      root.path === this.#config.workspaceRoot
+    );
   }
 }
