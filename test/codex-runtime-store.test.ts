@@ -40,4 +40,23 @@ describe("official Codex runtime storage", () => {
       "reload the VS Code window",
     );
   });
+
+  it("treats version metadata as optional diagnostics", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-runtime-versionless-"));
+    const path = join(directory, "official-codex-runtime.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        source: runtime.source,
+        executable: runtime.executable,
+      }),
+    );
+
+    await expect(loadOfficialCodexRuntime(path)).resolves.toEqual({
+      source: runtime.source,
+      executable: runtime.executable,
+      extensionVersion: null,
+      codexVersion: null,
+    });
+  });
 });

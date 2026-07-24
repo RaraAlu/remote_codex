@@ -4,13 +4,30 @@ export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
 export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
 export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 4;
-export const REMOTE_EXECUTOR_VERSION = "0.2.7";
+export const REMOTE_EXECUTOR_VERSION = "0.2.8";
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
+export const REMOTE_EXECUTOR_CAPABILITIES = [
+  "canonicalPath",
+  "execute",
+  "listDirectory",
+  "listTree",
+  "probe",
+  "readFile",
+  "search",
+  "stdioEnd",
+  "stdioStart",
+  "stdioStop",
+  "stdioWrite",
+] as const;
+
+export type RemoteExecutorCapability = (typeof REMOTE_EXECUTOR_CAPABILITIES)[number];
+
 export interface RemoteExecutorPing {
-  executorVersion: typeof REMOTE_EXECUTOR_VERSION;
-  protocolVersion: typeof REMOTE_EXECUTOR_PROTOCOL_VERSION;
+  capabilities: readonly RemoteExecutorCapability[];
+  executorVersion?: string;
+  protocolVersion?: number;
   remoteName: "ssh-remote";
 }
 
@@ -141,10 +158,11 @@ export function isRemoteExecutorPing(value: unknown): value is RemoteExecutorPin
     return false;
   }
   const ping = value as Record<string, unknown>;
+  const capabilities = Array.isArray(ping.capabilities) ? ping.capabilities : null;
   return (
-    ping.executorVersion === REMOTE_EXECUTOR_VERSION &&
-    ping.protocolVersion === REMOTE_EXECUTOR_PROTOCOL_VERSION &&
-    ping.remoteName === "ssh-remote"
+    ping.remoteName === "ssh-remote" &&
+    capabilities !== null &&
+    REMOTE_EXECUTOR_CAPABILITIES.every((capability) => capabilities.includes(capability))
   );
 }
 

@@ -3,16 +3,7 @@ import { BridgeError } from "../src/core/errors.js";
 import {
   officialCodexExecutable,
   resolveOfficialCodexExecutable,
-  validateBundledCodexProtocol,
-  type OfficialCodexRuntime,
 } from "../src/core/official-codex.js";
-
-const runtime: OfficialCodexRuntime = {
-  source: "official-extension",
-  executable: "/home/tester/.vscode/extensions/openai.chatgpt/bin/linux-x86_64/codex",
-  extensionVersion: "26.715.61943",
-  codexVersion: "0.145.0-alpha.27",
-};
 
 describe("official Codex runtime", () => {
   it("derives only the bundled Linux x64 executable", () => {
@@ -53,20 +44,5 @@ describe("official Codex runtime", () => {
         hostPlatform: "linux",
       }),
     ).toThrowError("does not contain the expected bundled runtime");
-  });
-
-  it("records any official extension version but requires its bundled protocol version", () => {
-    expect(() =>
-      validateBundledCodexProtocol(runtime, runtime.codexVersion),
-    ).not.toThrow();
-    expect(() =>
-      validateBundledCodexProtocol(
-        { ...runtime, extensionVersion: "26.999.0" },
-        runtime.codexVersion,
-      ),
-    ).not.toThrow();
-    expect(() =>
-      validateBundledCodexProtocol(runtime, "0.999.0"),
-    ).toThrowError("incompatible with generated bridge protocol");
   });
 });

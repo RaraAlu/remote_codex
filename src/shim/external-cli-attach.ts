@@ -6,6 +6,7 @@ import { bridgeExternalCliIntegrationPath } from "../core/locations.js";
 import { isRecord } from "./rpc.js";
 import { discoverExternalCliSessions } from "./external-session-registry.js";
 import type { ExternalCliSessionDescriptor } from "./shared-app-server.js";
+import { VsCodeConversationClient } from "./vscode-conversation-client.js";
 
 const execFileAsync = promisify(execFile);
 const TOKEN_ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -47,6 +48,11 @@ export type SpawnAttachedCodex = (
     windowsHide: boolean;
   },
 ) => ChildProcess;
+
+export type ProbeExternalCliThread = (
+  descriptor: ExternalCliSessionDescriptor,
+  threadId: string,
+) => Promise<boolean>;
 
 function parseIntegrationConfig(value: unknown): ExternalCliIntegrationConfig {
   if (
@@ -203,15 +209,57 @@ export async function assertRemoteAttachSupported(
   }
 }
 
+const probeExternalCliThread: ProbeExternalCliThread = async (
+  descriptor,
+  threadId,
+) => {
+  let client: VsCodeConversationClient | null = null;
+  try {
+    client = await VsCodeConversationClient.connect(descriptor);
+    await client.request("thread/turns/list", {
+      threadId,
+      limit: 1,
+      itemsView: "summary",
+      sortDirection: "desc",
+    });
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return !(
+      message.includes("not materialized yet") ||
+      message.includes("no rollout found")
+    );
+  } finally {
+    client?.close();
+  }
+};
+
+export async function resolveExternalCliAttachArgs(
+  prepared: PreparedExternalCliAttach,
+  probe: ProbeExternalCliThread = probeExternalCliThread,
+): Promise<string[]> {
+  if (await probe(prepared.descriptor, prepared.threadId)) {
+    return prepared.args;
+  }
+  return [
+    "--remote",
+    prepared.descriptor.endpoint,
+    "--remote-auth-token-env",
+    prepared.descriptor.tokenEnv,
+  ];
+}
+
 export async function runExternalCliAttach(
   options: ExternalCliAttachOptions = {},
   runHelp: RunCodexHelp = runCodexHelp,
   spawnCodex: SpawnAttachedCodex = spawn,
+  probeThread: ProbeExternalCliThread = probeExternalCliThread,
 ): Promise<number> {
   const prepared = await prepareExternalCliAttach(options);
   await assertRemoteAttachSupported(prepared.command, runHelp);
+  const args = await resolveExternalCliAttachArgs(prepared, probeThread);
   return await new Promise<number>((resolvePromise, reject) => {
-    const child = spawnCodex(prepared.command, prepared.args, {
+    const child = spawnCodex(prepared.command, args, {
       env: prepared.environment,
       stdio: "inherit",
       windowsHide: false,

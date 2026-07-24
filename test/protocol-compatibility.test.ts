@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { GENERATED_CODEX_APP_SERVER_VERSION } from "../src/core/compatibility.js";
+import { GENERATED_PROTOCOL_SNAPSHOT_VERSION } from "../src/core/compatibility.js";
 import {
   BLOCKED_LOCAL_CLIENT_METHODS,
   isLocalClientRiskNamespace,
@@ -28,23 +28,23 @@ interface ObjectSchema {
 
 async function currentProtocolPath(relativePath: string): Promise<string> {
   const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
-    codexAppServerVersion: string;
+    codexProtocolSnapshotVersion: string;
   };
-  return `protocol/${packageJson.codexAppServerVersion}/${relativePath}`;
+  return `protocol/${packageJson.codexProtocolSnapshotVersion}/${relativePath}`;
 }
 
 describe("generated app-server protocol compatibility", () => {
-  it("keeps the generated protocol manifest synchronized with the package pin", async () => {
+  it("keeps the generated protocol manifest synchronized with diagnostic metadata", async () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
-      codexAppServerVersion: string;
+      codexProtocolSnapshotVersion: string;
     };
     const manifest = JSON.parse(
       await readFile(await currentProtocolPath("manifest.json"), "utf8"),
     ) as ProtocolManifest;
-    expect(manifest.codexVersion).toBe(packageJson.codexAppServerVersion);
+    expect(manifest.codexVersion).toBe(packageJson.codexProtocolSnapshotVersion);
     expect(manifest.sourceExtensionVersion).toMatch(/^\d+\./);
-    expect(GENERATED_CODEX_APP_SERVER_VERSION).toBe(
-      packageJson.codexAppServerVersion,
+    expect(GENERATED_PROTOCOL_SNAPSHOT_VERSION).toBe(
+      packageJson.codexProtocolSnapshotVersion,
     );
   });
 

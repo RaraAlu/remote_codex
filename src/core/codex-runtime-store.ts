@@ -13,19 +13,21 @@ function parseOfficialCodexRuntime(value: unknown): OfficialCodexRuntime {
     input.source !== "official-extension" ||
     typeof input.executable !== "string" ||
     !isAbsolute(input.executable) ||
-    normalize(input.executable) !== input.executable ||
-    typeof input.extensionVersion !== "string" ||
-    !input.extensionVersion ||
-    typeof input.codexVersion !== "string" ||
-    !input.codexVersion
+    normalize(input.executable) !== input.executable
   ) {
     throw new BridgeError("INVALID_CONFIG", "Official Codex runtime metadata is invalid");
   }
   return {
     source: "official-extension",
     executable: input.executable,
-    extensionVersion: input.extensionVersion,
-    codexVersion: input.codexVersion,
+    extensionVersion:
+      typeof input.extensionVersion === "string" && input.extensionVersion
+        ? input.extensionVersion
+        : null,
+    codexVersion:
+      typeof input.codexVersion === "string" && input.codexVersion
+        ? input.codexVersion
+        : null,
   };
 }
 

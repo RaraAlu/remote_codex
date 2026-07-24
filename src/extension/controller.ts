@@ -6,7 +6,6 @@ import { promisify } from "node:util";
 import * as vscode from "vscode";
 import { AuditLog } from "../core/audit-log.js";
 import { saveOfficialCodexRuntime } from "../core/codex-runtime-store.js";
-import { GENERATED_CODEX_APP_SERVER_VERSION } from "../core/compatibility.js";
 import { defaultRemotePrimaryRoot, parseBridgeConfig } from "../core/config.js";
 import { loadBridgeConfig, saveBridgeConfig } from "../core/config-store.js";
 import { asBridgeError, BridgeError } from "../core/errors.js";
@@ -20,7 +19,6 @@ import {
 import {
   OFFICIAL_CODEX_EXTENSION_ID,
   resolveOfficialCodexExecutable,
-  validateBundledCodexProtocol,
   type OfficialCodexRuntime,
 } from "../core/official-codex.js";
 import { redact } from "../core/redaction.js";
@@ -804,7 +802,10 @@ export class BridgeController implements vscode.Disposable {
     };
   }
 
-  #officialCodexInstallation(): { executable: string; extensionVersion: string } {
+  #officialCodexInstallation(): {
+    executable: string;
+    extensionVersion: string | null;
+  } {
     const extension = vscode.extensions.getExtension(OFFICIAL_CODEX_EXTENSION_ID);
     if (!extension) {
       throw new BridgeError(
@@ -813,15 +814,10 @@ export class BridgeController implements vscode.Disposable {
       );
     }
     const extensionVersion = extension.packageJSON.version;
-    if (typeof extensionVersion !== "string" || !extensionVersion) {
-      throw new BridgeError(
-        "PROTOCOL_MISMATCH",
-        "The official OpenAI Codex extension version is unavailable",
-      );
-    }
     return {
       executable: resolveOfficialCodexExecutable(extension.extensionPath),
-      extensionVersion,
+      extensionVersion:
+        typeof extensionVersion === "string" && extensionVersion ? extensionVersion : null,
     };
   }
 
@@ -836,19 +832,12 @@ export class BridgeController implements vscode.Disposable {
   async #refreshOfficialCodexRuntime(): Promise<OfficialCodexRuntime> {
     const installation = this.#officialCodexInstallation();
     const codexVersion = await this.#readCodexVersion(installation.executable);
-    if (!codexVersion) {
-      throw new BridgeError(
-        "PROTOCOL_MISMATCH",
-        "Unable to determine the bundled Codex version from the official extension",
-      );
-    }
     const runtime: OfficialCodexRuntime = {
       source: "official-extension",
       executable: installation.executable,
       extensionVersion: installation.extensionVersion,
       codexVersion,
     };
-    validateBundledCodexProtocol(runtime, GENERATED_CODEX_APP_SERVER_VERSION);
     await saveOfficialCodexRuntime(officialCodexRuntimePath(), runtime);
     return runtime;
   }

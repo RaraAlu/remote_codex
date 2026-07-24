@@ -5,6 +5,7 @@ import { LocalProcessExecutor } from "../core/local-process-executor.js";
 import type { ExecuteOptions } from "../core/ssh-executor.js";
 import type { BridgeConfig } from "../core/types.js";
 import {
+  REMOTE_EXECUTOR_CAPABILITIES,
   REMOTE_EXECUTOR_COMMAND,
   REMOTE_EXECUTOR_PING_COMMAND,
   REMOTE_EXECUTOR_PROTOCOL_VERSION,
@@ -230,6 +231,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(REMOTE_EXECUTOR_COMMAND, executeRequest),
     vscode.commands.registerCommand(REMOTE_EXECUTOR_PING_COMMAND, () => ({
+      capabilities: [...REMOTE_EXECUTOR_CAPABILITIES],
       executorVersion: REMOTE_EXECUTOR_VERSION,
       protocolVersion: REMOTE_EXECUTOR_PROTOCOL_VERSION,
       remoteName: vscode.env.remoteName,

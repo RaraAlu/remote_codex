@@ -7,8 +7,8 @@ export const OFFICIAL_CODEX_EXTENSION_ID = "openai.chatgpt";
 export interface OfficialCodexRuntime {
   source: "official-extension";
   executable: string;
-  extensionVersion: string;
-  codexVersion: string;
+  extensionVersion: string | null;
+  codexVersion: string | null;
 }
 
 export function officialCodexExecutable(
@@ -55,16 +55,4 @@ export function resolveOfficialCodexExecutable(
     );
   }
   return executable;
-}
-
-export function validateBundledCodexProtocol(
-  runtime: OfficialCodexRuntime,
-  expectedCodexVersion: string | undefined,
-): void {
-  if (expectedCodexVersion && runtime.codexVersion !== expectedCodexVersion) {
-    throw new BridgeError(
-      "PROTOCOL_MISMATCH",
-      `Bundled Codex ${runtime.codexVersion} is incompatible with generated bridge protocol ${expectedCodexVersion}`,
-    );
-  }
 }

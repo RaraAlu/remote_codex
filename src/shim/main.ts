@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
 import { basename, isAbsolute, normalize, resolve } from "node:path";
 import { AuditLog } from "../core/audit-log.js";
-import { GENERATED_CODEX_APP_SERVER_VERSION } from "../core/compatibility.js";
 import { loadBridgeConfig } from "../core/config-store.js";
 import { loadOfficialCodexRuntime } from "../core/codex-runtime-store.js";
 import { BridgeError } from "../core/errors.js";
@@ -13,7 +12,6 @@ import {
   bridgeControlDir,
   officialCodexRuntimePath,
 } from "../core/locations.js";
-import { validateBundledCodexProtocol } from "../core/official-codex.js";
 import type { BridgeConfig } from "../core/types.js";
 import {
   automaticExternalCliAttachOptions,
@@ -109,7 +107,6 @@ async function selectedCodexExecutable(): Promise<string> {
     return developmentOverride;
   }
   const runtime = await loadOfficialCodexRuntime(officialCodexRuntimePath());
-  validateBundledCodexProtocol(runtime, GENERATED_CODEX_APP_SERVER_VERSION);
   return runtime.executable;
 }
 

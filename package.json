@@ -2,7 +2,7 @@
   "name": "codex-vscode-remote-bridge",
   "displayName": "Codex Remote Bridge",
   "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "private": true,
   "publisher": "zkbot",
   "license": "MIT",
@@ -201,7 +201,7 @@
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   },
-  "codexAppServerVersion": "0.145.0-alpha.27",
+  "codexProtocolSnapshotVersion": "0.146.0-alpha.3",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ws": "^8.21.1",

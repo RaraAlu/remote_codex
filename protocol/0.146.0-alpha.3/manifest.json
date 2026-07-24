@@ -1,0 +1,6 @@
+{
+  "codexVersion": "0.146.0-alpha.3",
+  "generatedAt": "2026-07-24T01:11:35.821Z",
+  "generator": "openai.chatgpt bundled Codex app-server generate-json-schema --experimental",
+  "sourceExtensionVersion": "26.721.30844"
+}

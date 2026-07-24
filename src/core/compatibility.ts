@@ -1,2 +1,2 @@
 // Updated by scripts/generate-protocol.mjs from the installed official extension.
-export const GENERATED_CODEX_APP_SERVER_VERSION = "0.145.0-alpha.27";
+export const GENERATED_PROTOCOL_SNAPSHOT_VERSION = "0.146.0-alpha.3";

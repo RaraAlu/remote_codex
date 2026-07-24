@@ -320,7 +320,7 @@ export class SharedAppServer {
         upstream.close();
         return;
       }
-      session = this.#createSession(false);
+      session = this.#createSession(true);
       const writeUpstream = webSocketWriter(upstream);
       const writeExternal = webSocketWriter(socket);
       this.#externalWriters.set(clientId, writeExternal);

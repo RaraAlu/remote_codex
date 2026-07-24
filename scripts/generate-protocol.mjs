@@ -48,14 +48,15 @@ const metadata = {
 await writeFile(join(outputDir, "manifest.json"), `${JSON.stringify(metadata, null, 2)}\n`);
 
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
-packageJson.codexAppServerVersion = version;
+packageJson.codexProtocolSnapshotVersion = version;
+delete packageJson.codexAppServerVersion;
 delete packageJson.officialCodexExtensionVersion;
 await writeFile("package.json", `${JSON.stringify(packageJson, null, 2)}\n`);
 await writeFile(
   "src/core/compatibility.ts",
   [
     "// Updated by scripts/generate-protocol.mjs from the installed official extension.",
-    `export const GENERATED_CODEX_APP_SERVER_VERSION = ${JSON.stringify(version)};`,
+    `export const GENERATED_PROTOCOL_SNAPSHOT_VERSION = ${JSON.stringify(version)};`,
     "",
   ].join("\n"),
 );

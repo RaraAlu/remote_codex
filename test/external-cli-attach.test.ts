@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { bridgeExternalCliDir } from "../src/core/locations.js";
 import {
   prepareExternalCliAttach,
+  resolveExternalCliAttachArgs,
   runExternalCliAttach,
   selectAutomaticExternalCliSession,
   type SpawnAttachedCodex,
@@ -157,9 +158,25 @@ describe("bidirectional external CLI attach", () => {
         },
         async () => "--remote <ADDR>\n--remote-auth-token-env <ENV_VAR>\n",
         spawnCodex,
+        async () => true,
       ),
     ).resolves.toBe(0);
     expect(spawnCodex).toHaveBeenCalledOnce();
     expect(spawnCodex.mock.calls[0]?.[2].stdio).toBe("inherit");
+  });
+
+  it("starts a synchronized thread when the selected VS Code thread is not materialized", async () => {
+    const { descriptor } = await prepareState();
+    const prepared = await prepareExternalCliAttach({
+      codexExecutable: "codex-test",
+      sessionPid: descriptor.pid,
+    });
+
+    await expect(resolveExternalCliAttachArgs(prepared, async () => false)).resolves.toEqual([
+      "--remote",
+      descriptor.endpoint,
+      "--remote-auth-token-env",
+      descriptor.tokenEnv,
+    ]);
   });
 });
