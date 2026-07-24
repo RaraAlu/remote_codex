@@ -20,7 +20,7 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地与 Remote SSH 外部 CLI 双向投影通过；官方面板发起待补测 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.3` 候选 | 无版本值门禁；空 thread 回退、Remote SSH 多轮与工具打印已实测 |
+| Bridge Controller | `0.3.4` 候选 | 无版本值门禁；Linux Remote SSH 外部 CLI 已实测保留远端命令实际退出码，官方面板与 Windows 实机待补测 |
 | Remote Executor | `0.2.8` 候选 | 按所需能力集合握手；远端命令、读取和 stdio CodeGraph 已实测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 

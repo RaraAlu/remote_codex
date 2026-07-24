@@ -187,6 +187,140 @@ describe("native Codex tool presentation", () => {
     });
   });
 
+  it("preserves a nonzero remote command exit code in the native item", () => {
+    const projected = projectServerMessage(
+      {
+        method: "item/completed",
+        params: {
+          item: {
+            id: "item-failed-exec",
+            type: "dynamicToolCall",
+            tool: "remote_exec",
+            arguments: {
+              argv: ["git", "status", "--short"],
+            },
+            status: "completed",
+            success: true,
+            durationMs: 73,
+            contentItems: [
+              {
+                type: "inputText",
+                text: JSON.stringify({
+                  ok: true,
+                  data: {
+                    actualCwd: "/remote/workspace",
+                    durationMs: 73,
+                    exitCode: 128,
+                    signal: null,
+                    stdout: "",
+                    stderr: "fatal: not a git repository\n",
+                    truncated: false,
+                  },
+                }),
+              },
+            ],
+          },
+        },
+      },
+      config,
+    ) as unknown as {
+      params: { item: Record<string, unknown> };
+    };
+
+    expect(projected.params.item).toMatchObject({
+      type: "commandExecution",
+      status: "failed",
+      exitCode: 128,
+      aggregatedOutput: "fatal: not a git repository\n",
+    });
+  });
+
+  it("reads a failed command exit code from structured error details", () => {
+    const projected = projectServerMessage(
+      {
+        method: "item/completed",
+        params: {
+          item: {
+            id: "item-failed-git",
+            type: "dynamicToolCall",
+            tool: "remote_git_status",
+            arguments: {},
+            status: "failed",
+            success: false,
+            contentItems: [
+              {
+                type: "inputText",
+                text: JSON.stringify({
+                  ok: false,
+                  error: {
+                    message: "git status failed",
+                    details: {
+                      exitCode: 128,
+                      signal: null,
+                    },
+                  },
+                }),
+              },
+            ],
+          },
+        },
+      },
+      config,
+    ) as unknown as {
+      params: { item: Record<string, unknown> };
+    };
+
+    expect(projected.params.item).toMatchObject({
+      type: "commandExecution",
+      status: "failed",
+      exitCode: 128,
+      aggregatedOutput: "git status failed",
+    });
+  });
+
+  it("preserves a signal termination with a null exit code", () => {
+    const projected = projectServerMessage(
+      {
+        method: "item/completed",
+        params: {
+          item: {
+            id: "item-signalled-exec",
+            type: "dynamicToolCall",
+            tool: "remote_exec",
+            arguments: {
+              argv: ["sleep", "10"],
+            },
+            status: "completed",
+            success: true,
+            contentItems: [
+              {
+                type: "inputText",
+                text: JSON.stringify({
+                  ok: true,
+                  data: {
+                    exitCode: null,
+                    signal: "SIGTERM",
+                    stdout: "",
+                    stderr: "",
+                  },
+                }),
+              },
+            ],
+          },
+        },
+      },
+      config,
+    ) as unknown as {
+      params: { item: Record<string, unknown> };
+    };
+
+    expect(projected.params.item).toMatchObject({
+      type: "commandExecution",
+      status: "failed",
+      exitCode: null,
+    });
+  });
+
   it("leaves unrelated dynamic tools and local passthrough messages untouched", () => {
     const message = {
       item: {

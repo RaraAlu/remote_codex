@@ -213,6 +213,16 @@ thread；外部 CLI 创建的会话会把 `permissions=full-access` 和
 仍因 Linux 工作区缺少 Windows SEA Shim 失败，该结果只支持 Linux 限定链路，不能
 推断 Windows 通过。
 
+后续两轮只读回归发现原生工具投影仍有一个准确性缺口：远端
+`git status --short` 实际退出码为 `128`，结构化工具结果和模型总结均正确，但 VS Code
+中的 `commandExecution` 项被固定投影为退出码 `0` 和成功状态。`0.3.4` 改为从
+`ToolResult.data` 或错误详情保留远端命令的实际退出码和信号；非零退出码在界面中标记
+为失败，但 RPC 本身仍保持已完成，避免把命令失败误报为传输失败。定向 8 项测试和
+`npm run check` 的 160 项通过、5 项条件跳过已经完成。Linux x64 活动 Remote SSH
+窗口中又用实际退出码 `23`、`37` 完成两轮外部 CLI 复测；只读观察器捕获第二轮
+`commandExecution` 为 `status=failed`、`exitCode=37`，证明修复后的结构化投影已进入
+共享 app-server 广播。官方面板按钮发起和 Windows x64 实机仍待补测。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 

@@ -19,7 +19,8 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 - 每个工作区首次就绪时把 Codex Webview 恢复到默认右侧栏，修复旧布局中的灰色面板。
 - 修改 `chatgpt.cliExecutable` 和 `remote.extensionKind` 前保存原值，并提供恢复命令。
 - 按官方扩展 API 获取当前 `openai.chatgpt` 的安装目录，并只启动对应平台的内置
-  Codex；扩展缺失、平台不支持、二进制缺失或版本不匹配时失败关闭。
+  Codex；扩展缺失、平台不支持、二进制缺失、所需能力缺失或消息结构不支持时失败关闭，
+  不按任何版本值门禁。
 - Controller 将验证后的插件内置运行时写入受限状态文件，Shim 在本地窗口和 Remote
   SSH 窗口都只读取该指针；旧 `codexExecutable` 配置会被忽略且不再公开。
 - Windows 使用 Node SEA 打包的原生 `codex-bridge-shim.exe`，Linux 使用 CJS Shim；

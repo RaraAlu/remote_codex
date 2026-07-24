@@ -15,7 +15,7 @@ Codex CLI 仅作为可选外部客户端按能力探测，不固定版本，也�
 | --- | --- | --- | --- |
 | VS Code | `1.130.0`（Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | 外部 CLI 发起的 Remote SSH 同步任务通过；官方面板发起待补测 |
 | 官方 Codex 扩展 | 本次探测 `openai.chatgpt@26.721.30844` | 固定扩展 ID，不固定版本；使用 VS Code 当前实际加载版本 | 普通本地窗口和 Remote SSH 外部 CLI 双向投影通过；官方面板新建任务待补测 |
-| Bridge Controller | `0.3.3` Linux x64 候选；`0.2.7` 支持基线 | 同一扩展 ID，分别发布 `win32-x64` 和 `linux-x64` VSIX | 版本值门禁已移除；自动迁移、空 thread 回退、双向多轮与远端工具打印通过 |
+| Bridge Controller | `0.3.4` Linux x64 候选；`0.2.7` 支持基线 | 同一扩展 ID，分别发布 `win32-x64` 和 `linux-x64` VSIX | `0.3.4` 修复原生命令投影丢失远端非零退出码；Linux Remote SSH 外部 CLI 实测通过，官方面板与 Windows 实机待补测 |
 | Remote Executor | `0.2.8`，Linux x64 候选 | Workspace 扩展；通过当前 Remote SSH 通道自动部署；ping 按所需能力集合验收，不按包版本或协议号门禁 | 能力握手、远端主根、命令/读取和 stdio CodeGraph 回归通过 |
 | 官方扩展内置 Codex/app-server | 本次探测 `0.146.0-alpha.3` | 只从当前官方扩展安装目录启动；版本仅作诊断和协议快照索引 | 真实 Shim 冒烟、普通本地和 Remote SSH 外部 CLI thread 通过；官方面板发起待补测 |
 | 系统 Codex CLI | 本次探针 `0.145.0`，不固定 | 仅用于 MCP、远程外部客户端和 POSIX 普通入口；运行时探测所需参数，官方扩展内置 app-server 仍是唯一服务端 | 普通 `codex` 本地接管和 `codex-vscode` Remote SSH 多轮实机通过；Windows 待验证 |
@@ -31,7 +31,8 @@ Codex CLI 仅作为可选外部客户端按能力探测，不固定版本，也�
 `docs/acceptance/2026-07-23-release-0.3.1-bidirectional-cli.md`，最新协议升级候选见
 `docs/acceptance/2026-07-23-release-0.3.2-bundled-protocol.md`，最新 Remote SSH 外部
 CLI 实机证据见
-`docs/acceptance/2026-07-23-release-0.3.3-remote-cli-acceptance.md`；上一支持基线见
+`docs/acceptance/2026-07-23-release-0.3.3-remote-cli-acceptance.md`，退出码投影修复见
+`docs/acceptance/2026-07-23-release-0.3.4-native-exit-code.md`；上一支持基线见
 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 
 当前协议文件位于 `protocol/0.146.0-alpha.3/`。`ServerRequest.json` 的方法集合由自动化测试与

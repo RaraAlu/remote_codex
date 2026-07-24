@@ -221,6 +221,37 @@ function formatToolOutput(tool: string, item: Record<string, unknown>): string |
   return data == null ? null : JSON.stringify(data, null, 2);
 }
 
+function completedCommandState(
+  tool: string,
+  item: Record<string, unknown>,
+): { exitCode: number | null; failed: boolean } {
+  const result = textResult(item);
+  const resultRecord = isRecord(result) ? result : null;
+  const data = resultRecord && isRecord(resultRecord.data) ? resultRecord.data : null;
+  const error = resultRecord && isRecord(resultRecord.error) ? resultRecord.error : null;
+  const details = error && isRecord(error.details) ? error.details : null;
+  const commandResult =
+    tool === "remote_exec" || tool === "remote_git_status" ? (data ?? details) : null;
+
+  let exitCode: number | null | undefined;
+  if (commandResult && "exitCode" in commandResult) {
+    exitCode =
+      typeof commandResult.exitCode === "number" ? commandResult.exitCode : null;
+  }
+  const signal = commandResult?.signal;
+  const failed =
+    item.status === "failed" ||
+    item.success === false ||
+    resultRecord?.ok === false ||
+    (typeof exitCode === "number" && exitCode !== 0) ||
+    (exitCode === null && typeof signal === "string" && signal.length > 0);
+
+  return {
+    exitCode: exitCode === undefined ? (failed ? 1 : 0) : exitCode,
+    failed,
+  };
+}
+
 function projectDynamicToolItem(
   item: Record<string, unknown>,
   config: BridgeConfig,
@@ -228,7 +259,7 @@ function projectDynamicToolItem(
   const tool = item.tool as string;
   const presentation = commandPresentation(tool, item.arguments, config);
   const completed = item.status !== "inProgress";
-  const failed = item.status === "failed" || item.success === false;
+  const commandState = completed ? completedCommandState(tool, item) : null;
 
   return {
     id: item.id,
@@ -236,10 +267,10 @@ function projectDynamicToolItem(
     command: presentation.command,
     commandActions: presentation.commandActions,
     cwd: presentation.cwd ?? config.workspaceRoot,
-    status: completed ? (failed ? "failed" : "completed") : "inProgress",
+    status: completed ? (commandState?.failed ? "failed" : "completed") : "inProgress",
     aggregatedOutput: completed ? formatToolOutput(tool, item) : null,
     durationMs: typeof item.durationMs === "number" ? item.durationMs : null,
-    exitCode: completed ? (failed ? 1 : 0) : null,
+    exitCode: commandState?.exitCode ?? null,
     processId: null,
     source: "agent",
   };
