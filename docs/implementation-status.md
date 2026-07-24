@@ -257,6 +257,15 @@ Extension Host 再写 Shim；Controller 在设置完整前不解析官方运行�
 app-server、窗口会话和 CodeGraph relay 启动，Bridge 重新进入 `ready`，远端仍不安装
 Codex。
 
+`0.3.11` 修复历史对话可读但不能接管的问题。官方 app-server 的 `thread/read` 能返回
+`notLoaded` thread，却不会把它注册为可接受 turn 的运行对象；旧路径随后直接
+`turn/start`，真实返回 `thread not found`。外部对话客户端现在先按实际能力调用
+`thread/resume(excludeTurns=true)`，再查询活动 turn 或启动新 turn。单元测试精确覆盖
+请求顺序，候选源码客户端也已对真实官方 app-server 完成
+`read -> resume -> start -> completed`，固定返回
+`HISTORICAL_THREAD_INTERVENE_0311_OK`。候选 VSIX 安装后的 Remote SSH 工具回归和
+Windows 实机仍待补测。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -285,7 +294,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-23-release-0.3.5-single-tool-execution.md`；外部网关正常关闭见
 `docs/acceptance/2026-07-23-release-0.3.6-graceful-gateway-close.md`；设置恢复空闲态见
 `docs/acceptance/2026-07-23-release-0.3.8-settings-restore-idle.md`；分阶段重新配置见
-`docs/acceptance/2026-07-23-release-0.3.10-staged-reconfigure.md`。
+`docs/acceptance/2026-07-23-release-0.3.10-staged-reconfigure.md`；历史 thread 恢复见
+`docs/acceptance/2026-07-23-release-0.3.11-historical-thread-resume.md`。
 
 ## 本地 MCP 边界
 

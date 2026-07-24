@@ -281,6 +281,11 @@ export async function interveneVsCodeConversation(options: {
     options.threadId,
     options.sessionPid,
   );
+  // thread/read can inspect a notLoaded thread without making it available to turn mutations.
+  await client.request("thread/resume", {
+    threadId: options.threadId,
+    excludeTurns: true,
+  });
   let turnId = options.expectedTurnId;
   if (options.mode !== "new-turn" && !turnId) {
     const turns = await client.request("thread/turns/list", {

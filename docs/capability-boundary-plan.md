@@ -20,7 +20,7 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.10` 候选 | 无版本值门禁；Linux Remote SSH 官方任务、网关正常关闭、设置恢复和分阶段重新配置通过，Windows 实机待补测 |
+| Bridge Controller | `0.3.11` 候选 | 无版本值门禁；Linux Remote SSH 官方任务、设置恢复和历史 thread 源码级接管通过，候选 VSIX 安装与 Windows 实机待补测 |
 | Remote Executor | `0.2.8` 候选 | 按所需能力集合握手；远端命令、读取和 stdio CodeGraph 已实测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
@@ -35,8 +35,8 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 2026-07-23 在 Linux x64 本机执行 `npm run check`：
 
 - TypeScript 类型检查通过。
-- 37 个测试文件通过，1 个真实远端条件测试文件跳过。
-- 160 项测试通过，5 项真实远端条件测试跳过，0 项失败。
+- 40 个测试文件通过，1 个真实远端条件测试文件跳过。
+- 166 项测试通过，6 项条件测试跳过，0 项失败。
 - Controller、Shim 和 Remote Executor 构建通过。
 - 插件内置 `0.146.0-alpha.3` 的本地透传、远程窗口启动和线程创建 Shim 冒烟通过；
   缺少受控运行时指针时，即使 PATH 存在系统 CLI 也失败关闭。
@@ -49,6 +49,11 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 `0.3.5` 使用校验过 SHA-256 的官方 Node `24.18.0` Windows x64 归档在 Linux 生成
 SEA Shim，`npm run package:all` 已成功。该结果证明跨平台构包和内容隔离，不替代
 Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
+
+`0.3.11` 新增外部对话历史 thread 恢复回归。真实官方 app-server 证明
+`thread/read` 可读取 `notLoaded` thread，但直接 `turn/start` 返回 `thread not found`；
+候选源码客户端插入 `thread/resume` 后，新 turn 成功完成并返回固定验收文本。该验证
+没有安装候选 VSIX，也没有在 Bridge 停用状态下调用远端工具，因此这两项继续待补测。
 
 ### 1.3 当前真实窗口证据
 

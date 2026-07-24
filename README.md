@@ -328,7 +328,8 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前功能候选为
-`docs/acceptance/2026-07-23-release-0.3.10-staged-reconfigure.md`；在完整生命周期
+`docs/acceptance/2026-07-23-release-0.3.11-historical-thread-resume.md`；在候选包安装、
+完整生命周期
 和双平台实机闭环通过前，它不会替代已验收基线。
 
 Windows x64 和 Linux x64 必须分别填写运行结果。`npm run package:all` 能证明两个目标
