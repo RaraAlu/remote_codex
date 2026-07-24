@@ -34,6 +34,7 @@ import {
   REMOTE_OUTPUT_COMMAND,
   isRemoteExecutorPing,
 } from "../core/vscode-transport.js";
+import { planAutomaticInitialization } from "./automatic-initialization.js";
 import { detectRemoteWorkspace } from "./remote-context.js";
 import { planRemoteExecutorInstall } from "./remote-executor-install.js";
 import { installShimExecutable } from "./shim-executable.js";
@@ -218,16 +219,35 @@ export class BridgeController implements vscode.Disposable {
   }
 
   async #initializeOnce(): Promise<void> {
-    try {
-      await this.#refreshOfficialCodexRuntime();
-    } catch (error) {
-      const bridgeError = asBridgeError(error, "PROTOCOL_MISMATCH");
-      this.#log(`official Codex runtime validation failed: ${bridgeError.message}`);
-      void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+    const plan = planAutomaticInitialization({
+      autoInitialize: vscode.workspace
+        .getConfiguration("codexRemoteBridge")
+        .get<boolean>("autoInitialize", true),
+      autoSuppressed: this.#autoSuppressed,
+      externalCliIntegration: shouldReconcileExternalCliIntegration(
+        this.#context.globalState.get<boolean>("codexRemoteBridge.externalMcpEnabled"),
+      ),
+      managedExecutable: this.#settings.hasManagedExecutable(),
+      remoteName: vscode.env.remoteName,
+      workspaceFolderCount: vscode.workspace.workspaceFolders?.length ?? 0,
+    });
+    if (!plan.refreshOfficialRuntime && !plan.reconcileExternalCli) {
+      this.#log("automatic initialization disabled; bridge remains idle");
       return;
     }
 
-    if (this.#settings.hasManagedExecutable()) {
+    if (plan.refreshOfficialRuntime) {
+      try {
+        await this.#refreshOfficialCodexRuntime();
+      } catch (error) {
+        const bridgeError = asBridgeError(error, "PROTOCOL_MISMATCH");
+        this.#log(`official Codex runtime validation failed: ${bridgeError.message}`);
+        void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+        return;
+      }
+    }
+
+    if (plan.repairManagedExecutable) {
       try {
         const shimPath = await installShimExecutable(this.#context);
         if (await this.#settings.repairManagedExecutable(shimPath)) {
@@ -243,11 +263,7 @@ export class BridgeController implements vscode.Disposable {
       }
     }
 
-    if (
-      shouldReconcileExternalCliIntegration(
-        this.#context.globalState.get<boolean>("codexRemoteBridge.externalMcpEnabled"),
-      )
-    ) {
+    if (plan.reconcileExternalCli) {
       try {
         await this.#reconcileExternalCliMcp();
       } catch (error) {
@@ -255,14 +271,8 @@ export class BridgeController implements vscode.Disposable {
       }
     }
 
-    if (
-      this.#autoSuppressed ||
-      vscode.env.remoteName !== "ssh-remote" ||
-      !vscode.workspace
-        .getConfiguration("codexRemoteBridge")
-        .get<boolean>("autoInitialize", true) ||
-      !vscode.workspace.workspaceFolders?.length
-    ) {
+    if (!plan.connectRemote) {
+      this.#log("automatic Remote SSH initialization disabled; bridge remains idle");
       return;
     }
     await this.#configureCurrentRemote(false);

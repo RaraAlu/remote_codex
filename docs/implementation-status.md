@@ -241,6 +241,14 @@ WebSocket，而是发送 `1012 / Bridge app-server restarting`，等待至多 25
 `notLoaded` thread 的显式恢复返回 `thread not found`，设置恢复和其他关闭类型仍作为
 独立待补项。
 
+`0.3.8` 完成真实设置恢复与停用空闲态。用户执行恢复命令后，原始
+`chatgpt.cliExecutable` 缺省值和 `remote.extensionKind` 中的 Codex 缺省项恢复，
+无关 `pub.name` 保留，`autoInitialize=false`，设置备份清空。恢复驱动的停止删除窗口
+会话；用户重载后旧 Shim、描述符和两份令牌均清理，且没有新建会话、Shim、app-server
+或远端 Codex。初始化策略现区分托管 Shim 修复、独立外部 CLI 对接和 Remote SSH 自动
+连接，外部 CLI 对接不再错误依赖官方 VS Code 扩展。重新启用、独立停止、完整
+Extension Host 退出和 Windows 实机仍待补测。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -267,7 +275,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-23-release-0.3.3-remote-cli-acceptance.md`；多上游远端工具
 单次执行见
 `docs/acceptance/2026-07-23-release-0.3.5-single-tool-execution.md`；外部网关正常关闭见
-`docs/acceptance/2026-07-23-release-0.3.6-graceful-gateway-close.md`。
+`docs/acceptance/2026-07-23-release-0.3.6-graceful-gateway-close.md`；设置恢复空闲态见
+`docs/acceptance/2026-07-23-release-0.3.8-settings-restore-idle.md`。
 
 ## 本地 MCP 边界
 
