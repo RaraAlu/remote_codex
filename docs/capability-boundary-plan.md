@@ -20,7 +20,7 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.16` 自动化候选 | 稳定幂等键、终态回放和幂等审计已实现；候选 VSIX 安装、断线自动恢复与 Windows 实机待补测 |
+| Bridge Controller | `0.3.17` 自动化候选 | transport 中断后的新 socket 账本查询、终态恢复和未知结果失败关闭已实现；候选 VSIX 安装、真实断线恢复与 Windows 实机待补测 |
 | Remote Executor | `0.2.11` / 诊断协议 6 自动化候选 | 新增有界结果账本和 `resultStatus`；同键请求合并或回放，参数冲突失败关闭；候选实机待补测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
@@ -36,7 +36,7 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 
 - TypeScript 类型检查通过。
 - 50 个测试文件通过，1 个真实远端条件测试文件跳过。
-- 192 项测试通过，6 项条件测试跳过，0 项失败。
+- 195 项测试通过，6 项条件测试跳过，0 项失败。
 - Controller、Shim 和 Remote Executor 构建通过。
 - 插件内置 `0.146.0-alpha.3` 的本地透传、远程窗口启动和线程创建 Shim 冒烟通过；
   缺少受控运行时指针时，即使 PATH 存在系统 CLI 也失败关闭。
@@ -118,7 +118,7 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 | DUAL-READ | 双端目录读取、树、搜索和状态 | 已实施（自动化） | `workspace_*` 工具按显式目标和根 ID 路由；本地请求经已认证 Controller transport 执行，远端请求保持 Remote Executor/OpenSSH 路径；结果、审计和原生 UI 均保留根身份 | 候选 VSIX 的同任务双端读取与界面观感待实机补测 |
 | DUAL-WRITE | 双端写入、补丁、重命名和删除 | 待实施 | 读取结果已返回远端 SHA-256 | 没有写工具、`expectedHash`、原子替换或统一错误语义 |
 | LIFE-CANCEL | 运行中取消 | 已实施（自动化） | `turn/interrupt` 绑定 thread/turn 活动调用；默认 VS Code Remote transport 显式取消；Executor 按 operation ID 中止 POSIX 进程组；等待审批取消不执行命令 | 真实 Remote SSH 取消耗时/遗留进程、Windows 进程树和 OpenSSH 回退待补测 |
-| LIFE-IDEMP | 幂等和断线结果确认 | 部分实施（账本自动化完成） | 同一 app-server 广播先协调为单次执行；`remote_exec` 使用稳定键；Executor 当前代次内有界账本可合并、回放并通过 `resultStatus` 查询五种状态 | transport 断线后的自动查询恢复、Extension Host 重启状态和真实 Remote SSH 重放待补测 |
+| LIFE-IDEMP | 幂等和断线结果确认 | 已实施（自动化）/待实机 | 同一 app-server 广播先协调为单次执行；`remote_exec` 使用稳定键；Executor 有界账本可合并、回放并查询五种状态；transport 中断后从新 socket 查询，终态恢复，未知结果不重放 | Extension Host 重启状态、真实 Remote SSH 断线恢复和双平台生命周期待补测 |
 | LIFE-BACKGROUND | 后台任务 | 待实施 | MCP stdio 有长生命周期会话管理 | 普通命令没有 start/status/log/cancel 协议 |
 | SAFE-CORE | Core 本地 Shell/文件工具硬阻断 | 部分实施/待补测 | 专用本地拒绝权限配置已由官方 app-server 激活；Shim 阻断 25 个本地客户端请求和五类 Core 本地审批并失败审计 | 真实模型专用工具诱饵负测和官方 UI 恢复尚未完成；hook 不能作为完整强制边界 |
 | UX-REMOTE | 远程 URI、Diff 和文件跳转 | 待实施 | Bridge 工具可投影为原生 command item | 没有可打开的远程资源身份和 Diff 提供器 |
@@ -237,7 +237,8 @@ VS Code 工作区 URI。2026-07-22 对官方扩展内置 `0.145.0-alpha.27` app-
 - `cwd`、环境变量变化、超时和输出上限都有参数边界。
 - 非完全访问模式使用官方命令审批；完全访问模式自动放行但仍写审计。
 - stdout/stderr 以官方 `commandExecution` 输出增量形态转发。
-- 超时或断线后的有副作用操作会返回 `RESULT_UNKNOWN`，不会自动本地重试。
+- 有副作用操作在 transport 中断后只查询原幂等键：能确认 completed/cancelled/failed
+  时恢复原终态，否则返回 `RESULT_UNKNOWN`；不会自动本地重试或重放原命令。
 
 边界：
 
@@ -259,7 +260,8 @@ VS Code 工作区 URI。2026-07-22 对官方扩展内置 `0.145.0-alpha.27` app-
 - Remote Executor 以 host、workspace 和 operation ID 保存 `AbortController`；
   POSIX 命令运行在独立进程组，取消依次发送 `SIGTERM` 和 `SIGKILL`。
 - OpenSSH 执行器也接受 `AbortSignal`，但只能终止本地 SSH 进程。
-- VS Code transport 断开时，有副作用请求在本地返回 `RESULT_UNKNOWN`。
+- VS Code transport 断开时，有副作用请求从新 socket 查询原幂等键；completed 返回
+  原结果，cancelled/failed 还原错误，running 在有界窗口内轮询。
 - MCP stdio 会话支持 start/write/end/stop 和窗口关闭清理。
 
 边界：
@@ -269,7 +271,8 @@ VS Code 工作区 URI。2026-07-22 对官方扩展内置 `0.145.0-alpha.27` app-
 - OpenSSH 回退没有远端 operation ID 或进程树身份，取消后无法确认远端是否仍在运行。
 - Windows 执行器目前只能终止直接子进程，完整进程树行为尚未验证。
 - Remote Executor 当前 Extension Host 代次内可查询 running、completed、cancelled、
-  failed 和 unknown；Controller 尚未在 transport 断线后自动执行查询恢复。
+  failed 和 unknown；unknown、查询不可达或恢复窗口结束时明确返回
+  `RESULT_UNKNOWN`，不会重放命令。
 - 普通命令没有后台作业协议；MCP stdio 生命周期不能直接复用于任意训练命令。
 
 ### 3.7 Core 本地工具阻断
@@ -656,8 +659,8 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
    终止 POSIX 进程组而不是只关闭本地 socket。
 4. [x] 为非幂等操作增加 `idempotencyKey` 和带上限的结果账本，区分 running、
    completed、cancelled、failed 和 unknown。
-5. [ ] socket 重连后先查询 operation 状态；已完成调用返回原结果，未知调用不得自动
-   重放。查询协议已具备，Controller 自动恢复编排留到下一提交。
+5. [x] socket 重连后先查询 operation 状态；已完成调用返回原结果，取消/失败保留远端
+   终态，未知调用明确返回 `RESULT_UNKNOWN` 且不得自动重放。
 6. 明确 VS Code 窗口关闭、Executor 失联、Shim 退出和超时的结果语义及审计字段。
 
 验收：
@@ -671,7 +674,8 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 
 - [x] transport cancel 与进程树终止一个提交。
 - [x] 幂等账本和结果查询一个提交。
-- 断线恢复与生命周期证据一个提交。
+- [x] 断线状态查询恢复一个提交。
+- 真实 Remote SSH 与双平台生命周期证据一个验收提交。
 
 ### 阶段 5：双端安全写入
 

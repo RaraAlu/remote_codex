@@ -13,7 +13,11 @@ let server: Server | null = null;
 let endpoint: string | null = null;
 
 async function listen(
-  respond: (request: TransportRequest, write: (message: unknown) => void) => void,
+  respond: (
+    request: TransportRequest,
+    write: (message: unknown) => void,
+    disconnect: () => void,
+  ) => void,
 ): Promise<string> {
   const id = randomUUID();
   endpoint =
@@ -28,7 +32,11 @@ async function listen(
     const lines = createInterface({ input: socket });
     lines.once("line", (line) => {
       const request = JSON.parse(line) as TransportRequest;
-      respond(request, (message) => socket.write(`${JSON.stringify(message)}\n`));
+      respond(
+        request,
+        (message) => socket.write(`${JSON.stringify(message)}\n`),
+        () => socket.end(),
+      );
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -183,6 +191,138 @@ describe("VsCodeRemoteExecutor", () => {
       operation: "resultStatus",
       params: { idempotencyKey: "stable-operation" },
     });
+    executor.close();
+  });
+
+  it("recovers a completed side effect from the result ledger after disconnect", async () => {
+    const operations: TransportRequest[] = [];
+    let statusRequests = 0;
+    const pipe = await listen((request, write, disconnect) => {
+      operations.push(request);
+      if (request.operation === "execute") {
+        disconnect();
+        return;
+      }
+      expect(request).toMatchObject({
+        operation: "resultStatus",
+        params: { idempotencyKey: "recover-completed" },
+      });
+      statusRequests += 1;
+      if (statusRequests === 1) {
+        disconnect();
+        return;
+      }
+      write({
+        id: request.id,
+        result: {
+          result: {
+            actualCwd: "/workspace",
+            durationMs: 3,
+            exitCode: 0,
+            signal: null,
+            stderr: "",
+            stdout: "done",
+            truncated: false,
+          },
+          status: "completed",
+        },
+        type: "response",
+      });
+    });
+    const executor = new VsCodeRemoteExecutor(config(pipe));
+
+    await expect(
+      executor.execute(["printf", "done"], {
+        idempotencyKey: "recover-completed",
+        sideEffect: true,
+      }),
+    ).resolves.toMatchObject({
+      exitCode: 0,
+      idempotencyOutcome: "replayed",
+      stdout: "done",
+    });
+    expect(operations.map((request) => request.operation)).toEqual([
+      "execute",
+      "resultStatus",
+      "resultStatus",
+    ]);
+    executor.close();
+  });
+
+  it("polls a running operation and preserves its terminal error", async () => {
+    let statusRequests = 0;
+    const operations: string[] = [];
+    const pipe = await listen((request, write, disconnect) => {
+      operations.push(request.operation);
+      if (request.operation === "execute") {
+        disconnect();
+        return;
+      }
+      statusRequests += 1;
+      write({
+        id: request.id,
+        result:
+          statusRequests === 1
+            ? { status: "running" }
+            : {
+                error: {
+                  code: "TIMEOUT",
+                  message: "remote command timed out",
+                  retryable: false,
+                },
+                status: "failed",
+              },
+        type: "response",
+      });
+    });
+    const executor = new VsCodeRemoteExecutor(config(pipe));
+
+    await expect(
+      executor.execute(["sleep", "30"], {
+        idempotencyKey: "recover-failed",
+        sideEffect: true,
+      }),
+    ).rejects.toMatchObject({
+      code: "TIMEOUT",
+      details: {
+        idempotencyOutcome: "replayed",
+        recoveryAttempts: 2,
+      },
+    });
+    expect(operations).toEqual(["execute", "resultStatus", "resultStatus"]);
+    executor.close();
+  });
+
+  it("does not replay a side effect when the result ledger is unknown", async () => {
+    const operations: string[] = [];
+    const pipe = await listen((request, write, disconnect) => {
+      operations.push(request.operation);
+      if (request.operation === "execute") {
+        disconnect();
+        return;
+      }
+      write({
+        id: request.id,
+        result: { status: "unknown" },
+        type: "response",
+      });
+    });
+    const executor = new VsCodeRemoteExecutor(config(pipe));
+
+    await expect(
+      executor.execute(["touch", "unsafe"], {
+        idempotencyKey: "recover-unknown",
+        sideEffect: true,
+      }),
+    ).rejects.toMatchObject({
+      code: "RESULT_UNKNOWN",
+      details: {
+        idempotencyKey: "recover-unknown",
+        recoveryAttempts: 1,
+        recoveryStatus: "unknown",
+      },
+    });
+    expect(operations).toEqual(["execute", "resultStatus"]);
     executor.close();
   });
 

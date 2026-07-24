@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createConnection, type Socket } from "node:net";
 import { createInterface } from "node:readline";
 import type { SpawnOptionsWithoutStdio } from "node:child_process";
-import { BridgeError } from "./errors.js";
+import { asBridgeError, BridgeError } from "./errors.js";
 import {
   OpenSshExecutor,
   type DirectoryEntry,
@@ -42,6 +42,7 @@ interface RequestObserver {
   onStdout?: (chunk: string) => void;
   sideEffect?: boolean;
   signal?: AbortSignal;
+  timeoutGraceMs?: number;
   timeoutMs?: number;
 }
 
@@ -49,6 +50,10 @@ interface RemoteCancellationResult {
   cancelled: boolean;
   operationId: string;
 }
+
+const RESULT_RECOVERY_POLL_MS = 100;
+const RESULT_RECOVERY_TIMEOUT_MS = 3_000;
+const RESULT_STATUS_TIMEOUT_MS = 1_000;
 
 function errorCode(value: string): BridgeErrorCode {
   return BRIDGE_ERROR_CODES.includes(value as BridgeErrorCode)
@@ -78,20 +83,28 @@ export class VsCodeRemoteExecutor
     options: ExecuteOptions = {},
   ): Promise<RemoteCommandResult> {
     const idempotencyKey = options.idempotencyKey ?? `exec_${randomUUID()}`;
-    return await this.#request<RemoteCommandResult>(
-      "execute",
-      {
-        argv: [...argv],
-        idempotencyKey,
-        options: {
-          ...(options.cwd ? { cwd: options.cwd } : {}),
-          ...(options.env ? { env: options.env } : {}),
-          ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
-          sideEffect: options.sideEffect === true,
+    try {
+      return await this.#request<RemoteCommandResult>(
+        "execute",
+        {
+          argv: [...argv],
+          idempotencyKey,
+          options: {
+            ...(options.cwd ? { cwd: options.cwd } : {}),
+            ...(options.env ? { env: options.env } : {}),
+            ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+            sideEffect: options.sideEffect === true,
+          },
         },
-      },
-      options,
-    );
+        options,
+      );
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "RESULT_UNKNOWN");
+      if (!options.sideEffect || bridgeError.code !== "RESULT_UNKNOWN") {
+        throw bridgeError;
+      }
+      return await this.#recoverExecuteResult(idempotencyKey, bridgeError);
+    }
   }
 
   async operationStatus(
@@ -169,6 +182,115 @@ export class VsCodeRemoteExecutor
     super.close();
   }
 
+  async #recoverExecuteResult(
+    idempotencyKey: string,
+    originalError: BridgeError,
+  ): Promise<RemoteCommandResult> {
+    const deadline = Date.now() + RESULT_RECOVERY_TIMEOUT_MS;
+    let attempts = 0;
+    let lastStatus: RemoteOperationSnapshot["status"] | "unreachable" =
+      "unreachable";
+    let statusError: BridgeError | undefined;
+
+    while (!this.#closed && Date.now() < deadline) {
+      attempts += 1;
+      let snapshot: RemoteOperationSnapshot<RemoteCommandResult>;
+      try {
+        snapshot = await this.#request<
+          RemoteOperationSnapshot<RemoteCommandResult>
+        >(
+          "resultStatus",
+          { idempotencyKey },
+          {
+            timeoutGraceMs: 0,
+            timeoutMs: RESULT_STATUS_TIMEOUT_MS,
+          },
+        );
+        statusError = undefined;
+      } catch (error) {
+        lastStatus = "unreachable";
+        statusError = asBridgeError(error, "REMOTE_TRANSPORT_DISCONNECTED");
+        if (!statusError.retryable) {
+          break;
+        }
+        await this.#waitForRecoveryPoll(deadline);
+        continue;
+      }
+
+      lastStatus = snapshot.status;
+      if (snapshot.status === "completed") {
+        if (
+          !snapshot.result ||
+          typeof snapshot.result !== "object" ||
+          Array.isArray(snapshot.result)
+        ) {
+          break;
+        }
+        return {
+          ...snapshot.result,
+          idempotencyOutcome: "replayed",
+        };
+      }
+      if (snapshot.status === "cancelled" || snapshot.status === "failed") {
+        if (!snapshot.error) {
+          break;
+        }
+        throw new BridgeError(
+          errorCode(snapshot.error.code),
+          snapshot.error.message,
+          {
+            ...snapshot.error.details,
+            idempotencyOutcome: "replayed",
+            recoveryAttempts: attempts,
+          },
+        );
+      }
+      if (snapshot.status === "unknown") {
+        throw new BridgeError(
+          "RESULT_UNKNOWN",
+          snapshot.error?.message ??
+            "Remote operation is absent from the current result ledger",
+          {
+            ...snapshot.error?.details,
+            idempotencyKey,
+            recoveryAttempts: attempts,
+            recoveryStatus: "unknown",
+          },
+        );
+      }
+      if (snapshot.status !== "running") {
+        break;
+      }
+      await this.#waitForRecoveryPoll(deadline);
+    }
+
+    throw new BridgeError(
+      "RESULT_UNKNOWN",
+      "Remote operation result could not be confirmed after the transport disconnected",
+      {
+        cause: originalError.message,
+        idempotencyKey,
+        lastStatus,
+        recoveryAttempts: attempts,
+        ...(statusError ? { statusError: statusError.message } : {}),
+      },
+    );
+  }
+
+  async #waitForRecoveryPoll(deadline: number): Promise<void> {
+    const delayMs = Math.min(
+      RESULT_RECOVERY_POLL_MS,
+      Math.max(0, deadline - Date.now()),
+    );
+    if (delayMs === 0) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, delayMs);
+      timer.unref();
+    });
+  }
+
   async #request<T>(
     operation: ControllerWorkspaceOperation | RemoteExecutorOperation,
     params: Record<string, unknown>,
@@ -212,7 +334,9 @@ export class VsCodeRemoteExecutor
       let settled = false;
       let requestSent = false;
       let cancellationStarted = false;
-      const timeoutMs = (observer.timeoutMs ?? this.config.commandTimeoutMs) + 5_000;
+      const timeoutMs =
+        (observer.timeoutMs ?? this.config.commandTimeoutMs) +
+        (observer.timeoutGraceMs ?? 5_000);
       const finish = (callback: () => void): void => {
         if (settled) {
           return;

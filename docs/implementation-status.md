@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 50 个测试文件通过、1 个真实远端条件文件跳过，192 项通过、6 项
+`npm run test` 为 50 个测试文件通过、1 个真实远端条件文件跳过，195 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -115,13 +115,13 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 审批绑定 | 人工审批仅匹配一个待处理调用 ID；完全访问的自动放行单独审计 |
 | 运行中取消 | `0.3.15` 已把 `turn/interrupt` 绑定到活动 Bridge 调用；VS Code Remote 通道显式发送 `cancel`，Remote Executor 按 operation ID 中止 POSIX 进程组；自动化通过，真实 Remote SSH 与 Windows 待补测 |
 | 哈希保护写入和补丁 | 未实现 |
-| 断线结果确认和幂等 | `0.3.16` 已按 thread/turn/call 派生稳定键，在 Remote Executor 当前代次内合并运行中请求、回放终态并提供 `resultStatus`；transport 断线后的自动查询恢复与 Extension Host 重启持久化未实现 |
+| 断线结果确认和幂等 | `0.3.17` 已在 transport 中断后用原幂等键从新 socket 查询账本；completed 返回原结果，cancelled/failed 保留终态，running 有界轮询，unknown 或查询不可达返回 `RESULT_UNKNOWN` 且不重放；Extension Host 重启持久化未实现 |
 | Core 内置本地工具硬阻断 | 部分实施；专用权限配置、25 个客户端请求和五类本地审批已失败关闭，真实模型专用工具诱饵待补测 |
 
 阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行，0.3.15 完成默认
 VS Code Remote 链路的运行中取消自动化闭环，0.3.16 增加当前 Executor 代次内的有界
-幂等账本与结果查询；写操作、断线自动恢复、本地执行硬阻断和真实取消验收完成前，
-不得用于无人值守的有副作用任务。
+幂等账本与结果查询，0.3.17 增加断线后的查询恢复；写操作、本地执行硬阻断和真实
+生命周期验收完成前，不得用于无人值守的有副作用任务。
 
 ## 当前优先阶段：外部 Codex CLI 介入
 
@@ -312,8 +312,16 @@ Extension Host 代次内合并运行中重复请求，回放 completed、cancell
 unknown 终态。同一键若参数或执行策略不同会返回 `PROTOCOL_MISMATCH`，不会产生第二次
 副作用。账本同时限制保留时间、条目数和结果字节数；无法安全保留的大结果留下
 `RESULT_UNKNOWN` 墓碑。协议新增 `resultStatus` 能力，Executor 升到 `0.2.11`、诊断
-协议号升到 6；审计记录 `executed`、`joined` 或 `replayed`。Controller 在 transport
-断线后主动查询账本并恢复终态结果、Extension Host 重启后的状态语义仍属于下一提交。
+协议号升到 6；审计记录 `executed`、`joined` 或 `replayed`。transport 断线后的
+自动查询编排由 `0.3.17` 继续完成。
+
+`0.3.17` 完成阶段 4 的断线查询恢复提交。Shim 中的 `VsCodeRemoteExecutor` 在有副作用
+请求因 transport 中断变成未知结果后，不重发原命令，而是使用原幂等键建立新 socket
+调用 `resultStatus`。completed 状态返回原命令结果并标记 `replayed`；
+cancelled/failed 还原远端错误；running 在三秒有界窗口内轮询；unknown、查询持续
+不可达、账本响应缺失或恢复窗口结束都明确返回 `RESULT_UNKNOWN`。Remote Executor
+实现和协议形状没有变化，因此继续使用 `0.2.11` 和诊断协议号 6。真实 Remote SSH
+断线、窗口关闭、Executor 失联和 Extension Host 重启仍按生命周期门禁分别待补测。
 
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
@@ -349,7 +357,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-23-release-0.3.13-local-root-authority.md`；双端只读路由见
 `docs/acceptance/2026-07-23-release-0.3.14-dual-read-routing.md`；运行中命令取消见
 `docs/acceptance/2026-07-23-release-0.3.15-command-cancellation.md`；幂等账本见
-`docs/acceptance/2026-07-23-release-0.3.16-idempotency-ledger.md`。
+`docs/acceptance/2026-07-23-release-0.3.16-idempotency-ledger.md`；断线查询恢复见
+`docs/acceptance/2026-07-23-release-0.3.17-disconnect-recovery.md`。
 
 ## 本地 MCP 边界
 

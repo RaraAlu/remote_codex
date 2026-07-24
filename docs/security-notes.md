@@ -46,8 +46,10 @@
   完全访问的自动放行会单独写入审计日志。
 - 所有文件路径先限制在根目录，再在远端解析符号链接并二次校验。
 - 断线、超时和取消不会触发本地回退。默认 VS Code Remote 链路只有收到远端 Executor
-  的明确取消结果才返回 `CANCELLED`；无法确认的断线和超时，以及 OpenSSH 回退中只
-  能终止本地 SSH 进程的有副作用调用，仍返回 `RESULT_UNKNOWN`。
+  的明确取消结果才返回 `CANCELLED`；有副作用请求的 transport 中断后只使用原幂等键
+  查询账本，不重发原命令。completed 返回原结果，cancelled/failed 还原远端终态；
+  unknown、查询不可达或有界恢复窗口结束时返回 `RESULT_UNKNOWN`。OpenSSH 回退中只
+  能终止本地 SSH 进程的未知调用仍返回 `RESULT_UNKNOWN`。
 - 默认 VS Code Remote 链路为非幂等命令使用稳定键；Remote Executor 当前代次内的
   有界账本只合并相同参数请求，参数冲突失败关闭，并保留终态或 `RESULT_UNKNOWN`
   墓碑。账本过期、Extension Host 重启或查询不可达时不得自动重放。
@@ -72,9 +74,9 @@ Codex Core 仍然拥有内置本地 Shell/文件工具。Shim 已把本地 `cwd`
 
 远程写入仍必须先接入官方审批链路，并把审批结果绑定到基础哈希、规范化参数和当前
 `connectionId`，之后才能注入对应动态工具。当前通用命令已经接入一次性审批；默认
-VS Code Remote 链路的运行中取消已完成自动化，但真实 Remote SSH 遗留进程、Windows
-进程树、OpenSSH 回退的远端进程身份、断线结果确认和 Core 内置本地工具硬阻断仍未
-完成。
+VS Code Remote 链路的运行中取消和断线账本查询已完成自动化，但真实 Remote SSH
+遗留进程与断线恢复、Windows 进程树、OpenSSH 回退的远端进程身份和 Core 内置本地
+工具硬阻断仍未完成。
 
 `remote_exec` 约束启动目录位于工作区，但获批命令本身拥有远端 SSH 账号的权限，
 可以显式访问工作区外路径；它不是远端文件系统沙箱。审批前必须检查完整命令。需要

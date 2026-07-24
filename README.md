@@ -7,8 +7,8 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 发现、选择或回退。
 
 > 当前版本是读操作和受审批非交互命令的技术原型，不是完整 MVP。运行中取消已完成
-> 自动化验证，远端有界幂等账本和结果查询也已接通；真实 Remote SSH 候选窗口、
-> 断线后的自动查询恢复和远程写入仍未完成，不要用于无人值守的生产训练。
+> 自动化验证，远端有界幂等账本、结果查询和断线查询恢复也已接通；真实 Remote SSH
+> 候选窗口和远程写入仍未完成，不要用于无人值守的生产训练。
 
 ## 当前实现
 
@@ -47,6 +47,9 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
   Extension Host 代次内用有界账本合并运行中重复请求、回放终态结果，并通过
   `resultStatus` 区分 running、completed、cancelled、failed 和 unknown；参数冲突
   失败关闭，执行、合并和回放结果写入审计。
+- 有副作用命令的 transport 中断后，Shim 中的远端执行客户端使用原幂等键从新 socket
+  查询账本：completed 返回原结果，cancelled/failed 保留远端错误，running 在有界
+  窗口内轮询；unknown、查询不可达或窗口结束时返回 `RESULT_UNKNOWN`，不会重放原命令。
 - 默认 `vscode-remote` 模式自动部署一个不含 Codex 和凭据的 Workspace Executor，
   通过 VS Code Remote Extension Host 执行结构化操作；密码、公钥和 Agent 认证均由
   已建立的 Remote SSH 窗口处理，Bridge 不再发起第二次认证。
@@ -105,9 +108,9 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
   进程组，并通过自动化验证；真实 Remote SSH 候选窗口、Windows 进程树和取消确认
   耗时待补测。
 - [x] 非幂等命令已携带稳定幂等键，Remote Executor 的有界结果账本和
-  `resultStatus` 查询已通过自动化；Controller 在 transport 断线后自动查询并恢复
-  终态结果仍待下一目标。
-- 后台任务和断线后的自动结果确认。
+  `resultStatus` 查询已通过自动化；Shim 中的远端执行客户端在 transport 断线后会通过
+  新 socket 查询并恢复终态，未知结果不重放。真实 Remote SSH 断线链路仍待补测。
+- 后台任务。
 - [ ] 对 Codex Core 内置本地 Shell 和文件工具执行前硬阻断。阶段 2C 已让 Remote
   Bridge 会话强制使用本地拒绝权限配置，并在 Shim 边界拒绝 25 个已知本地客户端请求；
   五类 Core 本地审批请求也会直接失败关闭。真实模型对本地诱饵的专用工具负测仍待
@@ -347,7 +350,7 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前功能候选为
-`docs/acceptance/2026-07-23-release-0.3.16-idempotency-ledger.md`；在候选包安装、
+`docs/acceptance/2026-07-23-release-0.3.17-disconnect-recovery.md`；在候选包安装、
 完整生命周期
 和双平台实机闭环通过前，它不会替代已验收基线。
 
