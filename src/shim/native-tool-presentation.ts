@@ -246,6 +246,36 @@ function commandPresentation(
         };
       }
     }
+    case "remote_background_start": {
+      try {
+        const request = parseRemoteExecArguments(args, 24 * 60 * 60_000);
+        const command = `codex-bridge background start -- ${formatRemoteExecRequest(request)}`;
+        return {
+          command,
+          commandActions: [{ type: "unknown", command }],
+          cwd: displayPath(root, request.cwd),
+        };
+      } catch {
+        const command = "codex-bridge background start";
+        return {
+          command,
+          commandActions: [{ type: "unknown", command }],
+          cwd: root.path,
+        };
+      }
+    }
+    case "remote_background_status":
+    case "remote_background_log":
+    case "remote_background_cancel": {
+      const operation = normalizedTool.replace("remote_background_", "");
+      const taskId = typeof args.taskId === "string" ? args.taskId : "unknown";
+      const command = `codex-bridge background ${operation} ${shellQuote(taskId)}`;
+      return {
+        command,
+        commandActions: [{ type: "unknown", command }],
+        cwd: root.path,
+      };
+    }
     default: {
       const command = tool;
       return {
@@ -374,6 +404,35 @@ function formatToolOutput(tool: string, item: Record<string, unknown>): string |
     const stdout = typeof data.stdout === "string" ? data.stdout : "";
     const stderr = typeof data.stderr === "string" ? data.stderr : "";
     return `${stdout}${stderr}`;
+  }
+  if (
+    (normalizedTool === "remote_background_start" ||
+      normalizedTool === "remote_background_status" ||
+      normalizedTool === "remote_background_cancel") &&
+    isRecord(data)
+  ) {
+    const taskId = typeof data.taskId === "string" ? data.taskId : "unknown";
+    const status = typeof data.status === "string" ? data.status : "unknown";
+    const exitCode =
+      typeof data.exitCode === "number" ? `, exit ${data.exitCode}` : "";
+    return `${taskId}: ${status}${exitCode}`;
+  }
+  if (
+    normalizedTool === "remote_background_log" &&
+    isRecord(data) &&
+    Array.isArray(data.events)
+  ) {
+    const output = data.events
+      .filter(isRecord)
+      .map((event) => {
+        if (typeof event.contentBase64 !== "string") {
+          return "";
+        }
+        const content = Buffer.from(event.contentBase64, "base64").toString("utf8");
+        return event.channel === "stderr" ? `[stderr] ${content}` : content;
+      })
+      .join("");
+    return `${data.truncated === true ? "[earlier output truncated]\n" : ""}${output}`;
   }
   return data == null ? null : JSON.stringify(data, null, 2);
 }

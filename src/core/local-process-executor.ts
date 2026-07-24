@@ -73,7 +73,7 @@ export function remoteProcessEnvironment(
   return environment;
 }
 
-function signalProcessTree(
+export function signalProcessTree(
   child: ChildProcessWithoutNullStreams,
   signal: NodeJS.Signals,
 ): void {

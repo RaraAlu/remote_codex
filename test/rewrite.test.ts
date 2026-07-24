@@ -86,6 +86,9 @@ describe("app-server request rewriting", () => {
     expect(String(rewritten.params.developerInstructions)).toContain(
       "remote_exec is the project command runner",
     );
+    expect(String(rewritten.params.developerInstructions)).toContain(
+      "use remote_background_start once",
+    );
     const tools = rewritten.params.dynamicTools as Array<{ name: string }>;
     expect(tools.map((tool) => tool.name)).toEqual([
       "existing",

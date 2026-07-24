@@ -246,6 +246,86 @@ describe("native Codex tool presentation", () => {
     });
   });
 
+  it("projects background task launch and cursor logs as native command items", () => {
+    const started = projectServerMessage(
+      {
+        method: "item/started",
+        params: {
+          item: {
+            id: "item-background",
+            type: "dynamicToolCall",
+            tool: "remote_background_start",
+            arguments: {
+              argv: ["npm", "run", "check"],
+              cwd: "packages/core",
+            },
+            status: "inProgress",
+          },
+        },
+      },
+      config,
+    ) as unknown as {
+      params: { item: Record<string, unknown> };
+    };
+    expect(started.params.item).toMatchObject({
+      command: "codex-bridge background start -- npm run check",
+      cwd: "/remote/workspace/packages/core",
+      status: "inProgress",
+      type: "commandExecution",
+    });
+
+    const logged = projectServerMessage(
+      {
+        method: "item/completed",
+        params: {
+          item: {
+            id: "item-background-log",
+            type: "dynamicToolCall",
+            tool: "remote_background_log",
+            arguments: { taskId: "bg_test", cursor: 0 },
+            status: "completed",
+            success: true,
+            contentItems: [
+              {
+                type: "inputText",
+                text: JSON.stringify({
+                  ok: true,
+                  data: {
+                    task: { taskId: "bg_test", status: "running" },
+                    events: [
+                      {
+                        channel: "stdout",
+                        contentBase64: Buffer.from("out\n").toString("base64"),
+                        cursor: 0,
+                      },
+                      {
+                        channel: "stderr",
+                        contentBase64: Buffer.from("err\n").toString("base64"),
+                        cursor: 4,
+                      },
+                    ],
+                    nextCursor: 8,
+                    truncated: true,
+                    hasMore: false,
+                  },
+                }),
+              },
+            ],
+          },
+        },
+      },
+      config,
+    ) as unknown as {
+      params: { item: Record<string, unknown> };
+    };
+    expect(logged.params.item).toMatchObject({
+      aggregatedOutput: "[earlier output truncated]\nout\n[stderr] err\n",
+      command: "codex-bridge background log 'bg_test'",
+      status: "completed",
+      type: "commandExecution",
+    });
+  });
+
   it("preserves a nonzero remote command exit code in the native item", () => {
     const projected = projectServerMessage(
       {

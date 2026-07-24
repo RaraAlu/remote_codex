@@ -43,9 +43,17 @@ export const WORKSPACE_MUTATION_TOOL_NAMES = new Set([
   "workspace_write_file",
 ]);
 
+export const REMOTE_BACKGROUND_TOOL_NAMES = new Set([
+  "remote_background_start",
+  "remote_background_status",
+  "remote_background_log",
+  "remote_background_cancel",
+]);
+
 export const REMOTE_TOOL_NAMES = new Set([
   ...WORKSPACE_TOOL_NAMES,
   ...LEGACY_REMOTE_TOOL_ALIASES.keys(),
+  ...REMOTE_BACKGROUND_TOOL_NAMES,
   "remote_exec",
 ]);
 
@@ -84,6 +92,91 @@ const REMOTE_ROOT_INPUT_PROPERTIES = {
 } as const;
 
 export const REMOTE_DYNAMIC_TOOLS = [
+  {
+    type: "function",
+    name: "remote_background_start",
+    description:
+      "Start one tracked non-interactive command in the remote primary workspace. Returns a taskId for status, log, and cancellation. Requires the active VS Code Remote transport.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["argv"],
+      properties: {
+        ...REMOTE_ROOT_INPUT_PROPERTIES,
+        argv: {
+          type: "array",
+          minItems: 1,
+          maxItems: 256,
+          items: { type: "string" },
+        },
+        cwd: {
+          type: "string",
+          description: "Optional workspace-relative remote working directory.",
+        },
+        env: {
+          type: "object",
+          additionalProperties: { type: ["string", "null"] },
+        },
+        timeoutMs: {
+          type: "integer",
+          minimum: 1000,
+          maximum: 86400000,
+          description: "Tracked task lifetime, up to 24 hours. Defaults to 1 hour.",
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "remote_background_status",
+    description:
+      "Read the current state and log cursors of a tracked remote background task.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["taskId"],
+      properties: {
+        ...REMOTE_ROOT_INPUT_PROPERTIES,
+        taskId: { type: "string", minLength: 1, maxLength: 64 },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "remote_background_log",
+    description:
+      "Read a bounded stdout/stderr page from a tracked remote background task using a byte cursor.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["taskId"],
+      properties: {
+        ...REMOTE_ROOT_INPUT_PROPERTIES,
+        taskId: { type: "string", minLength: 1, maxLength: 64 },
+        cursor: { type: "integer", minimum: 0 },
+        limitBytes: {
+          type: "integer",
+          minimum: 1,
+          maximum: 262144,
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "remote_background_cancel",
+    description:
+      "Cancel a tracked remote background task and its POSIX process group.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["taskId"],
+      properties: {
+        ...REMOTE_ROOT_INPUT_PROPERTIES,
+        taskId: { type: "string", minLength: 1, maxLength: 64 },
+      },
+    },
+  },
   {
     type: "function",
     name: "workspace_write_file",
@@ -483,6 +576,9 @@ export class DynamicToolRouter {
                 ...(typeof data.hash === "string"
                   ? { newHash: data.hash }
                   : {}),
+                ...(REMOTE_BACKGROUND_TOOL_NAMES.has(call.tool)
+                  ? this.#backgroundAuditDetails(args, data)
+                  : {}),
                 ...(WORKSPACE_MUTATION_TOOL_NAMES.has(call.tool)
                   ? this.#mutationAuditDetails(args)
                   : {}),
@@ -525,6 +621,9 @@ export class DynamicToolRouter {
         durationMs: Math.round(performance.now() - startedAt),
         details: {
           error: bridgeError.toPayload(),
+          ...(REMOTE_BACKGROUND_TOOL_NAMES.has(call.tool)
+            ? this.#backgroundAuditDetails(args)
+            : {}),
           ...(WORKSPACE_MUTATION_TOOL_NAMES.has(call.tool)
             ? this.#mutationAuditDetails(args)
             : {}),
@@ -579,6 +678,50 @@ export class DynamicToolRouter {
     root: WorkspaceRootConfig,
     observer: DynamicToolObserver,
   ): Promise<unknown> {
+    if (tool === "remote_background_start") {
+      this.#assertRemotePrimaryRoot(root);
+      const request = parseRemoteExecArguments(args, 24 * 60 * 60_000);
+      const taskId = `bg_${(observer.idempotencyKey ?? randomUUID()).slice(0, 32)}`;
+      return await this.#executor.startBackgroundTask(
+        taskId,
+        request.argv,
+        {
+          cwd: request.cwd,
+          env: request.env,
+          idempotencyKey: observer.idempotencyKey,
+          timeoutMs: request.timeoutMs,
+          signal: observer.signal,
+        },
+      );
+    }
+    if (tool === "remote_background_status") {
+      this.#assertRemotePrimaryRoot(root);
+      return await this.#executor.backgroundTaskStatus(
+        this.#requiredTaskId(args),
+      );
+    }
+    if (tool === "remote_background_log") {
+      this.#assertRemotePrimaryRoot(root);
+      const cursor =
+        typeof args.cursor === "number" && Number.isInteger(args.cursor)
+          ? Math.max(0, args.cursor)
+          : 0;
+      const limitBytes =
+        typeof args.limitBytes === "number" && Number.isInteger(args.limitBytes)
+          ? Math.max(1, Math.min(args.limitBytes, 256 * 1024))
+          : 256 * 1024;
+      return await this.#executor.readBackgroundTaskLog(
+        this.#requiredTaskId(args),
+        cursor,
+        limitBytes,
+      );
+    }
+    if (tool === "remote_background_cancel") {
+      this.#assertRemotePrimaryRoot(root);
+      return await this.#executor.cancelBackgroundTask(
+        this.#requiredTaskId(args),
+      );
+    }
     if (tool === "remote_exec") {
       this.#assertRemotePrimaryRoot(root);
       const request = parseRemoteExecArguments(args);
@@ -830,6 +973,48 @@ export class DynamicToolRouter {
         : {}),
       ...(typeof args.expectedHash === "string"
         ? { expectedHash: args.expectedHash }
+        : {}),
+    };
+  }
+
+  #requiredTaskId(args: Record<string, unknown>): string {
+    if (
+      typeof args.taskId !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(args.taskId)
+    ) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "taskId must contain 1 to 64 safe characters",
+      );
+    }
+    return args.taskId;
+  }
+
+  #backgroundAuditDetails(
+    args: Record<string, unknown>,
+    data?: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const task = data && isRecord(data.task) ? data.task : null;
+    const taskId =
+      typeof data?.taskId === "string"
+        ? data.taskId
+        : typeof task?.taskId === "string"
+          ? task.taskId
+          : typeof args.taskId === "string"
+            ? args.taskId
+            : undefined;
+    const taskStatus =
+      typeof data?.status === "string"
+        ? data.status
+        : typeof task?.status === "string"
+          ? task.status
+          : undefined;
+    return {
+      ...(taskId ? { taskId } : {}),
+      ...(taskStatus ? { taskStatus } : {}),
+      ...(typeof args.cursor === "number" ? { cursor: args.cursor } : {}),
+      ...(typeof args.limitBytes === "number"
+        ? { limitBytes: args.limitBytes }
         : {}),
     };
   }

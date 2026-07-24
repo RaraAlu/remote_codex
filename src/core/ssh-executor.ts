@@ -14,6 +14,8 @@ import { chmodSyncIfSupported } from "./file-permissions.js";
 import { isPathInside, normalizeRemotePath } from "./path-policy.js";
 import type {
   BridgeConfig,
+  RemoteBackgroundLogResult,
+  RemoteBackgroundTaskSummary,
   RemoteCommandResult,
   RemoteFileRead,
   RemoteIdentity,
@@ -521,6 +523,46 @@ export class OpenSshExecutor {
         });
       });
     });
+  }
+
+  async startBackgroundTask(
+    _taskId: string,
+    _argv: readonly string[],
+    _options: ExecuteOptions = {},
+  ): Promise<RemoteBackgroundTaskSummary> {
+    throw new BridgeError(
+      "COMMAND_DENIED",
+      "Background tasks require the active VS Code Remote transport",
+    );
+  }
+
+  async backgroundTaskStatus(
+    _taskId: string,
+  ): Promise<RemoteBackgroundTaskSummary> {
+    throw new BridgeError(
+      "COMMAND_DENIED",
+      "Background tasks require the active VS Code Remote transport",
+    );
+  }
+
+  async readBackgroundTaskLog(
+    _taskId: string,
+    _cursor = 0,
+    _limitBytes = 256 * 1024,
+  ): Promise<RemoteBackgroundLogResult> {
+    throw new BridgeError(
+      "COMMAND_DENIED",
+      "Background tasks require the active VS Code Remote transport",
+    );
+  }
+
+  async cancelBackgroundTask(
+    _taskId: string,
+  ): Promise<RemoteBackgroundTaskSummary> {
+    throw new BridgeError(
+      "COMMAND_DENIED",
+      "Background tasks require the active VS Code Remote transport",
+    );
   }
 
   async probe(): Promise<RemoteIdentity> {

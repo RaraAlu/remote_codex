@@ -15,6 +15,8 @@ import {
   BRIDGE_ERROR_CODES,
   type BridgeConfig,
   type BridgeErrorCode,
+  type RemoteBackgroundLogResult,
+  type RemoteBackgroundTaskSummary,
   type RemoteCommandResult,
   type RemoteFileRead,
   type RemoteIdentity,
@@ -108,6 +110,75 @@ export class VsCodeRemoteExecutor
       }
       return await this.#recoverExecuteResult(idempotencyKey, bridgeError);
     }
+  }
+
+  override async startBackgroundTask(
+    taskId: string,
+    argv: readonly string[],
+    options: ExecuteOptions = {},
+  ): Promise<RemoteBackgroundTaskSummary> {
+    try {
+      return await this.#request<RemoteBackgroundTaskSummary>(
+        "backgroundStart",
+        {
+          argv: [...argv],
+          taskId,
+          ...(options.cwd ? { cwd: options.cwd } : {}),
+          ...(options.env ? { env: options.env } : {}),
+          ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+        },
+        { sideEffect: true, signal: options.signal },
+      );
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "RESULT_UNKNOWN");
+      if (bridgeError.code !== "RESULT_UNKNOWN") {
+        throw bridgeError;
+      }
+      try {
+        const status = await this.backgroundTaskStatus(taskId);
+        if (status.status !== "unknown") {
+          return { ...status, idempotencyOutcome: "replayed" };
+        }
+      } catch {
+        // Preserve the original unknown start result below.
+      }
+      throw new BridgeError(
+        "RESULT_UNKNOWN",
+        "Background task start could not be confirmed after transport disconnect",
+        { cause: bridgeError.message, taskId },
+      );
+    }
+  }
+
+  override async backgroundTaskStatus(
+    taskId: string,
+  ): Promise<RemoteBackgroundTaskSummary> {
+    return await this.#request<RemoteBackgroundTaskSummary>(
+      "backgroundStatus",
+      { taskId },
+    );
+  }
+
+  override async readBackgroundTaskLog(
+    taskId: string,
+    cursor = 0,
+    limitBytes = 256 * 1024,
+  ): Promise<RemoteBackgroundLogResult> {
+    return await this.#request<RemoteBackgroundLogResult>("backgroundLog", {
+      cursor,
+      limitBytes,
+      taskId,
+    });
+  }
+
+  override async cancelBackgroundTask(
+    taskId: string,
+  ): Promise<RemoteBackgroundTaskSummary> {
+    return await this.#request<RemoteBackgroundTaskSummary>(
+      "backgroundCancel",
+      { taskId },
+      { sideEffect: true },
+    );
   }
 
   async operationStatus(

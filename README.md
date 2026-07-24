@@ -6,9 +6,9 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 执行器保留为回退模式。系统安装的 Codex CLI 不是运行依赖，其版本不会参与 Bridge
 发现、选择或回退。
 
-> 当前版本是读操作和受审批非交互命令的技术原型，不是完整 MVP。运行中取消已完成
-> 自动化验证，远端有界幂等账本、结果查询和断线查询恢复也已接通；真实 Remote SSH
-> 候选窗口和远程写入仍未完成，不要用于无人值守的生产训练。
+> 当前版本是受控读写和受审批非交互命令的技术原型，不是完整 MVP。运行中取消、远端
+> 有界幂等账本、断线查询恢复和受控后台任务已完成自动化验证；真实 Remote SSH 候选
+> 窗口和跨平台生命周期仍未闭环，不要用于无人值守的生产训练。
 
 ## 当前实现
 
@@ -50,6 +50,11 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 - 有副作用命令的 transport 中断后，Shim 中的远端执行客户端使用原幂等键从新 socket
   查询账本：completed 返回原结果，cancelled/failed 保留远端错误，running 在有界
   窗口内轮询；unknown、查询不可达或窗口结束时返回 `RESULT_UNKNOWN`，不会重放原命令。
+- `remote_background_start/status/log/cancel` 在活动 VS Code Remote transport 上管理
+  非交互后台任务；任务按稳定 ID 幂等恢复，stdout/stderr 使用有界字节游标增量读取，
+  最多同时保留 8 个任务和 4 MiB 日志，取消、超时或 Extension Host 关闭会终止
+  POSIX 进程组。本地调用客户端或 Controller 断开后，已登记任务继续运行到终态、超时
+  或显式取消；OpenSSH 回退不伪装支持该生命周期。
 - 默认 `vscode-remote` 模式自动部署一个不含 Codex 和凭据的 Workspace Executor，
   通过 VS Code Remote Extension Host 执行结构化操作；密码、公钥和 Agent 认证均由
   已建立的 Remote SSH 窗口处理，Bridge 不再发起第二次认证。
@@ -92,8 +97,9 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 
 当前重新汇总的任务清单、能力边界和详细实施顺序见
 `docs/capability-boundary-plan.md`。所有需要用户、真实 VS Code/Remote SSH 或 Windows
-实机参与的项目已统一冻结到 `docs/manual-acceptance-backlog.md`，待产品能力全部落实后
-一次性补测，不再穿插阻塞源码实现。
+实机参与的项目已统一列入 `docs/manual-acceptance-backlog.md`，不再阻塞源码实现；
+当前已打开的 Remote SSH 会话可由 Codex 注入执行无需安装和重载的候选探针，最终候选
+安装、手动重载和完整 UI 验收仍统一收口。
 
 - [x] 将官方 `openai.chatgpt` 扩展及其内置 Codex 设为 Bridge 唯一 app-server 来源；
   系统 `codex` CLI 不再参与发现、版本选择或运行时回退。
@@ -117,11 +123,13 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 - [x] 非幂等命令已携带稳定幂等键，Remote Executor 的有界结果账本和
   `resultStatus` 查询已通过自动化；Shim 中的远端执行客户端在 transport 断线后会通过
   新 socket 查询并恢复终态，未知结果不重放。真实 Remote SSH 断线链路仍待补测。
-- 后台任务。
+- [x] 活动 VS Code Remote transport 已提供后台任务启动、状态、游标日志和取消工具；
+  任务数量、日志、超时、工作目录和环境继承均有边界，重连按任务 ID 恢复观察而不重启，
+  Extension Host 关闭时同步终止进程组；真实候选窗口和 Windows 生命周期待补测。
 - [ ] 对 Codex Core 内置本地 Shell 和文件工具执行前硬阻断。阶段 2C 已让 Remote
   Bridge 会话强制使用本地拒绝权限配置，并在 Shim 边界拒绝 25 个已知本地客户端请求；
   五类 Core 本地审批请求也会直接失败关闭。真实模型对本地诱饵的专用工具负测仍待
-  补测；`0.3.19` 写工具只作为自动化候选，不据此宣称 Core 强制边界闭环。
+  补测；当前写工具只作为自动化候选，不据此宣称 Core 强制边界闭环。
 - 为远程文件提供可打开的资源 URI、Diff 和文件跳转。
 - 建立 Windows/Linux 原生构建与受控产物收集流程，避免单端打包删除另一端产物。
 - 在目标 Remote SSH 主机和 MimicLite 仓库上的完整 P0 验收。
@@ -357,7 +365,7 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前功能候选为
-`docs/acceptance/2026-07-24-release-0.3.19-dual-write.md`；在候选包安装、
+`docs/acceptance/2026-07-24-release-0.3.20-background-tasks.md`；在候选包安装、
 完整生命周期
 和双平台实机闭环通过前，它不会替代已验收基线。
 

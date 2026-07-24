@@ -8,7 +8,10 @@ export interface RemoteExecArguments {
   timeoutMs?: number;
 }
 
-export function parseRemoteExecArguments(value: unknown): RemoteExecArguments {
+export function parseRemoteExecArguments(
+  value: unknown,
+  maxTimeoutMs = 3_600_000,
+): RemoteExecArguments {
   if (!isRecord(value) || !Array.isArray(value.argv) || value.argv.length === 0) {
     throw new BridgeError(
       "PROTOCOL_MISMATCH",
@@ -43,7 +46,7 @@ export function parseRemoteExecArguments(value: unknown): RemoteExecArguments {
   const cwd = typeof value.cwd === "string" ? value.cwd : undefined;
   const timeoutMs =
     typeof value.timeoutMs === "number" && Number.isInteger(value.timeoutMs)
-      ? Math.max(1_000, Math.min(value.timeoutMs, 3_600_000))
+      ? Math.max(1_000, Math.min(value.timeoutMs, maxTimeoutMs))
       : undefined;
   return {
     argv,

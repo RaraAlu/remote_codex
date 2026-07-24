@@ -12,6 +12,8 @@ const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
 - For project overviews, prefer one workspace_list_tree call before focused directory listings.
 - At the start of every turn, remember that remote_exec is the project command runner.
 - Use remote_exec for all project commands. Its approval behavior follows the active Codex permission mode.
+- For a long-running non-interactive command, use remote_background_start once, then remote_background_status and remote_background_log with cursors; use remote_background_cancel when it must stop.
+- Never use background tasks for commands that require an interactive terminal or stdin after launch.
 - Local MCP, app, and connector tools may be used for complementary capabilities.
 - A local MCP tool must not read, write, or execute workspace paths unless it explicitly supports the selected Bridge target and root.
 - Never use built-in local shell or filesystem tools to bypass Bridge workspace tools.

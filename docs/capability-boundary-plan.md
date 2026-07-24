@@ -20,8 +20,8 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.19` 自动化候选 | 双端有界写入、补丁、目录创建、重命名和删除已接通；候选 VSIX 安装、真实写入与 Windows 实机待补测 |
-| Remote Executor | `0.2.12` / 诊断协议 7 自动化候选 | 保留结果账本并新增有界 stdin 执行能力，文件正文不进入 argv；候选实机待补测 |
+| Bridge Controller | `0.3.20` 自动化候选 | 双端有界写入和后台任务生命周期已接通；候选 VSIX 安装、真实运行与 Windows 实机待补测 |
+| Remote Executor | `0.2.13` / 诊断协议 8 自动化候选 | 保留结果账本和有界 stdin，新增隔离后台任务、游标日志、状态及进程组取消能力；候选实机待补测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
 仓库不固定或门禁任何组件版本；当前生成协议记录的来源扩展为 `26.721.30844`，诊断
@@ -120,7 +120,7 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 | DUAL-WRITE | 双端写入、补丁、重命名和删除 | 已实施（自动化） | 五个显式根工具、`expectedHash`、1 MiB 上限、同目录原子替换、幂等账本、审批和脱敏审计均已接通 | 候选 VSIX 的同任务双端写入、冲突、权限失败、断线终态和 Windows 实机待补测 |
 | LIFE-CANCEL | 运行中取消 | 已实施（自动化） | `turn/interrupt` 绑定 thread/turn 活动调用；默认 VS Code Remote transport 显式取消；Executor 按 operation ID 中止 POSIX 进程组；等待审批取消不执行命令 | 真实 Remote SSH 取消耗时/遗留进程、Windows 进程树和 OpenSSH 回退待补测 |
 | LIFE-IDEMP | 幂等和断线结果确认 | 已实施（自动化）/待实机 | 同一 app-server 广播先协调为单次执行；`remote_exec` 使用稳定键；Executor 有界账本可合并、回放并查询五种状态；transport 中断后从新 socket 查询，终态恢复，未知结果不重放 | Extension Host 重启状态、真实 Remote SSH 断线恢复和双平台生命周期待补测 |
-| LIFE-BACKGROUND | 后台任务 | 待实施 | MCP stdio 有长生命周期会话管理 | 普通命令没有 start/status/log/cancel 协议 |
+| LIFE-BACKGROUND | 后台任务 | 已实施（自动化） | 活动 VS Code Remote transport 提供 start/status/log/cancel；任务按工作区和稳定 ID 隔离，日志、数量、保留时间和寿命有界；取消、超时及 Extension Host 关闭终止进程组 | 真实候选窗口、窗口关闭与 Windows 进程树待补测；OpenSSH 回退明确失败关闭 |
 | SAFE-CORE | Core 本地 Shell/文件工具硬阻断 | 自动化边界已实施/待实机 | 专用本地拒绝权限配置已激活；Shim 阻断 25 个已知客户端请求、五类 Core 本地审批和风险命名空间中的未来方法并失败审计 | 真实模型专用工具诱饵负测和官方 UI 恢复尚未完成；外部协议边界不能证明 Core 内部不存在未暴露路径 |
 | UX-REMOTE | 远程 URI、Diff 和文件跳转 | 待实施 | Bridge 工具可投影为原生 command item | 没有可打开的远程资源身份和 Diff 提供器 |
 | PACK-DUAL | 双平台产物构建与收集 | 待实施 | 两个平台分别有原生 Shim 构建逻辑 | Linux 无法生成 Windows SEA，`package:all` 依赖预存 `.exe` |
@@ -713,14 +713,19 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 
 ### 阶段 6：后台任务
 
-目标：复用阶段 4 的 operation ID 和结果账本管理非交互后台任务。
+目标：使用由调用身份派生的稳定任务 ID，在 Remote Executor 内管理非交互后台任务，
+并在 transport 响应丢失后只恢复观察、不重发启动命令。
 
 实施：
 
-1. 增加 background start/status/log/cancel 协议，不复用普通 `remote_exec` 的一次性响应。
-2. 为日志设置游标、大小上限和保留时间。
-3. 限制后台任务数量、工作目录和环境变量；禁止脱离 Executor 的无主进程。
-4. 窗口恢复后只恢复观察，不自动重启任务。
+1. [x] 增加 background start/status/log/cancel 协议，不复用普通 `remote_exec` 的一次性响应。
+2. [x] 为日志设置游标、大小上限和保留时间。
+3. [x] 限制后台任务数量、工作目录和环境变量；禁止脱离 Executor 的无主进程。
+4. [x] 窗口恢复后只恢复观察，不自动重启任务。
+
+当前进度：`0.3.20` / Executor `0.2.13` 已完成以上实现与自动化。默认通道使用
+活动 VS Code Remote transport；OpenSSH 回退因无法提供同等跨调用生命周期而失败关闭。
+真实 `test_40` / Zklab 候选窗口、窗口关闭清理和 Windows 进程树保留为人工补测。
 
 验收：
 

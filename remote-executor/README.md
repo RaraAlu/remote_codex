@@ -6,6 +6,8 @@ Remote SSH connection. It does not contain Codex, OpenAI credentials, or network
 It also owns bounded, long-lived stdio sessions for eligible credential-free MCP executables. The
 controller forwards those byte streams over the same authenticated VS Code Remote connection and
 terminates the child process when the relay or window closes.
+It owns tracked non-interactive background tasks with bounded cursor logs, status, cancellation,
+timeout, and process-group cleanup when the Remote Extension Host closes.
 
 Install this VSIX on the Remote SSH target and install the matching Codex Remote Bridge controller
 VSIX locally.

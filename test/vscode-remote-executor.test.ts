@@ -374,4 +374,120 @@ describe("VsCodeRemoteExecutor", () => {
     expect(operations).toEqual(["execute", "cancel"]);
     executor.close();
   });
+
+  it("routes tracked background task lifecycle requests", async () => {
+    const operations: TransportRequest[] = [];
+    const pipe = await listen((request, write) => {
+      operations.push(request);
+      const summary = {
+        taskId: "bg-task",
+        status: request.operation === "backgroundCancel" ? "cancelled" : "running",
+        actualCwd: "/workspace",
+        startedAtMs: 10,
+        completedAtMs: null,
+        exitCode: null,
+        signal: null,
+        cancellationRequested: request.operation === "backgroundCancel",
+        logBaseCursor: 0,
+        logCursor: 3,
+      };
+      write({
+        id: request.id,
+        result:
+          request.operation === "backgroundLog"
+            ? {
+                task: summary,
+                events: [
+                  {
+                    channel: "stdout",
+                    contentBase64: "b2sK",
+                    cursor: 0,
+                  },
+                ],
+                nextCursor: 3,
+                truncated: false,
+                hasMore: false,
+              }
+            : summary,
+        type: "response",
+      });
+    });
+    const executor = new VsCodeRemoteExecutor(config(pipe));
+
+    await expect(
+      executor.startBackgroundTask("bg-task", ["npm", "test"], {
+        cwd: "packages/core",
+        env: { CI: "1" },
+        timeoutMs: 90_000,
+      }),
+    ).resolves.toMatchObject({ taskId: "bg-task", status: "running" });
+    await expect(executor.backgroundTaskStatus("bg-task")).resolves.toMatchObject({
+      status: "running",
+    });
+    await expect(
+      executor.readBackgroundTaskLog("bg-task", 2, 1024),
+    ).resolves.toMatchObject({ nextCursor: 3 });
+    await expect(executor.cancelBackgroundTask("bg-task")).resolves.toMatchObject({
+      cancellationRequested: true,
+      status: "cancelled",
+    });
+
+    expect(operations.map((request) => request.operation)).toEqual([
+      "backgroundStart",
+      "backgroundStatus",
+      "backgroundLog",
+      "backgroundCancel",
+    ]);
+    expect(operations[0]).toMatchObject({
+      params: {
+        argv: ["npm", "test"],
+        cwd: "packages/core",
+        env: { CI: "1" },
+        taskId: "bg-task",
+        timeoutMs: 90_000,
+      },
+    });
+    expect(operations[2]).toMatchObject({
+      params: { cursor: 2, limitBytes: 1024, taskId: "bg-task" },
+    });
+    executor.close();
+  });
+
+  it("recovers a background start by task id after transport disconnect", async () => {
+    const operations: string[] = [];
+    const pipe = await listen((request, write, disconnect) => {
+      operations.push(request.operation);
+      if (request.operation === "backgroundStart") {
+        disconnect();
+        return;
+      }
+      write({
+        id: request.id,
+        result: {
+          taskId: "bg-recover",
+          status: "running",
+          actualCwd: "/workspace",
+          startedAtMs: 10,
+          completedAtMs: null,
+          exitCode: null,
+          signal: null,
+          cancellationRequested: false,
+          logBaseCursor: 0,
+          logCursor: 0,
+        },
+        type: "response",
+      });
+    });
+    const executor = new VsCodeRemoteExecutor(config(pipe));
+
+    await expect(
+      executor.startBackgroundTask("bg-recover", ["sleep", "30"]),
+    ).resolves.toMatchObject({
+      idempotencyOutcome: "replayed",
+      status: "running",
+      taskId: "bg-recover",
+    });
+    expect(operations).toEqual(["backgroundStart", "backgroundStatus"]);
+    executor.close();
+  });
 });

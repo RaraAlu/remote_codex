@@ -14,6 +14,7 @@ import { OpenSshExecutor, type SpawnProcess } from "../core/ssh-executor.js";
 import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
 import {
   DynamicToolRouter,
+  REMOTE_BACKGROUND_TOOL_NAMES,
   REMOTE_TOOL_NAMES,
   WORKSPACE_MUTATION_TOOL_NAMES,
 } from "./dynamic-tools.js";
@@ -93,6 +94,15 @@ function isRemoteExecToolCall(request: RpcRequest): boolean {
     request.method === "item/tool/call" &&
     isRecord(request.params) &&
     request.params.tool === "remote_exec"
+  );
+}
+
+function isRemoteCommandStartToolCall(request: RpcRequest): boolean {
+  return (
+    isRemoteExecToolCall(request) ||
+    (request.method === "item/tool/call" &&
+      isRecord(request.params) &&
+      request.params.tool === "remote_background_start")
   );
 }
 
@@ -512,7 +522,7 @@ export class ShimProxy {
           async (signal) => {
             let execContext: RemoteExecContext | null = null;
             const idempotencyKey = remoteToolIdempotencyKey(message);
-            if (isRemoteExecToolCall(message)) {
+            if (isRemoteCommandStartToolCall(message)) {
               execContext = this.#remoteExecContext(message);
               if (signal.aborted) {
                 return await this.#router!.handle(message.id, message.params, {
@@ -523,13 +533,40 @@ export class ShimProxy {
               const requiresApproval = this.#remoteApprovalPolicies.requiresApproval(
                 execContext.threadId,
               );
+              const approvalOperation =
+                isRecord(message.params) &&
+                message.params.tool === "remote_background_start"
+                  ? "remote_background_start.approval"
+                  : "remote_exec.approval";
+              const approved = requiresApproval
+                ? await this.#requestRemoteCommandApproval(
+                    execContext,
+                    writeClient,
+                    signal,
+                  )
+                : true;
+              if (requiresApproval) {
+                await this.#audit.write({
+                  requestId: execContext.callId,
+                  connectionId: this.#executor?.connectionId,
+                  hostId: this.#options.config?.host,
+                  workspaceRoot: this.#options.config?.workspaceRoot,
+                  remoteCwd: execContext.cwd,
+                  operation: approvalOperation,
+                  outcome: approved ? "succeeded" : "cancelled",
+                  details: {
+                    automatic: false,
+                    decision: approved
+                      ? "accept"
+                      : signal.aborted
+                        ? "cancelled"
+                        : "decline",
+                  },
+                });
+              }
               if (
                 requiresApproval &&
-                !(await this.#requestRemoteCommandApproval(
-                  execContext,
-                  writeClient,
-                  signal,
-                ))
+                !approved
               ) {
                 if (signal.aborted) {
                   return await this.#router!.handle(message.id, message.params, {
@@ -549,7 +586,7 @@ export class ShimProxy {
                   hostId: this.#options.config?.host,
                   workspaceRoot: this.#options.config?.workspaceRoot,
                   remoteCwd: execContext.cwd,
-                  operation: "remote_exec.approval",
+                  operation: approvalOperation,
                   outcome: "succeeded",
                   details: {
                     automatic: true,
@@ -601,7 +638,7 @@ export class ShimProxy {
             return await this.#router!.handle(message.id, message.params, {
               idempotencyKey,
               signal,
-              onOutput: execContext
+              onOutput: isRemoteExecToolCall(message) && execContext
                 ? (delta) => {
                     writeClient({
                       method: "item/commandExecution/outputDelta",
@@ -662,7 +699,12 @@ export class ShimProxy {
     ) {
       throw new TypeError("Remote command call is missing thread, turn, or item identity");
     }
-    const remote = parseRemoteExecArguments(params.arguments);
+    const maxTimeoutMs =
+      params.tool === "remote_background_start" &&
+      REMOTE_BACKGROUND_TOOL_NAMES.has(params.tool)
+        ? 24 * 60 * 60_000
+        : 60 * 60_000;
+    const remote = parseRemoteExecArguments(params.arguments, maxTimeoutMs);
     const context: RemoteExecContext = {
       callId: params.callId,
       command: formatRemoteExecRequest(remote),

@@ -150,6 +150,42 @@ export interface WorkspaceMutationResult {
   idempotencyOutcome?: "executed" | "joined" | "replayed";
 }
 
+export type RemoteBackgroundTaskState =
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "timed_out"
+  | "unknown";
+
+export interface RemoteBackgroundTaskSummary {
+  taskId: string;
+  status: RemoteBackgroundTaskState;
+  actualCwd: string | null;
+  startedAtMs: number | null;
+  completedAtMs: number | null;
+  exitCode: number | null;
+  signal: string | null;
+  cancellationRequested: boolean;
+  logBaseCursor: number;
+  logCursor: number;
+  idempotencyOutcome?: "executed" | "joined" | "replayed";
+}
+
+export interface RemoteBackgroundLogEvent {
+  channel: "stderr" | "stdout";
+  contentBase64: string;
+  cursor: number;
+}
+
+export interface RemoteBackgroundLogResult {
+  task: RemoteBackgroundTaskSummary;
+  events: RemoteBackgroundLogEvent[];
+  nextCursor: number;
+  truncated: boolean;
+  hasMore: boolean;
+}
+
 export interface AuditEvent {
   timestamp: string;
   requestId?: string;

@@ -4,8 +4,8 @@ import type { OperationSnapshot } from "./operation-ledger.js";
 export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
 export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
-export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 7;
-export const REMOTE_EXECUTOR_VERSION = "0.2.12";
+export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 8;
+export const REMOTE_EXECUTOR_VERSION = "0.2.13";
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
@@ -27,6 +27,10 @@ export type ControllerWorkspaceOperation =
   (typeof CONTROLLER_WORKSPACE_OPERATIONS)[number];
 
 export const REMOTE_EXECUTOR_CAPABILITIES = [
+  "backgroundCancel",
+  "backgroundLog",
+  "backgroundStart",
+  "backgroundStatus",
   "canonicalPath",
   "cancel",
   "execute",
@@ -53,6 +57,10 @@ export interface RemoteExecutorPing {
 }
 
 export type RemoteExecutorOperation =
+  | "backgroundCancel"
+  | "backgroundLog"
+  | "backgroundStart"
+  | "backgroundStatus"
   | "canonicalPath"
   | "cancel"
   | "execute"
@@ -246,6 +254,10 @@ export function isTransportRequest(value: unknown): value is TransportRequest {
     !Array.isArray(request.policy) &&
     typeof request.operation === "string" &&
     [
+      "backgroundCancel",
+      "backgroundLog",
+      "backgroundStart",
+      "backgroundStatus",
       "canonicalPath",
       "cancel",
       "execute",

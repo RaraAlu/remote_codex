@@ -23,10 +23,15 @@ import {
   type RemoteOutputEvent,
 } from "../core/vscode-transport.js";
 import { matchesRemoteWorkspaceRoot } from "./workspace.js";
+import {
+  BACKGROUND_TASK_MAX_LOG_READ_BYTES,
+  RemoteBackgroundTasks,
+} from "./background-tasks.js";
 import { RemoteStdioSessions } from "./stdio-sessions.js";
 
 const executors = new Map<string, LocalProcessExecutor>();
 const operationLedger = new OperationLedger();
+const backgroundTasks = new RemoteBackgroundTasks();
 const stdioSessions = new RemoteStdioSessions(async (event) => {
   await vscode.commands.executeCommand(REMOTE_OUTPUT_COMMAND, event);
 });
@@ -118,6 +123,25 @@ function stringArray(value: unknown, name: string): string[] {
   return value as string[];
 }
 
+function environmentValue(
+  value: unknown,
+  name: string,
+): Record<string, string | null> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const environment = record(value, name);
+  for (const [key, entry] of Object.entries(environment)) {
+    if (typeof entry !== "string" && entry !== null) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        `${name}.${key} must be a string or null`,
+      );
+    }
+  }
+  return environment as Record<string, string | null>;
+}
+
 function validateWorkspace(request: RemoteExecutorCommandRequest): void {
   if (vscode.env.remoteName !== "ssh-remote") {
     throw new BridgeError(
@@ -173,6 +197,46 @@ async function dispatch(
 ): Promise<unknown> {
   const params = record(request.params, "params");
   switch (request.operation) {
+    case "backgroundStart": {
+      const environment = environmentValue(params.env, "params.env");
+      return await backgroundTasks.start({
+        argv: stringArray(params.argv, "params.argv"),
+        ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}),
+        ...(environment ? { env: environment } : {}),
+        taskId: stringValue(params.taskId, "params.taskId"),
+        ...(typeof params.timeoutMs === "number"
+          ? {
+              timeoutMs: numberValue(
+                params.timeoutMs,
+                60 * 60_000,
+                "params.timeoutMs",
+              ),
+            }
+          : {}),
+        workspaceRoot: request.workspaceRoot,
+      });
+    }
+    case "backgroundStatus":
+      return backgroundTasks.status(
+        request.workspaceRoot,
+        stringValue(params.taskId, "params.taskId"),
+      );
+    case "backgroundLog":
+      return backgroundTasks.log(
+        request.workspaceRoot,
+        stringValue(params.taskId, "params.taskId"),
+        numberValue(params.cursor, 0, "params.cursor"),
+        numberValue(
+          params.limitBytes,
+          BACKGROUND_TASK_MAX_LOG_READ_BYTES,
+          "params.limitBytes",
+        ),
+      );
+    case "backgroundCancel":
+      return await backgroundTasks.cancel(
+        request.workspaceRoot,
+        stringValue(params.taskId, "params.taskId"),
+      );
     case "probe":
       return await executor.probe();
     case "canonicalPath":
@@ -372,6 +436,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   operationLedger.close();
+  backgroundTasks.close();
   stdioSessions.close();
   for (const executor of executors.values()) {
     executor.close();

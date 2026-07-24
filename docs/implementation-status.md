@@ -119,11 +119,13 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 写入审批与审计 | 覆盖、补丁、重命名和删除在非完全访问模式进入绑定调用 ID 的官方审批；新建文件/目录为有界自动操作；`full-access` 自动放行，审计不含正文 |
 | 写入幂等与上限 | 默认远端复用 Executor 账本，本地 Controller 有独立有界账本；文件正文最多 1 MiB，经 stdin 传输，不进入 argv |
 | 断线结果确认和幂等 | `0.3.17` 已在 transport 中断后用原幂等键从新 socket 查询账本；completed 返回原结果，cancelled/failed 保留终态，running 有界轮询，unknown 或查询不可达返回 `RESULT_UNKNOWN` 且不重放；Extension Host 重启持久化未实现 |
+| 后台任务 | `0.3.20` 在活动 VS Code Remote transport 上提供 start/status/log/cancel；稳定任务 ID 避免重连重复启动，日志按字节游标有界保留，取消、超时和 Extension Host 关闭终止进程组；OpenSSH 回退失败关闭 |
 | Core 内置本地工具硬阻断 | 自动化边界已实施；专用权限配置、25 个已知客户端请求、五类本地审批及未来风险命名空间均失败关闭，真实模型专用工具诱饵待补测 |
 
 阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行，0.3.15 完成默认
 VS Code Remote 链路的运行中取消自动化闭环，0.3.16 增加当前 Executor 代次内的有界
-幂等账本与结果查询，0.3.17 增加断线后的查询恢复，0.3.19 交付双端写入自动化；
+幂等账本与结果查询，0.3.17 增加断线后的查询恢复，0.3.19 交付双端写入自动化，
+0.3.20 交付后台任务生命周期自动化；
 本地 Core 真实诱饵、真实写入和生命周期验收完成前，不得用于无人值守的有副作用任务。
 
 ## 当前优先阶段：外部 Codex CLI 介入
@@ -340,6 +342,14 @@ UTF-8 补丁、目录创建、非覆盖重命名和文件或空目录删除；�
 Executor 增加 `executeStdin` 能力，升到 `0.2.12`、诊断协议号 7；真实双端写入和
 Windows 运行仍按统一人工清单补测。
 
+`0.3.20` 完成阶段 6 的后台任务自动化。Shim 新增 background
+start/status/log/cancel 四个动态工具，启动复用 thread 权限审批并只记录任务元数据；
+Remote Executor 按工作区与稳定任务 ID 隔离任务，最多保留 8 项、每项 4 MiB 日志和
+15 分钟终态，单次日志读取最多 256 KiB，任务寿命上限 24 小时。启动响应断线后只按
+任务 ID 查询，不重发命令；取消、超时和 Extension Host 关闭终止 POSIX 进程组。
+Executor 升到 `0.2.13`、诊断协议号 8，并新增四项 background 能力；真实 Remote SSH
+候选窗口、窗口关闭和 Windows 进程树仍按统一人工清单补测。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -377,7 +387,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-23-release-0.3.16-idempotency-ledger.md`；断线查询恢复见
 `docs/acceptance/2026-07-23-release-0.3.17-disconnect-recovery.md`；Core 风险命名空间
 阻断见 `docs/acceptance/2026-07-24-release-0.3.18-core-risk-namespaces.md`；双端安全
-写入见 `docs/acceptance/2026-07-24-release-0.3.19-dual-write.md`。
+写入见 `docs/acceptance/2026-07-24-release-0.3.19-dual-write.md`；后台任务见
+`docs/acceptance/2026-07-24-release-0.3.20-background-tasks.md`。
 
 ## 本地 MCP 边界
 
