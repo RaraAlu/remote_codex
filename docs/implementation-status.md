@@ -249,6 +249,14 @@ WebSocket，而是发送 `1012 / Bridge app-server restarting`，等待至多 25
 连接，外部 CLI 对接不再错误依赖官方 VS Code 扩展。重新启用、独立停止、完整
 Extension Host 退出和 Windows 实机仍待补测。
 
+`0.3.10` 修复设置恢复后的重新启用顺序。首个 `0.3.9` 候选在写入
+`remote.extensionKind.openai.chatgpt=["ui"]` 后，因同一 Extension Host 尚未注册
+`chatgpt.cliExecutable` 而失败，随即废弃。设置管理器现先写 UI 路由并返回重载，下一
+Extension Host 再写 Shim；Controller 在设置完整前不解析官方运行时或启动 transport，
+交互配置重新启用自动初始化并延迟重入。用户从真实部分配置现场恢复后，本地官方
+app-server、窗口会话和 CodeGraph relay 启动，Bridge 重新进入 `ready`，远端仍不安装
+Codex。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -276,7 +284,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 单次执行见
 `docs/acceptance/2026-07-23-release-0.3.5-single-tool-execution.md`；外部网关正常关闭见
 `docs/acceptance/2026-07-23-release-0.3.6-graceful-gateway-close.md`；设置恢复空闲态见
-`docs/acceptance/2026-07-23-release-0.3.8-settings-restore-idle.md`。
+`docs/acceptance/2026-07-23-release-0.3.8-settings-restore-idle.md`；分阶段重新配置见
+`docs/acceptance/2026-07-23-release-0.3.10-staged-reconfigure.md`。
 
 ## 本地 MCP 边界
 

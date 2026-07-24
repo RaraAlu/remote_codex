@@ -219,6 +219,11 @@ export class BridgeController implements vscode.Disposable {
   }
 
   async #initializeOnce(): Promise<void> {
+    if (this.#state.state === "configuring") {
+      this.#log("automatic initialization deferred while configuration is in progress");
+      return;
+    }
+
     const plan = planAutomaticInitialization({
       autoInitialize: vscode.workspace
         .getConfiguration("codexRemoteBridge")
@@ -291,7 +296,7 @@ export class BridgeController implements vscode.Disposable {
     }
     this.#state.transition("configuring");
     try {
-      const config = await this.#resolveCompatibleCodex(this.#currentRemoteConfig());
+      const config = this.#currentRemoteConfig();
       const shimPath = await installShimExecutable(this.#context);
       if (interactive) {
         const confirmation = await vscode.window.showWarningMessage(
@@ -313,10 +318,14 @@ export class BridgeController implements vscode.Disposable {
       }
 
       await saveBridgeConfig(bridgeConfigPath(), config);
-      await this.#saveWindowSession(config);
       this.#config = config;
       const settingsChanged = await this.#settings.configure(shimPath);
       if (settingsChanged) {
+        if (interactive) {
+          await vscode.workspace
+            .getConfiguration("codexRemoteBridge")
+            .update("autoInitialize", true, vscode.ConfigurationTarget.Global);
+        }
         this.#log("official Codex settings updated; reloading the window once");
         await vscode.commands.executeCommand("workbench.action.reloadWindow");
         if (this.#state.state === "configuring") {
@@ -325,6 +334,9 @@ export class BridgeController implements vscode.Disposable {
         return;
       }
 
+      this.#config = await this.#resolveCompatibleCodex(config);
+      await saveBridgeConfig(bridgeConfigPath(), this.#config);
+      await this.#saveWindowSession(this.#config);
       this.#state.transition("connecting");
       await this.#connect();
       if (interactive) {

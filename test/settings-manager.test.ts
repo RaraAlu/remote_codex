@@ -82,6 +82,12 @@ describe("OfficialSettingsManager", () => {
     const manager = new OfficialSettingsManager(context());
 
     await expect(manager.configure("/extension/shim.cjs")).resolves.toBe(true);
+    expect(mock.effective.get("chatgpt.cliExecutable")).toBe("/previous/codex");
+    expect(mock.effective.get("remote.extensionKind")).toEqual({
+      example: ["workspace"],
+      "openai.chatgpt": ["ui"],
+    });
+    await expect(manager.configure("/extension/shim.cjs")).resolves.toBe(true);
     expect(manager.status("/extension/shim.cjs").configured).toBe(true);
     expect(mock.effective.get("remote.extensionKind")).toEqual({
       example: ["workspace"],

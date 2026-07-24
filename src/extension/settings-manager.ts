@@ -143,6 +143,14 @@ export class OfficialSettingsManager {
 
   async #apply(shimPath: string): Promise<boolean> {
     const before = this.status(shimPath);
+    const backup = await this.#loadBackup();
+    if (backup && backup.managedCliExecutable !== shimPath) {
+      await this.#context.globalState.update(BACKUP_KEY_V2, {
+        ...backup,
+        managedCliExecutable: shimPath,
+      } satisfies OfficialSettingsBackupV2);
+    }
+
     if (!before.extensionKind) {
       const currentKinds =
         vscode.workspace
@@ -156,19 +164,17 @@ export class OfficialSettingsManager {
         },
         vscode.ConfigurationTarget.Global,
       );
+      if (!this.status(shimPath).extensionKind) {
+        throw new Error(
+          "Workspace or remote settings override the required Codex Bridge global settings",
+        );
+      }
+      return true;
     }
     if (!before.cliExecutable) {
       await vscode.workspace
         .getConfiguration("chatgpt")
         .update("cliExecutable", shimPath, vscode.ConfigurationTarget.Global);
-    }
-
-    const backup = await this.#loadBackup();
-    if (backup && backup.managedCliExecutable !== shimPath) {
-      await this.#context.globalState.update(BACKUP_KEY_V2, {
-        ...backup,
-        managedCliExecutable: shimPath,
-      } satisfies OfficialSettingsBackupV2);
     }
 
     if (!this.status(shimPath).configured) {
