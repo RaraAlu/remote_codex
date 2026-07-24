@@ -48,6 +48,9 @@
 - 断线、超时和取消不会触发本地回退。默认 VS Code Remote 链路只有收到远端 Executor
   的明确取消结果才返回 `CANCELLED`；无法确认的断线和超时，以及 OpenSSH 回退中只
   能终止本地 SSH 进程的有副作用调用，仍返回 `RESULT_UNKNOWN`。
+- 默认 VS Code Remote 链路为非幂等命令使用稳定键；Remote Executor 当前代次内的
+  有界账本只合并相同参数请求，参数冲突失败关闭，并保留终态或 `RESULT_UNKNOWN`
+  墓碑。账本过期、Extension Host 重启或查询不可达时不得自动重放。
 - Linux 本地配置和审计日志权限为 `0600`，控制目录权限为 `0500`。Windows 不模拟
   POSIX mode，文件位于当前用户的 `%APPDATA%`/`%LOCALAPPDATA%` 下并继承用户配置目录
   ACL；高安全场景仍应显式审计该目录 ACL。

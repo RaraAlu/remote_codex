@@ -24,6 +24,7 @@ import {
   type ControllerWorkspaceClient,
   type ControllerWorkspaceOperation,
   type RemoteExecutorOperation,
+  type RemoteOperationSnapshot,
   type TransportMessage,
   type TransportRequest,
 } from "./vscode-transport.js";
@@ -76,10 +77,12 @@ export class VsCodeRemoteExecutor
     argv: readonly string[],
     options: ExecuteOptions = {},
   ): Promise<RemoteCommandResult> {
+    const idempotencyKey = options.idempotencyKey ?? `exec_${randomUUID()}`;
     return await this.#request<RemoteCommandResult>(
       "execute",
       {
         argv: [...argv],
+        idempotencyKey,
         options: {
           ...(options.cwd ? { cwd: options.cwd } : {}),
           ...(options.env ? { env: options.env } : {}),
@@ -88,6 +91,15 @@ export class VsCodeRemoteExecutor
         },
       },
       options,
+    );
+  }
+
+  async operationStatus(
+    idempotencyKey: string,
+  ): Promise<RemoteOperationSnapshot<RemoteCommandResult>> {
+    return await this.#request<RemoteOperationSnapshot<RemoteCommandResult>>(
+      "resultStatus",
+      { idempotencyKey },
     );
   }
 

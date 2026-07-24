@@ -3,7 +3,7 @@ import {
   type ChildProcessWithoutNullStreams,
   type SpawnOptionsWithoutStdio,
 } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { AuditLog } from "../core/audit-log.js";
@@ -88,6 +88,24 @@ function isRemoteExecToolCall(request: RpcRequest): boolean {
     isRecord(request.params) &&
     request.params.tool === "remote_exec"
   );
+}
+
+export function remoteToolIdempotencyKey(request: RpcRequest): string {
+  if (
+    !isRecord(request.params) ||
+    typeof request.params.threadId !== "string" ||
+    typeof request.params.turnId !== "string" ||
+    typeof request.params.callId !== "string"
+  ) {
+    throw new TypeError("Remote tool call is missing thread, turn, or item identity");
+  }
+  return createHash("sha256")
+    .update(
+      [request.params.threadId, request.params.turnId, request.params.callId].join(
+        "\0",
+      ),
+    )
+    .digest("hex");
 }
 
 interface RemoteExecContext {
@@ -465,10 +483,12 @@ export class ShimProxy {
           this.#options.remoteToolPriority ?? 0,
           async (signal) => {
             let context: RemoteExecContext | null = null;
+            const idempotencyKey = remoteToolIdempotencyKey(message);
             if (isRemoteExecToolCall(message)) {
               context = this.#remoteExecContext(message);
               if (signal.aborted) {
                 return await this.#router!.handle(message.id, message.params, {
+                  idempotencyKey,
                   signal,
                 });
               }
@@ -485,6 +505,7 @@ export class ShimProxy {
               ) {
                 if (signal.aborted) {
                   return await this.#router!.handle(message.id, message.params, {
+                    idempotencyKey,
                     signal,
                   });
                 }
@@ -511,6 +532,7 @@ export class ShimProxy {
             }
 
             return await this.#router!.handle(message.id, message.params, {
+              idempotencyKey,
               signal,
               onOutput: context
                 ? (delta) => {

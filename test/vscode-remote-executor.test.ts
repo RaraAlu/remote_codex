@@ -88,6 +88,7 @@ describe("VsCodeRemoteExecutor", () => {
 
     await expect(
       executor.execute(["printf", "done"], {
+        idempotencyKey: "stable-operation",
         onStdout: (chunk) => streamed.push(chunk),
       }),
     ).resolves.toMatchObject({ exitCode: 0, stdout: "done" });
@@ -95,6 +96,7 @@ describe("VsCodeRemoteExecutor", () => {
     expect(observed).toMatchObject({
       hostId: "remote-host",
       operation: "execute",
+      params: { idempotencyKey: "stable-operation" },
       token: "0123456789abcdef0123456789abcdef",
       workspaceRoot: "/workspace",
     });
@@ -146,6 +148,40 @@ describe("VsCodeRemoteExecutor", () => {
     await expect(executor.canonicalPath("../outside")).rejects.toMatchObject({
       code: "PATH_OUTSIDE_ROOT",
       message: "outside",
+    });
+    executor.close();
+  });
+
+  it("queries the result ledger by idempotency key", async () => {
+    let observed: TransportRequest | undefined;
+    const pipe = await listen((request, write) => {
+      observed = request;
+      write({
+        id: request.id,
+        result: {
+          result: {
+            actualCwd: "/workspace",
+            durationMs: 3,
+            exitCode: 0,
+            signal: null,
+            stderr: "",
+            stdout: "done",
+            truncated: false,
+          },
+          status: "completed",
+        },
+        type: "response",
+      });
+    });
+    const executor = new VsCodeRemoteExecutor(config(pipe));
+
+    await expect(executor.operationStatus("stable-operation")).resolves.toMatchObject({
+      result: { exitCode: 0, stdout: "done" },
+      status: "completed",
+    });
+    expect(observed).toMatchObject({
+      operation: "resultStatus",
+      params: { idempotencyKey: "stable-operation" },
     });
     executor.close();
   });

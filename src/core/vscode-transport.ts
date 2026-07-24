@@ -1,10 +1,11 @@
 import type { BridgeErrorPayload } from "./types.js";
+import type { OperationSnapshot } from "./operation-ledger.js";
 
 export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
 export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
-export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 5;
-export const REMOTE_EXECUTOR_VERSION = "0.2.10";
+export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 6;
+export const REMOTE_EXECUTOR_VERSION = "0.2.11";
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
@@ -28,6 +29,7 @@ export const REMOTE_EXECUTOR_CAPABILITIES = [
   "listTree",
   "probe",
   "readFile",
+  "resultStatus",
   "search",
   "stdioEnd",
   "stdioStart",
@@ -52,6 +54,7 @@ export type RemoteExecutorOperation =
   | "listTree"
   | "probe"
   | "readFile"
+  | "resultStatus"
   | "search"
   | "stdioEnd"
   | "stdioStart"
@@ -76,6 +79,8 @@ export interface RemoteExecutorCommandResponse {
   ok: boolean;
   result?: unknown;
 }
+
+export type RemoteOperationSnapshot<T = unknown> = OperationSnapshot<T>;
 
 export interface ControllerWorkspaceRequest {
   hostId: string;
@@ -242,6 +247,7 @@ export function isTransportRequest(value: unknown): value is TransportRequest {
       "listTree",
       "probe",
       "readFile",
+      "resultStatus",
       "search",
       "stdioStart",
       ...CONTROLLER_WORKSPACE_OPERATIONS,

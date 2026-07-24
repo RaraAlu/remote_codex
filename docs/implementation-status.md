@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 49 个测试文件通过、1 个真实远端条件文件跳过，185 项通过、6 项
+`npm run test` 为 50 个测试文件通过、1 个真实远端条件文件跳过，192 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -115,12 +115,13 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 审批绑定 | 人工审批仅匹配一个待处理调用 ID；完全访问的自动放行单独审计 |
 | 运行中取消 | `0.3.15` 已把 `turn/interrupt` 绑定到活动 Bridge 调用；VS Code Remote 通道显式发送 `cancel`，Remote Executor 按 operation ID 中止 POSIX 进程组；自动化通过，真实 Remote SSH 与 Windows 待补测 |
 | 哈希保护写入和补丁 | 未实现 |
-| 断线结果确认和幂等 | 部分实现；同一 app-server 广播的同一远端工具请求只执行一次，跨重连账本仍未实现 |
+| 断线结果确认和幂等 | `0.3.16` 已按 thread/turn/call 派生稳定键，在 Remote Executor 当前代次内合并运行中请求、回放终态并提供 `resultStatus`；transport 断线后的自动查询恢复与 Extension Host 重启持久化未实现 |
 | Core 内置本地工具硬阻断 | 部分实施；专用权限配置、25 个客户端请求和五类本地审批已失败关闭，真实模型专用工具诱饵待补测 |
 
 阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行，0.3.15 完成默认
-VS Code Remote 链路的运行中取消自动化闭环；写操作、断线恢复、本地执行硬阻断和
-真实取消验收完成前，不得用于无人值守的有副作用任务。
+VS Code Remote 链路的运行中取消自动化闭环，0.3.16 增加当前 Executor 代次内的有界
+幂等账本与结果查询；写操作、断线自动恢复、本地执行硬阻断和真实取消验收完成前，
+不得用于无人值守的有副作用任务。
 
 ## 当前优先阶段：外部 Codex CLI 介入
 
@@ -302,7 +303,17 @@ Controller 再次核对会话配置与实时授权；请求不会到达 Remote E
 创建独立进程组并依次发送 `SIGTERM`/`SIGKILL`。进程树、断线触发、协议往返和审计
 自动化已通过，因此 Executor 升到 `0.2.10`、诊断协议号升到 5 并声明 `cancel`
 能力。真实 Remote SSH 取消耗时和遗留进程、Windows 行为、OpenSSH 回退远端进程身份、
-跨重连幂等账本与结果查询仍待后续目标。
+Controller 断线后的账本查询恢复仍待后续目标。
+
+`0.3.16` 完成阶段 4 的幂等账本与结果查询提交。Shim 从
+`threadId + turnId + callId` 派生固定长度的稳定键并随 `remote_exec` 传到默认
+VS Code Remote 链路；Remote Executor 以 host、workspace 和幂等键分区，在当前
+Extension Host 代次内合并运行中重复请求，回放 completed、cancelled、failed 或
+unknown 终态。同一键若参数或执行策略不同会返回 `PROTOCOL_MISMATCH`，不会产生第二次
+副作用。账本同时限制保留时间、条目数和结果字节数；无法安全保留的大结果留下
+`RESULT_UNKNOWN` 墓碑。协议新增 `resultStatus` 能力，Executor 升到 `0.2.11`、诊断
+协议号升到 6；审计记录 `executed`、`joined` 或 `replayed`。Controller 在 transport
+断线后主动查询账本并恢复终态结果、Extension Host 重启后的状态语义仍属于下一提交。
 
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
@@ -337,7 +348,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-23-release-0.3.12-root-identity-protocol.md`；本地根授权执行器见
 `docs/acceptance/2026-07-23-release-0.3.13-local-root-authority.md`；双端只读路由见
 `docs/acceptance/2026-07-23-release-0.3.14-dual-read-routing.md`；运行中命令取消见
-`docs/acceptance/2026-07-23-release-0.3.15-command-cancellation.md`。
+`docs/acceptance/2026-07-23-release-0.3.15-command-cancellation.md`；幂等账本见
+`docs/acceptance/2026-07-23-release-0.3.16-idempotency-ledger.md`。
 
 ## 本地 MCP 边界
 

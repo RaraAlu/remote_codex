@@ -20,8 +20,8 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.15` 自动化候选 | turn 中断、transport cancel 和调用方断线取消已实现；候选 VSIX 安装、真实取消与 Windows 实机待补测 |
-| Remote Executor | `0.2.10` / 诊断协议 5 自动化候选 | 新增 operation ID 绑定、`cancel` 能力和 POSIX 进程组终止；候选实机待补测 |
+| Bridge Controller | `0.3.16` 自动化候选 | 稳定幂等键、终态回放和幂等审计已实现；候选 VSIX 安装、断线自动恢复与 Windows 实机待补测 |
+| Remote Executor | `0.2.11` / 诊断协议 6 自动化候选 | 新增有界结果账本和 `resultStatus`；同键请求合并或回放，参数冲突失败关闭；候选实机待补测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
 仓库不固定或门禁任何组件版本；当前生成协议记录的来源扩展为 `26.721.30844`，诊断
@@ -35,8 +35,8 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 2026-07-23 在 Linux x64 本机执行 `npm run check`：
 
 - TypeScript 类型检查通过。
-- 49 个测试文件通过，1 个真实远端条件测试文件跳过。
-- 185 项测试通过，6 项条件测试跳过，0 项失败。
+- 50 个测试文件通过，1 个真实远端条件测试文件跳过。
+- 192 项测试通过，6 项条件测试跳过，0 项失败。
 - Controller、Shim 和 Remote Executor 构建通过。
 - 插件内置 `0.146.0-alpha.3` 的本地透传、远程窗口启动和线程创建 Shim 冒烟通过；
   缺少受控运行时指针时，即使 PATH 存在系统 CLI 也失败关闭。
@@ -118,7 +118,7 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 | DUAL-READ | 双端目录读取、树、搜索和状态 | 已实施（自动化） | `workspace_*` 工具按显式目标和根 ID 路由；本地请求经已认证 Controller transport 执行，远端请求保持 Remote Executor/OpenSSH 路径；结果、审计和原生 UI 均保留根身份 | 候选 VSIX 的同任务双端读取与界面观感待实机补测 |
 | DUAL-WRITE | 双端写入、补丁、重命名和删除 | 待实施 | 读取结果已返回远端 SHA-256 | 没有写工具、`expectedHash`、原子替换或统一错误语义 |
 | LIFE-CANCEL | 运行中取消 | 已实施（自动化） | `turn/interrupt` 绑定 thread/turn 活动调用；默认 VS Code Remote transport 显式取消；Executor 按 operation ID 中止 POSIX 进程组；等待审批取消不执行命令 | 真实 Remote SSH 取消耗时/遗留进程、Windows 进程树和 OpenSSH 回退待补测 |
-| LIFE-IDEMP | 幂等和断线结果确认 | 部分实施 | 同一 app-server 内广播的 `threadId + turnId + callId` 已协调为单次执行；有 `requestId`、`connectionId` 和 `RESULT_UNKNOWN` | 没有跨重连幂等账本、结果查询或重连确认 |
+| LIFE-IDEMP | 幂等和断线结果确认 | 部分实施（账本自动化完成） | 同一 app-server 广播先协调为单次执行；`remote_exec` 使用稳定键；Executor 当前代次内有界账本可合并、回放并通过 `resultStatus` 查询五种状态 | transport 断线后的自动查询恢复、Extension Host 重启状态和真实 Remote SSH 重放待补测 |
 | LIFE-BACKGROUND | 后台任务 | 待实施 | MCP stdio 有长生命周期会话管理 | 普通命令没有 start/status/log/cancel 协议 |
 | SAFE-CORE | Core 本地 Shell/文件工具硬阻断 | 部分实施/待补测 | 专用本地拒绝权限配置已由官方 app-server 激活；Shim 阻断 25 个本地客户端请求和五类 Core 本地审批并失败审计 | 真实模型专用工具诱饵负测和官方 UI 恢复尚未完成；hook 不能作为完整强制边界 |
 | UX-REMOTE | 远程 URI、Diff 和文件跳转 | 待实施 | Bridge 工具可投影为原生 command item | 没有可打开的远程资源身份和 Diff 提供器 |
@@ -244,7 +244,8 @@ VS Code 工作区 URI。2026-07-22 对官方扩展内置 `0.145.0-alpha.27` app-
 - 所有 `remote_exec` 都按有副作用操作处理，无法声明纯读取命令。
 - 默认 VS Code Remote 链路有请求 operation ID 和 POSIX 进程组；OpenSSH 回退仍只有
   本地 SSH 子进程身份，不能确认远端进程树。
-- 没有稳定幂等键；相同 `callId` 再次出现仍可能重复执行。
+- 默认 VS Code Remote 链路从完整工具身份派生稳定幂等键；相同参数在账本保留期内只
+  执行一次，参数变化失败关闭。OpenSSH 回退仍没有远端幂等账本。
 - 审批通过后参数不可变由当前调用对象保证，但没有跨重连审批摘要。
 
 ### 3.6 取消、断线和后台任务
@@ -267,7 +268,8 @@ VS Code 工作区 URI。2026-07-22 对官方扩展内置 `0.145.0-alpha.27` app-
   返回 `RESULT_UNKNOWN`，且不会本地回退或自动重放。
 - OpenSSH 回退没有远端 operation ID 或进程树身份，取消后无法确认远端是否仍在运行。
 - Windows 执行器目前只能终止直接子进程，完整进程树行为尚未验证。
-- 没有完成结果账本，恢复连接后无法判断旧副作用是否完成。
+- Remote Executor 当前 Extension Host 代次内可查询 running、completed、cancelled、
+  failed 和 unknown；Controller 尚未在 transport 断线后自动执行查询恢复。
 - 普通命令没有后台作业协议；MCP stdio 生命周期不能直接复用于任意训练命令。
 
 ### 3.7 Core 本地工具阻断
@@ -313,7 +315,8 @@ Codex `0.145.0` 的权限配置和 `PreToolUse` hooks 提供可探查的防线�
 
 边界：
 
-- 审计没有 `target`、主次角色、写入字节数、冲突结果、幂等命中或取消确认字段。
+- 审计已有 `target`、主次角色和幂等 executed/joined/replayed 结果；写入字节数、
+  冲突结果和取消确认耗时仍待实现。
 - 远程文件没有稳定的可打开 URI、Diff 或跳转提供器。
 - `package:all` 不是跨平台编译器；Linux 构建会删除 Windows SEA，不能单机重建完整
   双平台发布目录。
@@ -647,13 +650,14 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 实施：
 
 1. [x] 将 `turn/interrupt` 关联到该 turn 的活动 Bridge 调用。
-2. [ ] Remote Executor 协议升级：已复用稳定请求 ID 并增加 `cancel`；`result-status`
-   操作留给下一提交的结果账本。
+2. [x] Remote Executor 协议升级：复用稳定请求 ID，增加 `cancel`、稳定幂等键和
+   `resultStatus`。
 3. [x] Controller、transport 和 Remote Executor 为活动操作保存取消状态；取消时
    终止 POSIX 进程组而不是只关闭本地 socket。
-4. 为非幂等操作增加 `idempotencyKey` 和带上限的结果账本，区分 running、completed、
-   cancelled、failed 和 unknown。
-5. socket 重连后先查询 operation 状态；已完成调用返回原结果，未知调用不得自动重放。
+4. [x] 为非幂等操作增加 `idempotencyKey` 和带上限的结果账本，区分 running、
+   completed、cancelled、failed 和 unknown。
+5. [ ] socket 重连后先查询 operation 状态；已完成调用返回原结果，未知调用不得自动
+   重放。查询协议已具备，Controller 自动恢复编排留到下一提交。
 6. 明确 VS Code 窗口关闭、Executor 失联、Shim 退出和超时的结果语义及审计字段。
 
 验收：
@@ -666,7 +670,7 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 提交边界：
 
 - [x] transport cancel 与进程树终止一个提交。
-- 幂等账本和结果查询一个提交。
+- [x] 幂等账本和结果查询一个提交。
 - 断线恢复与生命周期证据一个提交。
 
 ### 阶段 5：双端安全写入

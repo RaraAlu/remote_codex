@@ -1,8 +1,12 @@
+import { createHash } from "node:crypto";
 import * as vscode from "vscode";
-import { ActiveOperationRegistry } from "../core/active-operation-registry.js";
 import { defaultRemotePrimaryRoot, parseBridgeConfig } from "../core/config.js";
 import { asBridgeError, BridgeError } from "../core/errors.js";
 import { LocalProcessExecutor } from "../core/local-process-executor.js";
+import {
+  OperationLedger,
+  type IdempotencyOutcome,
+} from "../core/operation-ledger.js";
 import type { ExecuteOptions } from "../core/ssh-executor.js";
 import type { BridgeConfig } from "../core/types.js";
 import {
@@ -21,7 +25,7 @@ import { matchesRemoteWorkspaceRoot } from "./workspace.js";
 import { RemoteStdioSessions } from "./stdio-sessions.js";
 
 const executors = new Map<string, LocalProcessExecutor>();
-const activeOperations = new ActiveOperationRegistry();
+const operationLedger = new OperationLedger();
 const stdioSessions = new RemoteStdioSessions(async (event) => {
   await vscode.commands.executeCommand(REMOTE_OUTPUT_COMMAND, event);
 });
@@ -38,6 +42,62 @@ function stringValue(value: unknown, name: string): string {
     throw new BridgeError("PROTOCOL_MISMATCH", `${name} must be a string`);
   }
   return value;
+}
+
+function idempotencyKeyValue(value: unknown): string {
+  const key = stringValue(value, "params.idempotencyKey");
+  if (key.length === 0 || key.length > 256 || key.includes("\0")) {
+    throw new BridgeError(
+      "PROTOCOL_MISMATCH",
+      "params.idempotencyKey must contain 1 to 256 NUL-free characters",
+    );
+  }
+  return key;
+}
+
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalValue);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, canonicalValue(entry)]),
+    );
+  }
+  return value;
+}
+
+function operationFingerprint(request: RemoteExecutorCommandRequest): string {
+  const { idempotencyKey: _idempotencyKey, ...params } = request.params;
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalValue({ params, policy: request.policy })))
+    .digest("hex");
+}
+
+function resultWithIdempotencyOutcome(
+  result: unknown,
+  outcome: IdempotencyOutcome,
+): unknown {
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    return { ...(result as Record<string, unknown>), idempotencyOutcome: outcome };
+  }
+  return { idempotencyOutcome: outcome, value: result };
+}
+
+function errorWithIdempotencyOutcome(
+  error: unknown,
+  outcome: IdempotencyOutcome,
+) {
+  const payload = asBridgeError(error, "REMOTE_TRANSPORT_DISCONNECTED").toPayload();
+  return {
+    ...payload,
+    details: {
+      ...payload.details,
+      idempotencyOutcome: outcome,
+    },
+  };
 }
 
 function numberValue(value: unknown, fallback: number, name: string): number {
@@ -202,9 +262,10 @@ async function dispatch(
       stdioSessions.stop(request.id);
       return { stopped: true };
     case "cancel":
+    case "resultStatus":
       throw new BridgeError(
         "PROTOCOL_MISMATCH",
-        "Cancel requests must be handled before operation dispatch",
+        "Operation control requests must be handled before operation dispatch",
       );
   }
 }
@@ -239,21 +300,47 @@ async function executeRequest(
       return {
         ok: true,
         result: {
-          cancelled: activeOperations.cancel(operationKey(request, operationId)),
+          cancelled: operationLedger.cancel(operationKey(request, operationId)),
           operationId,
         },
+      };
+    }
+    if (request.operation === "resultStatus") {
+      validateWorkspace(request);
+      const idempotencyKey = idempotencyKeyValue(
+        record(request.params, "params").idempotencyKey,
+      );
+      return {
+        ok: true,
+        result: operationLedger.status(operationKey(request, idempotencyKey)),
       };
     }
     const executor = executorFor(request);
     if (request.operation !== "execute") {
       return { ok: true, result: await dispatch(request, executor) };
     }
-    const key = operationKey(request, request.id);
-    const signal = activeOperations.start(key);
+    const idempotencyKey = idempotencyKeyValue(
+      record(request.params, "params").idempotencyKey,
+    );
+    const operation = operationLedger.start(
+      operationKey(request, idempotencyKey),
+      operationKey(request, request.id),
+      operationFingerprint(request),
+      async (signal) => await dispatch(request, executor, signal),
+    );
     try {
-      return { ok: true, result: await dispatch(request, executor, signal) };
-    } finally {
-      activeOperations.finish(key);
+      return {
+        ok: true,
+        result: resultWithIdempotencyOutcome(
+          await operation.result,
+          operation.outcome,
+        ),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        error: errorWithIdempotencyOutcome(error, operation.outcome),
+      };
     }
   } catch (error) {
     return {
@@ -276,7 +363,7 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  activeOperations.cancelAll();
+  operationLedger.close();
   stdioSessions.close();
   for (const executor of executors.values()) {
     executor.close();

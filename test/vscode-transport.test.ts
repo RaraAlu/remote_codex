@@ -4,6 +4,7 @@ import {
   REMOTE_EXECUTOR_CAPABILITIES,
   REMOTE_EXECUTOR_VERSION,
   isRemoteExecutorPing,
+  isTransportRequest,
 } from "../src/core/vscode-transport.js";
 
 describe("VS Code remote transport protocol", () => {
@@ -56,5 +57,23 @@ describe("VS Code remote transport protocol", () => {
       await readFile("remote-executor/package.json", "utf8"),
     ) as { version: string };
     expect(REMOTE_EXECUTOR_VERSION).toBe(packageJson.version);
+  });
+
+  it("accepts authenticated result-status transport requests", () => {
+    expect(
+      isTransportRequest({
+        hostId: "remote-host",
+        id: "status-1",
+        operation: "resultStatus",
+        outputCommand: "codexRemoteBridge.transport.output",
+        params: { idempotencyKey: "stable-key" },
+        policy: {
+          commandTimeoutMs: 30_000,
+          maxOutputBytes: 64 * 1024,
+        },
+        token: "token",
+        workspaceRoot: "/workspace",
+      }),
+    ).toBe(true);
   });
 });

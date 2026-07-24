@@ -7,6 +7,7 @@ import { BridgeError } from "../src/core/errors.js";
 import {
   RemoteToolCallCoordinator,
   ShimProxy,
+  remoteToolIdempotencyKey,
   type RpcMessageWriter,
 } from "../src/shim/proxy.js";
 import type { RpcRequest } from "../src/shim/rpc.js";
@@ -36,6 +37,18 @@ function toolCall(): RpcRequest {
 }
 
 describe("remote tool cancellation", () => {
+  it("derives a stable idempotency key from the complete tool identity", () => {
+    const call = toolCall();
+    expect(remoteToolIdempotencyKey(call)).toMatch(/^[a-f0-9]{64}$/);
+    expect(remoteToolIdempotencyKey(call)).toBe(remoteToolIdempotencyKey(toolCall()));
+    expect(
+      remoteToolIdempotencyKey({
+        ...call,
+        params: { ...(call.params as Record<string, unknown>), turnId: "turn-2" },
+      }),
+    ).not.toBe(remoteToolIdempotencyKey(call));
+  });
+
   it("cancels only calls bound to the interrupted thread and turn", async () => {
     const coordinator = new RemoteToolCallCoordinator();
     const observedSignals: AbortSignal[] = [];

@@ -106,6 +106,7 @@ export interface RemoteCommandResult {
   actualCwd: string;
   durationMs: number;
   exitCode: number | null;
+  idempotencyOutcome?: "executed" | "joined" | "replayed";
   signal: NodeJS.Signals | null;
   stderr: string;
   stdout: string;

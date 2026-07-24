@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -68,7 +68,7 @@ function request(
   };
 }
 
-describe.skipIf(process.platform === "win32")("Remote Executor cancellation", () => {
+describe.skipIf(process.platform === "win32")("Remote Executor operation ledger", () => {
   it("binds cancel to the active execute request and returns CANCELLED", async () => {
     workspace = await realpath(await mkdtemp(join(tmpdir(), "codex-remote-cancel-")));
     mock.workspaceRoot = workspace;
@@ -79,6 +79,7 @@ describe.skipIf(process.platform === "win32")("Remote Executor cancellation", ()
     const running = execute?.(
       request("operation-1", "execute", {
         argv: ["sleep", "30"],
+        idempotencyKey: "cancel-key",
         options: { sideEffect: true },
       }),
     ) as Promise<RemoteExecutorCommandResponse>;
@@ -104,5 +105,67 @@ describe.skipIf(process.platform === "win32")("Remote Executor cancellation", ()
       },
       ok: false,
     });
+    await expect(
+      execute?.(
+        request("status-1", "resultStatus", {
+          idempotencyKey: "cancel-key",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        error: { code: "CANCELLED" },
+        status: "cancelled",
+      },
+    });
+  });
+
+  it("replays a completed idempotency key without repeating its side effect", async () => {
+    workspace = await realpath(await mkdtemp(join(tmpdir(), "codex-remote-ledger-")));
+    mock.workspaceRoot = workspace;
+    activate({ subscriptions: [] } as never);
+    const execute = mock.commands.get(REMOTE_EXECUTOR_COMMAND);
+    expect(execute).toBeTypeOf("function");
+    const effectsPath = join(workspace, "effects.log");
+    const params = {
+      argv: ["sh", "-c", `printf x >> ${JSON.stringify(effectsPath)}`],
+      idempotencyKey: "stable-side-effect",
+      options: { sideEffect: true },
+    };
+
+    await expect(execute?.(request("operation-1", "execute", params))).resolves.toMatchObject({
+      ok: true,
+      result: { idempotencyOutcome: "executed" },
+    });
+    await expect(execute?.(request("operation-2", "execute", params))).resolves.toMatchObject({
+      ok: true,
+      result: { idempotencyOutcome: "replayed" },
+    });
+    await expect(readFile(effectsPath, "utf8")).resolves.toBe("x");
+    await expect(
+      execute?.(
+        request("status-1", "resultStatus", {
+          idempotencyKey: "stable-side-effect",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: {
+        result: { exitCode: 0 },
+        status: "completed",
+      },
+    });
+    await expect(
+      execute?.(
+        request("operation-3", "execute", {
+          ...params,
+          argv: ["sh", "-c", `printf y >> ${JSON.stringify(effectsPath)}`],
+        }),
+      ),
+    ).resolves.toMatchObject({
+      error: { code: "PROTOCOL_MISMATCH" },
+      ok: false,
+    });
+    await expect(readFile(effectsPath, "utf8")).resolves.toBe("x");
   });
 });

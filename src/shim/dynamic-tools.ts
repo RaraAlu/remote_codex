@@ -218,6 +218,7 @@ interface DynamicToolCall {
 }
 
 export interface DynamicToolObserver {
+  idempotencyKey?: string;
   onOutput?: (chunk: string) => void;
   signal?: AbortSignal;
 }
@@ -338,6 +339,9 @@ export class DynamicToolRouter {
         operation: call.tool,
         outcome: "succeeded",
         durationMs: Math.round(performance.now() - startedAt),
+        ...(isRecord(data) && typeof data.idempotencyOutcome === "string"
+          ? { details: { idempotencyOutcome: data.idempotencyOutcome } }
+          : {}),
       });
       return {
         success: true,
@@ -429,6 +433,7 @@ export class DynamicToolRouter {
       return await this.#executor.execute(request.argv, {
         cwd: request.cwd,
         env: request.env,
+        idempotencyKey: observer.idempotencyKey,
         timeoutMs: request.timeoutMs,
         sideEffect: true,
         signal: observer.signal,

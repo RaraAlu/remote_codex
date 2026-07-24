@@ -28,6 +28,7 @@ export type SpawnProcess = (
 export interface ExecuteOptions {
   cwd?: string;
   env?: Record<string, string | null>;
+  idempotencyKey?: string;
   onStderr?: (chunk: string) => void;
   onStdout?: (chunk: string) => void;
   signal?: AbortSignal;

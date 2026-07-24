@@ -82,6 +82,7 @@ describe("VS Code Controller cancellation transport", () => {
           outputCommand: "untrusted",
           params: {
             argv: ["sleep", "30"],
+            idempotencyKey: "cancel-key",
             options: { sideEffect: true },
           },
           policy: {
