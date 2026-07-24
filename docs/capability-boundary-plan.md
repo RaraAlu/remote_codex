@@ -16,11 +16,11 @@
 | 组件 | 2026-07-23 实测值 | 当前结论 |
 | --- | --- | --- |
 | 本地平台 | Linux x64 | 可执行 Linux Controller 自动化与打包 |
-| VS Code | `1.130.0` | Remote SSH 外部 CLI 同步任务已实测；官方面板发起待补测 |
-| 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地与 Remote SSH 外部 CLI 双向投影通过；官方面板发起待补测 |
+| VS Code | `1.130.0` | Remote SSH 官方面板与外部 CLI 同步任务已实测 |
+| 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.4` 候选 | 无版本值门禁；Linux Remote SSH 外部 CLI 已实测保留远端命令实际退出码，官方面板与 Windows 实机待补测 |
+| Bridge Controller | `0.3.5` 候选 | 无版本值门禁；Linux Remote SSH 官方任务、完整固定探针和多上游单次执行通过，Windows 实机待补测 |
 | Remote Executor | `0.2.8` 候选 | 按所需能力集合握手；远端命令、读取和 stdio CodeGraph 已实测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
@@ -36,39 +36,39 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 
 - TypeScript 类型检查通过。
 - 37 个测试文件通过，1 个真实远端条件测试文件跳过。
-- 157 项测试通过，5 项真实远端条件测试跳过，0 项失败。
+- 160 项测试通过，5 项真实远端条件测试跳过，0 项失败。
 - Controller、Shim 和 Remote Executor 构建通过。
 - 插件内置 `0.146.0-alpha.3` 的本地透传、远程窗口启动和线程创建 Shim 冒烟通过；
   缺少受控运行时指针时，即使 PATH 存在系统 CLI 也失败关闭。
 - Linux x64 Controller VSIX 和匹配的 Remote Executor VSIX 打包通过。
 
-这些结果证明当前源码自动化基线与 Linux 包构造可用；真实窗口另外证明了外部 CLI
-发起的 Remote SSH 同步任务、远端命令/读取和 CodeGraph。它们仍不证明官方面板发起
-的新任务、远程命令取消、断线恢复、双端读写或完整生命周期。
+这些结果证明当前源码自动化基线与 Linux 包构造可用；真实窗口另外证明了官方面板
+与外部 CLI 发起的 Remote SSH 任务、25 个固定远端探针和 CodeGraph。它们仍不证明
+远程命令取消、断线恢复、双端读写或完整生命周期。
 
-随后补跑 `npm run package:all` 时，Linux 主机因没有 Windows 构建生成的
-`dist/codex-bridge-shim.exe` 而失败。当前打包脚本不能在单一 Linux 工作区独立重建
-双平台 Controller；Windows 包必须由 Windows 构建产出并进入受控收集流程。
+`0.3.5` 使用校验过 SHA-256 的官方 Node `24.18.0` Windows x64 归档在 Linux 生成
+SEA Shim，`npm run package:all` 已成功。该结果证明跨平台构包和内容隔离，不替代
+Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 
 ### 1.3 当前真实窗口证据
 
-活动 VS Code Remote SSH 窗口已连接 `g1_1`，工作区为
-`/home/unitree/mimiclite-sim2real`。安装 `0.3.3` 并由用户重载后，当前日志和实机
-操作证明：
+活动 VS Code Remote SSH 窗口已连接 `g1_1`，工作区为 `/home/unitree/rl_sar`。
+安装 `0.3.5` 并由用户重载后，当前日志和实机操作证明：
 
 - Controller 自动迁移托管 Shim 并自动重载，随后复用唯一活动的 VS Code Remote SSH
   transport 进入 `ready`；远端没有安装或启动 Codex。
-- 初始 VS Code thread 尚未物化，无法 `resume`。`codex-vscode` 已按错误能力信号
-  自动回退为新建同步 thread，而不是报 `no rollout found` 后退出。
-- 外部 TUI 在 YOLO 模式连续完成两轮，打印 `remote_exec pwd`、README 读取和远端
-  CodeGraph `codegraph_status` 的调用过程与结果。
-- 审计确认 `full-access` 自动放行，没有 Bridge 二次审批；外部连接向 VS Code 主
-  客户端转发 141 条通知。
-- 官方 Codex 日志和结构化读取确认同一 thread 在 UI 侧活动，包含 2 个完成的 turn。
+- 用户从官方 Codex 面板创建新 thread，`remote_exec pwd` 返回规范远端根，官方日志
+  和 Bridge 审计各记录一条完整成功链路。
+- 外部对话控制客户端介入同一 thread 时，官方 stdio 和外部上游同时存在；并发
+  `pwd` 仍只产生一条执行记录。
+- 5 轮读取、目录树、搜索、Git 和 `pwd` 共 25 个固定探针全部成功，每种工具恰好
+  5 次开始和 5 次成功，重复 `requestId` 为 0。
+- 修复前 `0.3.4` 的同一组 25 个逻辑探针执行了 50 次；`0.3.5` 已把同一
+  `threadId + turnId + callId` 协调为单次执行。
 
-该证据完成了 Linux Remote SSH 外部 CLI 限定链路验收，但不能替代官方面板按钮发起
-的新任务、取消、断线、附件、当前文件、完整生命周期或 Windows x64 验收。详见
-`docs/acceptance/2026-07-23-release-0.3.3-remote-cli-acceptance.md`。
+该证据完成 Linux Remote SSH 官方面板、外部 CLI 和本目标的单次执行验收，但不能
+替代取消、断线、附件、当前文件、完整生命周期或 Windows x64 验收。详见
+`docs/acceptance/2026-07-23-release-0.3.5-single-tool-execution.md`。
 
 ### 1.4 外部 `0.145.0` 探针与插件内置协议
 
@@ -92,18 +92,18 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 - 协议生成、缺少运行时指针的失败关闭、真实 app-server 冒烟和 Linux 候选打包已通过；
   当时的内置版本门禁已经由 `0.3.2` 废止。
 
-当前扩展的外部 CLI 同步任务、MCP、固定远端探针和真实 Remote SSH 链路已经重跑；
-官方面板按钮发起的新任务和完整生命周期仍使该版本保持候选状态。
+当前扩展的官方面板、外部 CLI、MCP、固定远端探针和真实 Remote SSH 链路已经重跑；
+完整生命周期和 Windows x64 仍使该版本保持候选状态。
 
 ## 2. 重新汇总的任务清单
 
 | ID | 任务 | 当前状态 | 已有能力 | 主要缺口 |
 | --- | --- | --- | --- | --- |
-| RUNTIME-OFFICIAL | 仅依赖官方扩展内置 Codex | 已实施 | Controller 只从官方扩展 API 定位内置二进制；本地和 Remote SSH 实机均未启动系统 Codex 服务端 | 官方面板发起的新任务待验证 |
+| RUNTIME-OFFICIAL | 仅依赖官方扩展内置 Codex | 已实施并实测 | Controller 只从官方扩展 API 定位内置二进制；Remote SSH 官方新任务通过；本地和远端均未启动系统 Codex 服务端 | Windows 实机待验证 |
 | RUNTIME-PASSTHROUGH | 本地窗口使用插件内置 Codex且请求语义不变 | 已实施并实测 | Shim 使用受限运行时指针并在缺失时失败关闭；共享网关保持本地语义，Remote SSH 外部 CLI 权限继承通过 | 官方面板任务和完整生命周期仍待验证 |
 | COMP-BUNDLED | 为插件内置 app-server 生成协议 | 已实施 | 版本仅作诊断；协议快照、结构差异、自动化和升级后自动迁移已同步 | 官方面板和 Windows 实机待验证 |
 | COMP-145 | 适配外部 Codex `0.145.0` | 历史完成后被取代 | 当时的 CLI、协议、版本门禁、测试、Shim 冒烟和 Linux 候选包已完成 | 版本门禁已在 `0.3.2` 废止 |
-| COMP-OFFICIAL | 验证 `openai.chatgpt@26.721.30844` | Linux 限定链路实机通过 | 协议、Shim、普通本地、Remote SSH 外部 CLI、权限和远端工具通过 | 官方面板任务、完整生命周期和 Windows 待补测 |
+| COMP-OFFICIAL | 验证 `openai.chatgpt@26.721.30844` | Linux 实机通过 | 协议、Shim、普通本地、Remote SSH 官方任务、外部 CLI、权限和远端工具通过 | 完整生命周期和 Windows 待补测 |
 | ROUTE-EXEC | 强化 Remote SSH 下的 `remote_exec` 路由 | 已实施 | 新建/恢复线程注入策略，每次 turn 通过独立上下文键刷新提醒，动态工具描述明确 | Core 本地工具硬阻断仍属于 SAFE-CORE |
 | MCP-ADAPTER | 通用远端 MCP 启动适配 | 已实施 | 受控适配器 ID、共享注册表、VS Code Remote/Remote Executor 与 OpenSSH stdin 控制头均已实现；CodeGraph 八工具实机通过 | 其他服务适配器和 OpenSSH 回退实机仍待按需补充 |
 | ROOT-PRIMARY | 远程工作区成为主工作目录 | 已实施并限定实测 | 配置 v2 固定唯一 `remote/primary`；线程以本地控制目录为物理 `cwd`，以远程主根为逻辑 `runtimeWorkspaceRoots`；外部 CLI 新建同步 thread 的命令和读取默认落到远程主根 | 官方面板新建/恢复、附件和当前文件仍待补测 |
@@ -111,7 +111,7 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 | DUAL-READ | 双端目录读取、树、搜索和状态 | 待实施 | 远端只读工具完整；Remote Executor 有路径约束 | 工具没有 `target`；Controller 没有本地授权目录执行器 |
 | DUAL-WRITE | 双端写入、补丁、重命名和删除 | 待实施 | 读取结果已返回远端 SHA-256 | 没有写工具、`expectedHash`、原子替换或统一错误语义 |
 | LIFE-CANCEL | 运行中取消 | 待实施 | 执行器底层接受 `AbortSignal`，超时能终止子进程 | app-server `turn/interrupt` 没有传到活动远端请求 |
-| LIFE-IDEMP | 幂等和断线结果确认 | 待实施 | 有 `callId`、`requestId`、`connectionId` 和 `RESULT_UNKNOWN` | 没有幂等账本、结果查询、重连确认或去重 |
+| LIFE-IDEMP | 幂等和断线结果确认 | 部分实施 | 同一 app-server 内广播的 `threadId + turnId + callId` 已协调为单次执行；有 `requestId`、`connectionId` 和 `RESULT_UNKNOWN` | 没有跨重连幂等账本、结果查询或重连确认 |
 | LIFE-BACKGROUND | 后台任务 | 待实施 | MCP stdio 有长生命周期会话管理 | 普通命令没有 start/status/log/cancel 协议 |
 | SAFE-CORE | Core 本地 Shell/文件工具硬阻断 | 部分实施/待补测 | 专用本地拒绝权限配置已由官方 app-server 激活；Shim 阻断 25 个本地客户端请求和五类 Core 本地审批并失败审计 | 真实模型专用工具诱饵负测和官方 UI 恢复尚未完成；hook 不能作为完整强制边界 |
 | UX-REMOTE | 远程 URI、Diff 和文件跳转 | 待实施 | Bridge 工具可投影为原生 command item | 没有可打开的远程资源身份和 Diff 提供器 |
@@ -853,12 +853,12 @@ thread 自动回退为新建同步 thread，TUI 在 YOLO 模式连续完成两�
 
 ## 6. 当前阻塞与待用户配合
 
-- 外部 CLI 发起的 Remote SSH 新任务、审批继承和多轮工具链已完成；官方面板发起的
-  新任务、取消和断线仍需在真实窗口单独执行。Controller 自身升级引起的本地 Shim
+- 外部 CLI 和官方面板发起的 Remote SSH 新任务、审批继承与多轮工具链已完成；官方
+  面板发起的取消和断线仍需在真实窗口单独执行。Controller 自身升级引起的本地 Shim
   迁移已自动重载。
 - Windows x64 实机链路当前不可由本次 Linux 环境替代。
-- Windows SEA Shim 与 Controller VSIX 不能由当前 Linux 构建生成；完整 `dist/` 需由
-  Windows、Linux 两端产物收集后再验。
+- Windows SEA Shim 和 Controller VSIX 已在 Linux 使用校验过的官方 Node 归档完成
+  跨平台构包；Windows 原生构建和实机仍必须在 Windows x64 单独验收。
 - `runtimeWorkspaceRoots` 的 app-server 参数链路已经通过无副作用探针；官方 UI 的新建、
   恢复、附件和当前文件显示仍需在安装候选后实测。
 - 专用 permission profile 和 25 个客户端请求阻断已经实施，但真实模型是否仍能通过

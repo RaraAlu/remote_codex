@@ -55,6 +55,8 @@ export interface ShimProxyOptions {
   output?: Writable;
   errorOutput?: Writable;
   approvalPolicies?: RemoteApprovalPolicyTracker;
+  remoteToolCalls?: RemoteToolCallCoordinator;
+  remoteToolPriority?: number;
   observeApprovalPolicy?: boolean;
   rewriteClientMessages?: boolean;
   spawnCodex?: (
@@ -101,6 +103,111 @@ interface PendingApproval {
   timeout: NodeJS.Timeout;
 }
 
+interface CoordinatedRemoteToolCall {
+  fingerprint: string;
+  operation: () => Promise<unknown>;
+  priority: number;
+  result: Promise<unknown>;
+  started: boolean;
+  timer?: NodeJS.Timeout;
+  resolve: (result: unknown) => void;
+  reject: (error: unknown) => void;
+}
+
+const REMOTE_TOOL_PRIMARY_GRACE_MS = 25;
+const REMOTE_TOOL_RESULT_RETENTION_MS = 1_000;
+
+export class RemoteToolCallCoordinator {
+  readonly #calls = new Map<string, CoordinatedRemoteToolCall>();
+
+  async run(
+    request: RpcRequest,
+    priority: number,
+    operation: () => Promise<unknown>,
+  ): Promise<unknown> {
+    if (
+      !isRecord(request.params) ||
+      typeof request.params.threadId !== "string" ||
+      typeof request.params.turnId !== "string" ||
+      typeof request.params.callId !== "string"
+    ) {
+      throw new TypeError("Remote tool call is missing thread, turn, or item identity");
+    }
+    const key = [
+      request.params.threadId,
+      request.params.turnId,
+      request.params.callId,
+    ].join("\u0000");
+    const fingerprint = JSON.stringify(request.params);
+    const existing = this.#calls.get(key);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) {
+        throw new TypeError("Remote tool call identity was reused with different parameters");
+      }
+      if (!existing.started && priority < existing.priority) {
+        existing.priority = priority;
+        existing.operation = operation;
+        this.#start(existing);
+      }
+      return await existing.result;
+    }
+
+    let resolveResult: (result: unknown) => void = () => undefined;
+    let rejectResult: (error: unknown) => void = () => undefined;
+    const result = new Promise<unknown>((resolve, reject) => {
+      resolveResult = resolve;
+      rejectResult = reject;
+    });
+    const coordinated: CoordinatedRemoteToolCall = {
+      fingerprint,
+      operation,
+      priority,
+      result,
+      started: false,
+      resolve: resolveResult,
+      reject: rejectResult,
+    };
+    this.#calls.set(key, coordinated);
+    void result.then(
+      () => this.#scheduleDelete(key, coordinated),
+      () => this.#scheduleDelete(key, coordinated),
+    );
+    if (priority <= 0) {
+      this.#start(coordinated);
+    } else {
+      coordinated.timer = setTimeout(
+        () => this.#start(coordinated),
+        REMOTE_TOOL_PRIMARY_GRACE_MS,
+      );
+      coordinated.timer.unref();
+    }
+    return await result;
+  }
+
+  #start(call: CoordinatedRemoteToolCall): void {
+    if (call.started) {
+      return;
+    }
+    call.started = true;
+    if (call.timer) {
+      clearTimeout(call.timer);
+      call.timer = undefined;
+    }
+    void Promise.resolve()
+      .then(call.operation)
+      .then(call.resolve, call.reject);
+  }
+
+  #scheduleDelete(key: string, call: CoordinatedRemoteToolCall): void {
+    const timer = setTimeout(() => {
+      if (this.#calls.get(key) === call) {
+        this.#calls.delete(key);
+      }
+    }, REMOTE_TOOL_RESULT_RETENTION_MS);
+    timer.unref();
+  }
+}
+
 export function isUnknownServerRequest(request: RpcRequest): boolean {
   return !KNOWN_SERVER_REQUESTS.has(request.method);
 }
@@ -111,6 +218,7 @@ export class ShimProxy {
   readonly #executor: OpenSshExecutor | null;
   readonly #router: DynamicToolRouter | null;
   readonly #remoteApprovalPolicies: RemoteApprovalPolicyTracker;
+  readonly #remoteToolCalls: RemoteToolCallCoordinator;
   readonly #pendingApprovals = new Map<RpcId, PendingApproval>();
   #child: ChildProcessWithoutNullStreams | null = null;
 
@@ -119,6 +227,7 @@ export class ShimProxy {
     this.#audit = new AuditLog(options.auditPath);
     this.#remoteApprovalPolicies =
       options.approvalPolicies ?? new RemoteApprovalPolicyTracker();
+    this.#remoteToolCalls = options.remoteToolCalls ?? new RemoteToolCallCoordinator();
     this.#executor = options.config
       ? options.config.connectionMode === "vscode-remote"
         ? new VsCodeRemoteExecutor(options.config)
@@ -294,54 +403,59 @@ export class ShimProxy {
         return;
       }
       try {
-        let context: RemoteExecContext | null = null;
-        if (isRemoteExecToolCall(message)) {
-          context = this.#remoteExecContext(message);
-          const requiresApproval = this.#remoteApprovalPolicies.requiresApproval(
-            context.threadId,
-          );
-          if (
-            requiresApproval &&
-            !(await this.#requestRemoteCommandApproval(context, writeClient))
-          ) {
-            const result = await this.#router.decline(
-              message.id,
-              message.params,
-              "Remote command execution was declined by the user",
-            );
-            writeServer({ id: message.id, result });
-            return;
-          }
-          if (!requiresApproval) {
-            await this.#audit.write({
-              requestId: context.callId,
-              hostId: this.#options.config?.host,
-              workspaceRoot: this.#options.config?.workspaceRoot,
-              remoteCwd: context.cwd,
-              operation: "remote_exec.approval",
-              outcome: "succeeded",
-              details: {
-                automatic: true,
-                permissionMode: "full-access",
-              },
-            });
-          }
-        }
-        const result = await this.#router.handle(message.id, message.params, {
-          onOutput: context
-            ? (delta) => {
-                writeClient({
-                  method: "item/commandExecution/outputDelta",
-                  params: {
-                    delta,
-                    itemId: context.callId,
-                    threadId: context.threadId,
-                    turnId: context.turnId,
+        const result = await this.#remoteToolCalls.run(
+          message,
+          this.#options.remoteToolPriority ?? 0,
+          async () => {
+            let context: RemoteExecContext | null = null;
+            if (isRemoteExecToolCall(message)) {
+              context = this.#remoteExecContext(message);
+              const requiresApproval = this.#remoteApprovalPolicies.requiresApproval(
+                context.threadId,
+              );
+              if (
+                requiresApproval &&
+                !(await this.#requestRemoteCommandApproval(context, writeClient))
+              ) {
+                return await this.#router!.decline(
+                  message.id,
+                  message.params,
+                  "Remote command execution was declined by the user",
+                );
+              }
+              if (!requiresApproval) {
+                await this.#audit.write({
+                  requestId: context.callId,
+                  hostId: this.#options.config?.host,
+                  workspaceRoot: this.#options.config?.workspaceRoot,
+                  remoteCwd: context.cwd,
+                  operation: "remote_exec.approval",
+                  outcome: "succeeded",
+                  details: {
+                    automatic: true,
+                    permissionMode: "full-access",
                   },
                 });
               }
-            : undefined,
-        });
+            }
+
+            return await this.#router!.handle(message.id, message.params, {
+              onOutput: context
+                ? (delta) => {
+                    writeClient({
+                      method: "item/commandExecution/outputDelta",
+                      params: {
+                        delta,
+                        itemId: context.callId,
+                        threadId: context.threadId,
+                        turnId: context.turnId,
+                      },
+                    });
+                  }
+                : undefined,
+            });
+          },
+        );
         writeServer({ id: message.id, result });
       } catch (error) {
         writeServer({

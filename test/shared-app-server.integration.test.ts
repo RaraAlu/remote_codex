@@ -54,6 +54,7 @@ function fakeWebSocketAppServer(
     let activeTurnId = null;
     let turnNumber = 0;
     const broadcastNotifications = process.env.FAKE_BROADCAST_NOTIFICATIONS === "1";
+    const broadcastServerRequests = process.env.FAKE_BROADCAST_SERVER_REQUESTS === "1";
     const notify = (origin, message) => {
       const raw = JSON.stringify(message);
       if (!broadcastNotifications) {
@@ -127,7 +128,7 @@ function fakeWebSocketAppServer(
               delta: "streamed",
             },
           });
-          socket.send(JSON.stringify({
+          const request = {
             id: "remote-tool-request",
             method: "item/tool/call",
             params: {
@@ -137,7 +138,15 @@ function fakeWebSocketAppServer(
               tool: "remote_exec",
               arguments: { argv: ["printf", "hello"] },
             },
-          }));
+          };
+          const rawRequest = JSON.stringify(request);
+          if (broadcastServerRequests) {
+            for (const client of server.clients) {
+              if (client.readyState === 1) client.send(rawRequest);
+            }
+          } else {
+            socket.send(rawRequest);
+          }
           return;
         }
         if (message.method === "turn/steer") {
@@ -178,7 +187,12 @@ function fakeWebSocketAppServer(
     env: {
       ...process.env,
       FAKE_CODEX_ARGS: JSON.stringify(args),
-      FAKE_BROADCAST_NOTIFICATIONS: command.includes("broadcast") ? "1" : "0",
+      FAKE_BROADCAST_NOTIFICATIONS: command.includes("broadcast-notifications")
+        ? "1"
+        : "0",
+      FAKE_BROADCAST_SERVER_REQUESTS: command.includes("broadcast-requests")
+        ? "1"
+        : "0",
     },
     stdio: "pipe",
   });
@@ -207,7 +221,10 @@ async function readDescriptor(path: string): Promise<ExternalCliSessionDescripto
   }
 }
 
-function collectJsonLines(stream: PassThrough): Array<Record<string, unknown>> {
+function collectJsonLines(
+  stream: PassThrough,
+  onMessage?: (message: Record<string, unknown>) => void,
+): Array<Record<string, unknown>> {
   const messages: Array<Record<string, unknown>> = [];
   let buffer = "";
   stream.setEncoding("utf8");
@@ -220,7 +237,9 @@ function collectJsonLines(stream: PassThrough): Array<Record<string, unknown>> {
       }
       const line = buffer.slice(0, newline);
       buffer = buffer.slice(newline + 1);
-      messages.push(JSON.parse(line) as Record<string, unknown>);
+      const message = JSON.parse(line) as Record<string, unknown>;
+      messages.push(message);
+      onMessage?.(message);
     }
   });
   return messages;
@@ -263,12 +282,21 @@ describe("SharedAppServer", () => {
     const input = new PassThrough();
     const output = new PassThrough();
     const errorOutput = new PassThrough();
-    const vscodeMessages = collectJsonLines(output);
+    const vscodeMessages = collectJsonLines(output, (message) => {
+      if (
+        message.method === "item/commandExecution/requestApproval" &&
+        typeof message.id === "string"
+      ) {
+        input.write(
+          `${JSON.stringify({ id: message.id, result: { decision: "accept" } })}\n`,
+        );
+      }
+    });
     let sshSpawns = 0;
     const server = new SharedAppServer({
       appServerArgs: ["app-server", "--listen", "stdio://"],
       auditPath: join(directory, "audit.jsonl"),
-      codexExecutable: "fake-codex-connection-local",
+      codexExecutable: "fake-codex-broadcast-requests",
       config: parseBridgeConfig({
         host: "g1_1",
         workspaceRoot: "/remote/workspace",
@@ -459,6 +487,7 @@ describe("SharedAppServer", () => {
       id: 13,
       result: { turnId: "turn-shared" },
     });
+    await waitFor(() => (sshSpawns === 2 ? true : undefined));
     expect(sshSpawns).toBe(2);
     expect(vscodeMessages).toContainEqual({
       method: "bridge/fakeSteered",
@@ -555,6 +584,11 @@ describe("SharedAppServer", () => {
         );
       }),
     ).toBe(true);
+    expect(
+      auditEntries.filter(
+        (entry) => entry.operation === "remote_exec" && entry.outcome === "started",
+      ),
+    ).toHaveLength(3);
   });
 
   it("honors full-access for a thread started by an external CLI client", async () => {
@@ -760,7 +794,7 @@ describe("SharedAppServer", () => {
       appServerArgs: ["app-server", "--listen", "stdio://"],
       appServerCwd: directory,
       auditPath: join(directory, "audit.jsonl"),
-      codexExecutable: "fake-codex-broadcast",
+      codexExecutable: "fake-codex-broadcast-notifications",
       config: null,
       controlDir: directory,
       input,

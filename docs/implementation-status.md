@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run check` 为 37 个测试文件通过、1 个真实远端条件文件跳过，157 项通过、5 项
+`npm run check` 为 37 个测试文件通过、1 个真实远端条件文件跳过，160 项通过、5 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -32,8 +32,9 @@
 结构化差异审查确认服务端请求仍为 11 项，动态工具以及 Bridge 使用的线程/turn 顶层
 字段不变；客户端新增三个读取请求。定向协议测试、真实内置 app-server Shim 冒烟、
 完整自动化、审计和 Linux x64 候选包已经通过。新 VSIX 安装后的普通本地窗口实机
-回归已通过；后续 `0.3.3` 已完成限定范围的 Remote SSH 外部 CLI 实机回归，官方面板
-发起的新任务和 Windows x64 仍待补测。
+回归已通过；后续 `0.3.3` 已完成限定范围的 Remote SSH 外部 CLI 实机回归，
+`0.3.5` 已完成官方面板新任务、完整固定探针和多上游单次执行实机回归。Windows x64
+仍待补测。
 
 当前仍是候选状态：用户已重载活动 Remote SSH 窗口，进程和运行时指针确认目标窗口只
 使用官方插件内置 Codex，Bridge 对规范化远端根进入 `ready`，已有会话恢复成功。
@@ -42,9 +43,9 @@
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知
 本地客户端请求和五类 Core 本地审批，官方 app-server 实际激活
 `codex-remote-bridge` 权限配置，活动
-transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、官方 UI 新建/恢复、
-附件、当前文件和本地窗口共享附着仍待补测。Linux 构建无法生成 Windows SEA Shim，
-双平台产物收集仍为待实施项。
+transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、官方 UI 恢复、附件、
+当前文件和本地窗口共享附着仍待补测。`0.3.5` 已用校验过的官方 Windows Node 归档
+完成双平台构包，但 Windows 原生构建和实机仍待补测。
 
 ## 阶段 A：协议与运行位置探针
 
@@ -109,7 +110,7 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 审批绑定 | 人工审批仅匹配一个待处理调用 ID；完全访问的自动放行单独审计 |
 | 运行中取消 | 未实现 |
 | 哈希保护写入和补丁 | 未实现 |
-| 断线结果确认和幂等 | 未实现 |
+| 断线结果确认和幂等 | 部分实现；同一 app-server 广播的同一远端工具请求只执行一次，跨重连账本仍未实现 |
 | Core 内置本地工具硬阻断 | 部分实施；专用权限配置、25 个客户端请求和五类本地审批已失败关闭，真实模型专用工具诱饵待补测 |
 
 阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行；写操作、取消、断线恢复
@@ -118,8 +119,9 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 ## 当前优先阶段：外部 Codex CLI 介入
 
 状态：源码与 Linux x64 自动化候选已完成；显式 `codex-vscode` 和普通 `codex` 自动
-接管的本地窗口均已通过，`0.3.3` 也已完成真实 Remote SSH 外部 CLI 多轮、工具打印、
-权限继承和 VS Code 投影；Windows、官方面板发起方向和完整生命周期仍待补测。当前
+接管的本地窗口均已通过，`0.3.5` 也已完成真实 Remote SSH 官方任务、外部 CLI 多轮、
+工具打印、权限继承、VS Code 投影和广播请求单次执行；Windows 和完整生命周期仍待
+补测。当前
 本地 Codex CLI 对话
 通过 Bridge
 持久注册的 stdio MCP 获得对话列表、读取、介入和取消工具；MCP 通过受控网关接入官方
@@ -223,6 +225,14 @@ thread；外部 CLI 创建的会话会把 `permissions=full-access` 和
 `commandExecution` 为 `status=failed`、`exitCode=37`，证明修复后的结构化投影已进入
 共享 app-server 广播。官方面板按钮发起和 Windows x64 实机仍待补测。
 
+`0.3.5` 随后修复了广播的执行语义：真实 `0.3.4` app-server 在官方 stdio 与外部 CLI
+同时连接时，把 25 个逻辑固定探针各执行了两次。共享协调器现按 thread、turn 和 call
+身份复用同一执行结果，并拒绝身份相同但参数不同的请求。用户手动重载后从官方面板
+创建的新任务成功返回远端 `pwd`；并发外部介入和 5 轮共 25 个固定探针均只记录一个
+执行连接，重复 `requestId` 为 0。定向广播测试连续 5 轮、完整 160 项自动化和双平台
+构包通过。当前旧 CLI 仍按设计使用其启动时的 `0.3.4 external-mcp`，其父进程关系已
+确认，不属于孤儿进程；设置恢复、CLI 退出后清理和 Windows 实机仍待处理。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -246,7 +256,9 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 双向实时同 thread 候选见
 `docs/acceptance/2026-07-23-release-0.3.1-bidirectional-cli.md`；Linux Remote SSH
 外部 CLI 实机见
-`docs/acceptance/2026-07-23-release-0.3.3-remote-cli-acceptance.md`。
+`docs/acceptance/2026-07-23-release-0.3.3-remote-cli-acceptance.md`；多上游远端工具
+单次执行见
+`docs/acceptance/2026-07-23-release-0.3.5-single-tool-execution.md`。
 
 ## 本地 MCP 边界
 

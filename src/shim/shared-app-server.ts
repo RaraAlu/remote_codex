@@ -20,7 +20,11 @@ import {
 } from "../core/locations.js";
 import type { SpawnProcess } from "../core/ssh-executor.js";
 import type { BridgeConfig } from "../core/types.js";
-import { ShimProxy, type RpcMessageWriter } from "./proxy.js";
+import {
+  RemoteToolCallCoordinator,
+  ShimProxy,
+  type RpcMessageWriter,
+} from "./proxy.js";
 import { RemoteApprovalPolicyTracker } from "./remote-approval-policy.js";
 import {
   isRecord,
@@ -173,6 +177,7 @@ export class SharedAppServer {
   readonly #options: SharedAppServerOptions;
   readonly #audit: AuditLog;
   readonly #approvalPolicies = new RemoteApprovalPolicyTracker();
+  readonly #remoteToolCalls = new RemoteToolCallCoordinator();
   readonly #sessionPath = bridgeExternalCliSessionPath();
   readonly #externalTokenPath = bridgeExternalCliTokenPath();
   readonly #upstreamTokenPath = bridgeUpstreamTokenPath();
@@ -320,7 +325,7 @@ export class SharedAppServer {
         upstream.close();
         return;
       }
-      session = this.#createSession(true);
+      session = this.#createSession(true, 1);
       const writeUpstream = webSocketWriter(upstream);
       const writeExternal = webSocketWriter(socket);
       this.#externalWriters.set(clientId, writeExternal);
@@ -409,7 +414,7 @@ export class SharedAppServer {
     output: Writable,
     errorOutput: Writable,
   ): Promise<number> {
-    const session = this.#createSession(true);
+    const session = this.#createSession(true, 0);
     const pendingThreadRequests = new Map<RpcId, string>();
     const writeUpstream = webSocketWriter(upstream);
     const writeClient = streamWriter(output);
@@ -476,7 +481,7 @@ export class SharedAppServer {
     });
   }
 
-  #createSession(observeApprovalPolicy: boolean): ShimProxy {
+  #createSession(observeApprovalPolicy: boolean, remoteToolPriority: number): ShimProxy {
     return new ShimProxy({
       appServerArgs: this.#options.appServerArgs,
       auditPath: this.#options.auditPath,
@@ -484,6 +489,8 @@ export class SharedAppServer {
       config: this.#options.config,
       controlDir: this.#options.controlDir,
       approvalPolicies: this.#approvalPolicies,
+      remoteToolCalls: this.#remoteToolCalls,
+      remoteToolPriority,
       observeApprovalPolicy,
       rewriteClientMessages: this.#options.config !== null,
       spawnSsh: this.#options.spawnSsh,

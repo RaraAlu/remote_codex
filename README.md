@@ -218,8 +218,9 @@ turn、取消等稳定工具。Bridge 只负责本机鉴权、请求改写、权
   纳入 app-server 运行时选择。
 - [x] MCP 支持列出和读取当前反代对话，并向指定 thread 自动执行新 turn 或
   `turn/steer`、执行 `turn/interrupt`；Bridge 将各独立上游收到的无 ID 流式通知去重后
-  广播给 VS Code 与所有外部客户端，带 ID 的响应和服务端请求仍只返回原连接，不通过
-  修改 rollout 文件伪造对话。
+  广播给 VS Code 与所有外部客户端，带 ID 的响应返回原连接；官方 app-server 广播的
+  同一动态工具请求按 thread、turn 和 call 身份协调为单次执行，不通过修改 rollout
+  文件伪造对话。
 - [x] 提供长期自维护的本地附着入口：无参数 `codex` 自动按当前工作目录选择
   唯一活动 VS Code thread，`codex-vscode` 保留显式选择能力，并安全执行
   `codex resume <thread> --remote ...`；令牌只通过子进程环境传递，不进入命令行、
@@ -238,8 +239,8 @@ turn、取消等稳定工具。Bridge 只负责本机鉴权、请求改写、权
 - [ ] 完成双客户端诱饵、并发、恢复、权限撤销、敏感信息和 Linux/Windows 实机验收，
   再重新执行完整 P0 发布门禁。
 - [ ] 完成真实 Remote SSH 剩余闭环：CLI 新建同步 thread、`remote_exec`、远程读取、
-  CodeGraph、权限继承、VS Code UI 投影和审计已通过；官方 UI 发起输入、取消、断线、
-  附件/当前文件和完整生命周期仍待补测。
+  CodeGraph、权限继承、VS Code UI 投影和审计已通过；官方 UI 新任务和固定远端探针
+  已通过，取消、断线、附件/当前文件和完整生命周期仍待补测。
 
 本批次已经按“所有待实现功能的实施前置流程”重新汇总清单并完成能力探查；MCP 控制
 模式见 `docs/capability-boundary-plan.md` 的阶段 2D，双向实时同 thread 模式见阶段
@@ -327,8 +328,8 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前功能候选为
-`docs/acceptance/2026-07-23-release-0.3.1-bidirectional-cli.md`；在真实 Remote SSH
-双向对话闭环通过前，它不会替代已验收基线。
+`docs/acceptance/2026-07-23-release-0.3.5-single-tool-execution.md`；在完整生命周期
+和双平台实机闭环通过前，它不会替代已验收基线。
 
 Windows x64 和 Linux x64 必须分别填写运行结果。`npm run package:all` 能证明两个目标
 VSIX 已生成并完成平台内容隔离，但不能用 Windows 构建机上的 Linux 包替代 Linux 本地
