@@ -4,18 +4,23 @@ import type { OperationSnapshot } from "./operation-ledger.js";
 export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
 export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
-export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 6;
-export const REMOTE_EXECUTOR_VERSION = "0.2.11";
+export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 7;
+export const REMOTE_EXECUTOR_VERSION = "0.2.12";
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
 export const CONTROLLER_WORKSPACE_OPERATIONS = [
+  "localApplyPatch",
   "localCanonicalPath",
+  "localCreateDirectory",
+  "localDeletePath",
   "localGitStatus",
   "localListDirectory",
   "localListTree",
   "localReadFile",
+  "localRenamePath",
   "localSearch",
+  "localWriteFile",
 ] as const;
 
 export type ControllerWorkspaceOperation =
@@ -25,6 +30,7 @@ export const REMOTE_EXECUTOR_CAPABILITIES = [
   "canonicalPath",
   "cancel",
   "execute",
+  "executeStdin",
   "listDirectory",
   "listTree",
   "probe",

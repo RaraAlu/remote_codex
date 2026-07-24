@@ -98,13 +98,17 @@ describe("VsCodeRemoteExecutor", () => {
       executor.execute(["printf", "done"], {
         idempotencyKey: "stable-operation",
         onStdout: (chunk) => streamed.push(chunk),
+        stdin: Buffer.from("input"),
       }),
     ).resolves.toMatchObject({ exitCode: 0, stdout: "done" });
     expect(streamed).toEqual(["streamed"]);
     expect(observed).toMatchObject({
       hostId: "remote-host",
       operation: "execute",
-      params: { idempotencyKey: "stable-operation" },
+      params: {
+        idempotencyKey: "stable-operation",
+        options: { stdinBase64: "aW5wdXQ=" },
+      },
       token: "0123456789abcdef0123456789abcdef",
       workspaceRoot: "/workspace",
     });

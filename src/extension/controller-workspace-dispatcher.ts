@@ -1,10 +1,16 @@
+import { createHash } from "node:crypto";
 import { BridgeError } from "../core/errors.js";
+import {
+  OperationLedger,
+  type IdempotencyOutcome,
+} from "../core/operation-ledger.js";
 import type { BridgeConfig, WorkspaceRootConfig } from "../core/types.js";
 import type { ControllerWorkspaceRequest } from "../core/vscode-transport.js";
 import { LocalWorkspaceExecutor } from "./local-workspace-executor.js";
 
 export class ControllerWorkspaceDispatcher {
   readonly #config: () => BridgeConfig | null;
+  readonly #mutationLedger = new OperationLedger();
   readonly #resolveAuthorizedRoot: (
     rootId: string,
   ) => WorkspaceRootConfig | undefined;
@@ -73,14 +79,89 @@ export class ControllerWorkspaceDispatcher {
       }
       return value;
     };
+    const optionalString = (key: string): string | undefined => {
+      const value = request.params[key];
+      if (value === undefined) {
+        return undefined;
+      }
+      if (typeof value !== "string") {
+        throw new BridgeError("PROTOCOL_MISMATCH", `params.${key} must be a string`);
+      }
+      return value;
+    };
+    const mutationOptions = () => ({
+      ...(optionalString("expectedHash") === undefined
+        ? {}
+        : { expectedHash: optionalString("expectedHash") }),
+      ...(optionalString("idempotencyKey") === undefined
+        ? {}
+        : { idempotencyKey: optionalString("idempotencyKey") }),
+    });
 
     switch (request.operation) {
+      case "localApplyPatch": {
+        const replacements = request.params.replacements;
+        if (
+          !Array.isArray(replacements) ||
+          !replacements.every(
+            (entry) =>
+              entry !== null &&
+              typeof entry === "object" &&
+              !Array.isArray(entry) &&
+              typeof (entry as Record<string, unknown>).oldText === "string" &&
+              typeof (entry as Record<string, unknown>).newText === "string",
+          )
+        ) {
+          throw new BridgeError(
+            "PROTOCOL_MISMATCH",
+            "params.replacements must be text replacement objects",
+          );
+        }
+        return await this.#runMutation(
+          request,
+          async () =>
+            await executor.applyPatch(
+              requiredString("path"),
+              replacements as Array<{ oldText: string; newText: string }>,
+              mutationOptions(),
+            ),
+        );
+      }
       case "localCanonicalPath":
         return await executor.canonicalPath(requiredString("path"));
+      case "localCreateDirectory":
+        return await this.#runMutation(
+          request,
+          async () =>
+            await executor.createDirectory(requiredString("path"), {
+              ...(optionalString("idempotencyKey") === undefined
+                ? {}
+                : { idempotencyKey: optionalString("idempotencyKey") }),
+            }),
+        );
+      case "localDeletePath":
+        return await this.#runMutation(
+          request,
+          async () =>
+            await executor.deletePath(
+              requiredString("path"),
+              mutationOptions(),
+            ),
+        );
       case "localReadFile":
         return await executor.readFile(
           requiredString("path"),
           numberValue("limitBytes", request.policy.maxOutputBytes / 2),
+        );
+      case "localRenamePath":
+        return await this.#runMutation(
+          request,
+          async () =>
+            await executor.renamePath(
+              requiredString("path"),
+              requiredString("destinationPath"),
+              mutationOptions(),
+            ),
         );
       case "localListDirectory":
         return await executor.listDirectory(requiredString("path"));
@@ -114,6 +195,76 @@ export class ControllerWorkspaceDispatcher {
       }
       case "localGitStatus":
         return await executor.gitStatus();
+      case "localWriteFile":
+        return await this.#runMutation(
+          request,
+          async () =>
+            await executor.writeFile(
+              requiredString("path"),
+              requiredString("contentBase64"),
+              mutationOptions(),
+            ),
+        );
     }
   }
+
+  async #runMutation(
+    request: ControllerWorkspaceRequest,
+    operation: () => Promise<unknown>,
+  ): Promise<unknown> {
+    const idempotencyKey = request.params.idempotencyKey;
+    if (
+      typeof idempotencyKey !== "string" ||
+      idempotencyKey.length < 1 ||
+      idempotencyKey.length > 256 ||
+      idempotencyKey.includes("\0")
+    ) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "params.idempotencyKey must contain 1 to 256 NUL-free characters",
+      );
+    }
+    const { idempotencyKey: _ignored, ...params } = request.params;
+    const fingerprint = createHash("sha256")
+      .update(
+        JSON.stringify(
+          canonicalValue({
+            operation: request.operation,
+            params,
+            policy: request.policy,
+          }),
+        ),
+      )
+      .digest("hex");
+    const handle = this.#mutationLedger.start(
+      `${request.params.rootId}\0${idempotencyKey}`,
+      request.id,
+      fingerprint,
+      async () => await operation(),
+    );
+    return resultWithIdempotencyOutcome(await handle.result, handle.outcome);
+  }
+}
+
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalValue);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, canonicalValue(entry)]),
+    );
+  }
+  return value;
+}
+
+function resultWithIdempotencyOutcome(
+  result: unknown,
+  outcome: IdempotencyOutcome,
+): unknown {
+  return result && typeof result === "object" && !Array.isArray(result)
+    ? { ...(result as Record<string, unknown>), idempotencyOutcome: outcome }
+    : { value: result, idempotencyOutcome: outcome };
 }

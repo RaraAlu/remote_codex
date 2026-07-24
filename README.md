@@ -108,7 +108,9 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 - [x] 建立适用于全部远端 stdio MCP 的启动适配注册表；通用传输只携带受控适配器
   标识，不复制本机环境或凭据，由远端启动侧解析已审核的参数与环境变化。CodeGraph
   全工具暴露只作为首个适配器和验收样例，不得写成传输层特例。
-- 同一任务受控读写本地授权目录和远程工作区，详见下方双端读写计划。
+- [x] 同一任务通过显式目标和根 ID 受控读写本地授权目录与远程工作区；写入、精确
+  补丁、目录创建、重命名和删除均已接入大小限制、哈希冲突、原子替换、审批、审计和
+  幂等自动化，真实候选窗口统一待补测。
 - [x] 运行中命令取消已接通 turn、Controller transport、Remote Executor 和 POSIX
   进程组，并通过自动化验证；真实 Remote SSH 候选窗口、Windows 进程树和取消确认
   耗时待补测。
@@ -119,7 +121,7 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 - [ ] 对 Codex Core 内置本地 Shell 和文件工具执行前硬阻断。阶段 2C 已让 Remote
   Bridge 会话强制使用本地拒绝权限配置，并在 Shim 边界拒绝 25 个已知本地客户端请求；
   五类 Core 本地审批请求也会直接失败关闭。真实模型对本地诱饵的专用工具负测仍待
-  补测，完成前不得开放双端写入。
+  补测；`0.3.19` 写工具只作为自动化候选，不据此宣称 Core 强制边界闭环。
 - 为远程文件提供可打开的资源 URI、Diff 和文件跳转。
 - 建立 Windows/Linux 原生构建与受控产物收集流程，避免单端打包删除另一端产物。
 - 在目标 Remote SSH 主机和 MimicLite 仓库上的完整 P0 验收。
@@ -355,7 +357,7 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前功能候选为
-`docs/acceptance/2026-07-24-release-0.3.18-core-risk-namespaces.md`；在候选包安装、
+`docs/acceptance/2026-07-24-release-0.3.19-dual-write.md`；在候选包安装、
 完整生命周期
 和双平台实机闭环通过前，它不会替代已验收基线。
 

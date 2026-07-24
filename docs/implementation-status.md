@@ -1,6 +1,6 @@
 # 实施状态
 
-更新日期：2026-07-23
+更新日期：2026-07-24
 
 ## 能力边界复核
 
@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 50 个测试文件通过、1 个真实远端条件文件跳过，195 项通过、6 项
+`npm run test` 为 51 个测试文件通过、1 个真实远端条件文件跳过，200 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -114,14 +114,17 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 权限模式继承 | 已按线程映射 `full-access`/`approvalPolicy=never`，其余模式失败关闭 |
 | 审批绑定 | 人工审批仅匹配一个待处理调用 ID；完全访问的自动放行单独审计 |
 | 运行中取消 | `0.3.15` 已把 `turn/interrupt` 绑定到活动 Bridge 调用；VS Code Remote 通道显式发送 `cancel`，Remote Executor 按 operation ID 中止 POSIX 进程组；自动化通过，真实 Remote SSH 与 Windows 待补测 |
-| 哈希保护写入和补丁 | 未实现 |
+| 哈希保护写入和补丁 | `0.3.19` 已实现双端原子整文件写入和精确 UTF-8 补丁；覆盖、补丁、文件重命名和文件删除要求最新 SHA-256，冲突返回 `FILE_CONFLICT` |
+| 目录与路径变更 | `0.3.19` 已实现单级目录创建、不覆盖重命名、文件或空目录删除；递归删除不开放 |
+| 写入审批与审计 | 覆盖、补丁、重命名和删除在非完全访问模式进入绑定调用 ID 的官方审批；新建文件/目录为有界自动操作；`full-access` 自动放行，审计不含正文 |
+| 写入幂等与上限 | 默认远端复用 Executor 账本，本地 Controller 有独立有界账本；文件正文最多 1 MiB，经 stdin 传输，不进入 argv |
 | 断线结果确认和幂等 | `0.3.17` 已在 transport 中断后用原幂等键从新 socket 查询账本；completed 返回原结果，cancelled/failed 保留终态，running 有界轮询，unknown 或查询不可达返回 `RESULT_UNKNOWN` 且不重放；Extension Host 重启持久化未实现 |
 | Core 内置本地工具硬阻断 | 自动化边界已实施；专用权限配置、25 个已知客户端请求、五类本地审批及未来风险命名空间均失败关闭，真实模型专用工具诱饵待补测 |
 
 阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行，0.3.15 完成默认
 VS Code Remote 链路的运行中取消自动化闭环，0.3.16 增加当前 Executor 代次内的有界
-幂等账本与结果查询，0.3.17 增加断线后的查询恢复；写操作、本地执行硬阻断和真实
-生命周期验收完成前，不得用于无人值守的有副作用任务。
+幂等账本与结果查询，0.3.17 增加断线后的查询恢复，0.3.19 交付双端写入自动化；
+本地 Core 真实诱饵、真实写入和生命周期验收完成前，不得用于无人值守的有副作用任务。
 
 ## 当前优先阶段：外部 Codex CLI 介入
 
@@ -329,6 +332,14 @@ cancelled/failed 还原远端错误；running 在三秒有界窗口内轮询；u
 本地 app-server；审计区分已知方法和前向未知方法。真实模型是否存在完全不经过客户端
 请求或审批通道的专用工具路径，仍按统一人工清单执行诱饵负测。
 
+`0.3.19` 完成阶段 5 的双端安全写入自动化。统一工作区执行器新增整文件写入、精确
+UTF-8 补丁、目录创建、非覆盖重命名和文件或空目录删除；本地授权根经 Controller
+执行，远端主根经 Remote Executor 或显式 OpenSSH 回退执行。文件覆盖和破坏性变更
+绑定最近读取的 SHA-256，写入限制为 1 MiB 并使用同目录原子替换；正文在默认通道中
+通过 stdin 传输。重要操作沿用 thread 权限审批，`full-access` 自动放行并审计。
+Executor 增加 `executeStdin` 能力，升到 `0.2.12`、诊断协议号 7；真实双端写入和
+Windows 运行仍按统一人工清单补测。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -365,7 +376,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-23-release-0.3.15-command-cancellation.md`；幂等账本见
 `docs/acceptance/2026-07-23-release-0.3.16-idempotency-ledger.md`；断线查询恢复见
 `docs/acceptance/2026-07-23-release-0.3.17-disconnect-recovery.md`；Core 风险命名空间
-阻断见 `docs/acceptance/2026-07-24-release-0.3.18-core-risk-namespaces.md`。
+阻断见 `docs/acceptance/2026-07-24-release-0.3.18-core-risk-namespaces.md`；双端安全
+写入见 `docs/acceptance/2026-07-24-release-0.3.19-dual-write.md`。
 
 ## 本地 MCP 边界
 

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -113,6 +113,76 @@ describe("ControllerWorkspaceDispatcher", () => {
       exitCode: 0,
       truncated: false,
     });
+
+    const read = result as { hash: string };
+    const writeRequest = request("localWriteFile", {
+      contentBase64: Buffer.from("controller local write\n").toString("base64"),
+      expectedHash: read.hash,
+      idempotencyKey: "local-write",
+      path: "notes.md",
+    });
+    await expect(dispatcher.execute(writeRequest)).resolves.toMatchObject({
+      operation: "write",
+      bytesWritten: 23,
+      idempotencyOutcome: "executed",
+    });
+    await expect(dispatcher.execute(writeRequest)).resolves.toMatchObject({
+      operation: "write",
+      bytesWritten: 23,
+      idempotencyOutcome: "replayed",
+    });
+    const written = (await dispatcher.execute(
+      request("localReadFile", { path: "notes.md" }),
+    )) as { hash: string };
+    await expect(
+      dispatcher.execute(
+        request("localApplyPatch", {
+          expectedHash: written.hash,
+          idempotencyKey: "local-patch",
+          path: "notes.md",
+          replacements: [{ oldText: "write", newText: "patched" }],
+        }),
+      ),
+    ).resolves.toMatchObject({
+      operation: "patch",
+      bytesWritten: 25,
+    });
+    expect(await readFile(join(rootPath, "notes.md"), "utf8")).toBe(
+      "controller local patched\n",
+    );
+    await dispatcher.execute(
+      request("localCreateDirectory", {
+        idempotencyKey: "local-mkdir",
+        path: "archive",
+      }),
+    );
+    const patched = (await dispatcher.execute(
+      request("localReadFile", { path: "notes.md" }),
+    )) as { hash: string };
+    await dispatcher.execute(
+      request("localRenamePath", {
+        destinationPath: "archive/notes.md",
+        expectedHash: patched.hash,
+        idempotencyKey: "local-rename",
+        path: "notes.md",
+      }),
+    );
+    const renamed = (await dispatcher.execute(
+      request("localReadFile", { path: "archive/notes.md" }),
+    )) as { hash: string };
+    await dispatcher.execute(
+      request("localDeletePath", {
+        expectedHash: renamed.hash,
+        idempotencyKey: "local-delete-file",
+        path: "archive/notes.md",
+      }),
+    );
+    await dispatcher.execute(
+      request("localDeletePath", {
+        idempotencyKey: "local-delete-directory",
+        path: "archive",
+      }),
+    );
 
     authorizedRoot = undefined;
     await expect(

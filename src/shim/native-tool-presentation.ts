@@ -112,6 +112,51 @@ function commandPresentation(
   const path = displayPath(root, args.path);
 
   switch (normalizedTool) {
+    case "workspace_write_file": {
+      const command = workspaceCommand(root, "write", ["--", shellQuote(path)]);
+      return {
+        command,
+        commandActions: [{ type: "unknown", command }],
+        cwd: root.path,
+      };
+    }
+    case "workspace_apply_patch": {
+      const command = workspaceCommand(root, "patch", ["--", shellQuote(path)]);
+      return {
+        command,
+        commandActions: [{ type: "unknown", command }],
+        cwd: root.path,
+      };
+    }
+    case "workspace_create_directory": {
+      const command = workspaceCommand(root, "mkdir", ["--", shellQuote(path)]);
+      return {
+        command,
+        commandActions: [{ type: "unknown", command }],
+        cwd: root.path,
+      };
+    }
+    case "workspace_rename_path": {
+      const destination = displayPath(root, args.destinationPath);
+      const command = workspaceCommand(root, "rename", [
+        "--",
+        shellQuote(path),
+        shellQuote(destination),
+      ]);
+      return {
+        command,
+        commandActions: [{ type: "unknown", command }],
+        cwd: root.path,
+      };
+    }
+    case "workspace_delete_path": {
+      const command = workspaceCommand(root, "delete", ["--", shellQuote(path)]);
+      return {
+        command,
+        commandActions: [{ type: "unknown", command }],
+        cwd: root.path,
+      };
+    }
     case "workspace_read_file": {
       const command = workspaceCommand(root, "read", ["--", shellQuote(path)]);
       return {
@@ -252,6 +297,26 @@ function formatToolOutput(tool: string, item: Record<string, unknown>): string |
   }
 
   const data = result.data;
+  if (
+    (normalizedTool === "workspace_write_file" ||
+      normalizedTool === "workspace_apply_patch" ||
+      normalizedTool === "workspace_create_directory" ||
+      normalizedTool === "workspace_rename_path" ||
+      normalizedTool === "workspace_delete_path") &&
+    isRecord(data)
+  ) {
+    const operation =
+      typeof data.operation === "string" ? data.operation : normalizedTool;
+    const canonicalPath =
+      typeof data.destinationCanonicalPath === "string"
+        ? data.destinationCanonicalPath
+        : typeof data.canonicalPath === "string"
+          ? data.canonicalPath
+          : "";
+    const bytesWritten =
+      typeof data.bytesWritten === "number" ? ` (${data.bytesWritten} bytes)` : "";
+    return `${operation}: ${canonicalPath}${bytesWritten}`;
+  }
   if (normalizedTool === "workspace_read_file" && isRecord(data)) {
     return readableFileOutput(data);
   }

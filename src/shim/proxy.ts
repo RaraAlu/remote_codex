@@ -4,6 +4,7 @@ import {
   type SpawnOptionsWithoutStdio,
 } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { AuditLog } from "../core/audit-log.js";
@@ -11,7 +12,11 @@ import { normalizeRemotePath } from "../core/path-policy.js";
 import type { BridgeConfig } from "../core/types.js";
 import { OpenSshExecutor, type SpawnProcess } from "../core/ssh-executor.js";
 import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
-import { DynamicToolRouter, REMOTE_TOOL_NAMES } from "./dynamic-tools.js";
+import {
+  DynamicToolRouter,
+  REMOTE_TOOL_NAMES,
+  WORKSPACE_MUTATION_TOOL_NAMES,
+} from "./dynamic-tools.js";
 import {
   isBlockedLocalClientMethod,
   isBlockedLocalClientMessage,
@@ -91,6 +96,15 @@ function isRemoteExecToolCall(request: RpcRequest): boolean {
   );
 }
 
+function isWorkspaceMutationToolCall(request: RpcRequest): boolean {
+  return (
+    request.method === "item/tool/call" &&
+    isRecord(request.params) &&
+    typeof request.params.tool === "string" &&
+    WORKSPACE_MUTATION_TOOL_NAMES.has(request.params.tool)
+  );
+}
+
 export function remoteToolIdempotencyKey(request: RpcRequest): string {
   if (
     !isRecord(request.params) ||
@@ -115,6 +129,16 @@ interface RemoteExecContext {
   cwd: string;
   threadId: string;
   turnId: string;
+}
+
+interface WorkspaceMutationContext extends RemoteExecContext {
+  destinationPath?: string;
+  path: string;
+  requiresApproval: boolean;
+  rootId: string;
+  rootRole: "primary" | "secondary";
+  target: "local" | "remote";
+  tool: string;
 }
 
 interface PendingApproval {
@@ -486,10 +510,10 @@ export class ShimProxy {
           message,
           this.#options.remoteToolPriority ?? 0,
           async (signal) => {
-            let context: RemoteExecContext | null = null;
+            let execContext: RemoteExecContext | null = null;
             const idempotencyKey = remoteToolIdempotencyKey(message);
             if (isRemoteExecToolCall(message)) {
-              context = this.#remoteExecContext(message);
+              execContext = this.#remoteExecContext(message);
               if (signal.aborted) {
                 return await this.#router!.handle(message.id, message.params, {
                   idempotencyKey,
@@ -497,12 +521,12 @@ export class ShimProxy {
                 });
               }
               const requiresApproval = this.#remoteApprovalPolicies.requiresApproval(
-                context.threadId,
+                execContext.threadId,
               );
               if (
                 requiresApproval &&
                 !(await this.#requestRemoteCommandApproval(
-                  context,
+                  execContext,
                   writeClient,
                   signal,
                 ))
@@ -521,10 +545,10 @@ export class ShimProxy {
               }
               if (!requiresApproval) {
                 await this.#audit.write({
-                  requestId: context.callId,
+                  requestId: execContext.callId,
                   hostId: this.#options.config?.host,
                   workspaceRoot: this.#options.config?.workspaceRoot,
-                  remoteCwd: context.cwd,
+                  remoteCwd: execContext.cwd,
                   operation: "remote_exec.approval",
                   outcome: "succeeded",
                   details: {
@@ -533,20 +557,59 @@ export class ShimProxy {
                   },
                 });
               }
+            } else if (isWorkspaceMutationToolCall(message)) {
+              const context = this.#workspaceMutationContext(message);
+              if (signal.aborted) {
+                return await this.#router!.handle(message.id, message.params, {
+                  idempotencyKey,
+                  signal,
+                });
+              }
+              const permissionRequiresApproval =
+                this.#remoteApprovalPolicies.requiresApproval(context.threadId);
+              if (
+                context.requiresApproval &&
+                permissionRequiresApproval &&
+                !(await this.#requestWorkspaceMutationApproval(
+                  context,
+                  writeClient,
+                  signal,
+                ))
+              ) {
+                if (signal.aborted) {
+                  return await this.#router!.handle(message.id, message.params, {
+                    idempotencyKey,
+                    signal,
+                  });
+                }
+                return await this.#router!.decline(
+                  message.id,
+                  message.params,
+                  "Workspace mutation was declined by the user",
+                );
+              }
+              if (!context.requiresApproval || !permissionRequiresApproval) {
+                await this.#auditWorkspaceMutationApproval(context, {
+                  automatic: true,
+                  permissionMode: permissionRequiresApproval
+                    ? "bounded-create"
+                    : "full-access",
+                });
+              }
             }
 
             return await this.#router!.handle(message.id, message.params, {
               idempotencyKey,
               signal,
-              onOutput: context
+              onOutput: execContext
                 ? (delta) => {
                     writeClient({
                       method: "item/commandExecution/outputDelta",
                       params: {
                         delta,
-                        itemId: context.callId,
-                        threadId: context.threadId,
-                        turnId: context.turnId,
+                        itemId: execContext.callId,
+                        threadId: execContext.threadId,
+                        turnId: execContext.turnId,
                       },
                     });
                   }
@@ -613,10 +676,145 @@ export class ShimProxy {
     return context;
   }
 
+  #workspaceMutationContext(request: RpcRequest): WorkspaceMutationContext {
+    const config = this.#options.config;
+    if (!config || !isRecord(request.params)) {
+      throw new TypeError("Workspace mutation approval requires Bridge configuration");
+    }
+    const params = request.params;
+    if (
+      typeof params.callId !== "string" ||
+      typeof params.threadId !== "string" ||
+      typeof params.turnId !== "string" ||
+      typeof params.tool !== "string" ||
+      !WORKSPACE_MUTATION_TOOL_NAMES.has(params.tool) ||
+      !isRecord(params.arguments)
+    ) {
+      throw new TypeError(
+        "Workspace mutation call is missing identity, tool, or arguments",
+      );
+    }
+    const args = params.arguments;
+    if (typeof args.path !== "string") {
+      throw new TypeError("Workspace mutation path must be a string");
+    }
+    const target = args.target ?? "remote";
+    if (target !== "local" && target !== "remote") {
+      throw new TypeError("Workspace mutation target must be local or remote");
+    }
+    const defaultRoot = config.roots.find(
+      (root) => root.target === "remote" && root.role === "primary",
+    );
+    const rootId = args.rootId ?? defaultRoot?.id;
+    if (typeof rootId !== "string") {
+      throw new TypeError("Workspace mutation rootId is missing");
+    }
+    const root = config.roots.find(
+      (candidate) => candidate.id === rootId && candidate.target === target,
+    );
+    if (!root) {
+      throw new TypeError("Workspace mutation root is not configured");
+    }
+    const normalizePath = (value: string): string => {
+      if (target === "remote") {
+        return normalizeRemotePath(root.path, value).absolutePath;
+      }
+      const absolutePath = resolve(root.path, value || ".");
+      const child = relative(root.path, absolutePath);
+      if (
+        child === ".." ||
+        child.startsWith(`..${sep}`) ||
+        isAbsolute(child)
+      ) {
+        throw new TypeError("Workspace mutation path escapes the configured root");
+      }
+      return absolutePath;
+    };
+    const path = normalizePath(args.path);
+    const destinationPath =
+      typeof args.destinationPath === "string"
+        ? normalizePath(args.destinationPath)
+        : undefined;
+    const command = [
+      params.tool,
+      `${target}:${root.id}`,
+      path,
+      ...(destinationPath ? ["->", destinationPath] : []),
+    ].join(" ");
+    return {
+      callId: params.callId,
+      command,
+      cwd: root.path,
+      ...(destinationPath ? { destinationPath } : {}),
+      path,
+      requiresApproval:
+        params.tool === "workspace_apply_patch" ||
+        params.tool === "workspace_rename_path" ||
+        params.tool === "workspace_delete_path" ||
+        (params.tool === "workspace_write_file" &&
+          typeof args.expectedHash === "string"),
+      rootId: root.id,
+      rootRole: root.role,
+      target,
+      threadId: params.threadId,
+      tool: params.tool,
+      turnId: params.turnId,
+    };
+  }
+
+  async #requestWorkspaceMutationApproval(
+    context: WorkspaceMutationContext,
+    writeClient: RpcMessageWriter,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const approved = await this.#requestRemoteCommandApproval(
+      context,
+      writeClient,
+      signal,
+      `在已授权的 ${context.target} 工作区执行 ${context.tool}`,
+    );
+    await this.#auditWorkspaceMutationApproval(context, {
+      automatic: false,
+      decision: approved ? "accept" : signal.aborted ? "cancelled" : "decline",
+    });
+    return approved;
+  }
+
+  async #auditWorkspaceMutationApproval(
+    context: WorkspaceMutationContext,
+    details: Record<string, unknown>,
+  ): Promise<void> {
+    await this.#audit.write({
+      requestId: context.callId,
+      connectionId: this.#executor?.connectionId,
+      hostId: this.#options.config?.host,
+      workspaceRoot: this.#options.config?.workspaceRoot,
+      ...(context.target === "remote" ? { remoteCwd: context.cwd } : {}),
+      rootId: context.rootId,
+      rootRole: context.rootRole,
+      rootPath: context.cwd,
+      target: context.target,
+      operation: "workspace_mutation.approval",
+      outcome:
+        details.decision === "decline" || details.decision === "cancelled"
+          ? "cancelled"
+          : "succeeded",
+      details: {
+        ...details,
+        tool: context.tool,
+        path: context.path,
+        ...(context.destinationPath
+          ? { destinationPath: context.destinationPath }
+          : {}),
+      },
+    });
+  }
+
   async #requestRemoteCommandApproval(
     context: RemoteExecContext,
     writeClient: RpcMessageWriter,
     signal: AbortSignal,
+    reason?: string,
   ): Promise<boolean> {
     const config = this.#options.config;
     if (!config) {
@@ -656,7 +854,8 @@ export class ShimProxy {
         command: context.command,
         commandActions: [{ type: "unknown", command: context.command }],
         cwd: context.cwd,
-        reason: `通过 SSH 在远程主机 ${config.host} 上执行此命令`,
+        reason:
+          reason ?? `通过 SSH 在远程主机 ${config.host} 上执行此命令`,
         availableDecisions: ["accept", "decline"],
       },
     });

@@ -5,7 +5,8 @@ import { isRecord, type RpcMessage } from "./rpc.js";
 
 const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
 - The project primary root exists on the configured remote Ubuntu host.
-- Use workspace_* dynamic tools for file reads, directory views, literal search, and Git status.
+- Use workspace_* dynamic tools for bounded file reads and writes, exact patches, directory operations, literal search, and Git status.
+- Before replacing, patching, renaming, or deleting a file, read it and pass its returned SHA-256 as expectedHash. Never retry a FILE_CONFLICT without reading again.
 - Omitting target and rootId selects the remote primary root.
 - Access a local secondary root only through workspace_* with its explicit target="local" and rootId.
 - For project overviews, prefer one workspace_list_tree call before focused directory listings.

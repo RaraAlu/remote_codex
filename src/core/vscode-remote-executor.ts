@@ -92,6 +92,9 @@ export class VsCodeRemoteExecutor
           options: {
             ...(options.cwd ? { cwd: options.cwd } : {}),
             ...(options.env ? { env: options.env } : {}),
+            ...(options.stdin
+              ? { stdinBase64: options.stdin.toString("base64") }
+              : {}),
             ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
             sideEffect: options.sideEffect === true,
           },

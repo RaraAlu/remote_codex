@@ -1,7 +1,21 @@
 import { execFile, type ExecFileException } from "node:child_process";
-import { createHash } from "node:crypto";
-import { open, readFile as readFileBytes, readdir, realpath, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import type { Stats } from "node:fs";
+import {
+  chmod,
+  link,
+  lstat,
+  mkdir,
+  open,
+  readFile as readFileBytes,
+  readdir,
+  realpath,
+  rename,
+  rmdir,
+  stat,
+  unlink,
+} from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { BridgeError } from "../core/errors.js";
 import type {
   DirectoryEntry,
@@ -12,9 +26,20 @@ import type {
 import type {
   RemoteCommandResult,
   RemoteFileRead,
+  WorkspaceMutationResult,
+  WorkspacePatchReplacement,
   WorkspaceRootConfig,
 } from "../core/types.js";
-import type { WorkspaceExecutor } from "../core/workspace-executor.js";
+import type {
+  WorkspaceExecutor,
+  WorkspaceMutationOptions,
+} from "../core/workspace-executor.js";
+import {
+  applyWorkspacePatch,
+  decodeWorkspaceContent,
+  MAX_WORKSPACE_WRITE_BYTES,
+  validateExpectedHash,
+} from "../core/workspace-mutations.js";
 
 export interface LocalWorkspaceExecutorOptions {
   commandTimeoutMs: number;
@@ -76,6 +101,15 @@ function gitEnvironment(): NodeJS.ProcessEnv {
   return environment;
 }
 
+function nodeErrorCode(error: unknown): string | undefined {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+    ? error.code
+    : undefined;
+}
+
 export class LocalWorkspaceExecutor implements WorkspaceExecutor {
   readonly rootId: string;
   readonly #commandTimeoutMs: number;
@@ -84,6 +118,7 @@ export class LocalWorkspaceExecutor implements WorkspaceExecutor {
   readonly #maxOutputBytes: number;
   readonly #maxSearchBytes: number;
   readonly #maxSearchEntries: number;
+  readonly #maxWriteBytes: number;
   readonly #resolveRoot: LocalRootResolver;
 
   constructor(
@@ -99,6 +134,10 @@ export class LocalWorkspaceExecutor implements WorkspaceExecutor {
     this.#maxFileBytes = options.maxFileBytes ?? Math.min(options.maxOutputBytes * 8, 100 * 1024 * 1024);
     this.#maxSearchBytes = options.maxSearchBytes ?? Math.min(options.maxOutputBytes * 8, 64 * 1024 * 1024);
     this.#maxSearchEntries = options.maxSearchEntries ?? 20_000;
+    this.#maxWriteBytes = Math.min(
+      MAX_WORKSPACE_WRITE_BYTES,
+      Math.max(1, options.maxOutputBytes),
+    );
   }
 
   async canonicalPath(inputPath: string): Promise<string> {
@@ -201,6 +240,327 @@ export class LocalWorkspaceExecutor implements WorkspaceExecutor {
     } finally {
       await handle.close();
     }
+  }
+
+  async writeFile(
+    inputPath: string,
+    contentBase64: string,
+    options: WorkspaceMutationOptions = {},
+  ): Promise<WorkspaceMutationResult> {
+    const content = decodeWorkspaceContent(contentBase64, this.#maxWriteBytes);
+    const target = await this.#mutationTarget(inputPath);
+    const existing = await this.#lstatIfPresent(target);
+    if (existing?.isSymbolicLink()) {
+      throw new BridgeError(
+        "PATH_OUTSIDE_ROOT",
+        "Local mutation target must not be a symbolic link",
+      );
+    }
+    if (existing && !existing.isFile()) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Workspace write target is not a regular file",
+      );
+    }
+    const expectedHash = validateExpectedHash(options.expectedHash, Boolean(existing));
+    if (!existing && expectedHash) {
+      throw new BridgeError(
+        "FILE_CONFLICT",
+        "Workspace file does not exist for the supplied expectedHash",
+      );
+    }
+    if (existing) {
+      const current = await this.readFile(inputPath, 1);
+      if (current.hash !== expectedHash) {
+        throw new BridgeError(
+          "FILE_CONFLICT",
+          "Workspace file changed since it was read",
+          { actualHash: current.hash, expectedHash },
+        );
+      }
+    }
+
+    const temporaryPath = join(
+      dirname(target),
+      `.codex-bridge-write-${randomUUID()}.tmp`,
+    );
+    let temporaryExists = false;
+    try {
+      const handle = await open(
+        temporaryPath,
+        "wx",
+        existing ? existing.mode & 0o777 : 0o600,
+      );
+      temporaryExists = true;
+      try {
+        await handle.writeFile(content);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      if (existing) {
+        const current = await this.readFile(inputPath, 1);
+        if (current.hash !== expectedHash) {
+          throw new BridgeError(
+            "FILE_CONFLICT",
+            "Workspace file changed before the atomic replacement",
+            { actualHash: current.hash, expectedHash },
+          );
+        }
+        await chmod(temporaryPath, existing.mode & 0o777);
+        await rename(temporaryPath, target);
+        temporaryExists = false;
+      } else {
+        try {
+          await link(temporaryPath, target);
+          await unlink(temporaryPath);
+          temporaryExists = false;
+        } catch (error) {
+          if (nodeErrorCode(error) === "EEXIST") {
+            throw new BridgeError(
+              "FILE_CONFLICT",
+              "Workspace file was created concurrently",
+            );
+          }
+          throw error;
+        }
+      }
+      await this.#syncDirectory(dirname(target));
+    } catch (error) {
+      if (error instanceof BridgeError) {
+        throw error;
+      }
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Unable to atomically write the local workspace file",
+        { path: inputPath },
+        { cause: error },
+      );
+    } finally {
+      if (temporaryExists) {
+        await unlink(temporaryPath).catch(() => undefined);
+      }
+    }
+
+    const metadata = await this.readFile(inputPath, 1);
+    return {
+      operation: "write",
+      canonicalPath: metadata.canonicalPath,
+      bytesWritten: content.length,
+      hash: metadata.hash,
+      mode: metadata.mode,
+      modifiedAtMs: metadata.modifiedAtMs,
+      size: metadata.size,
+    };
+  }
+
+  async applyPatch(
+    inputPath: string,
+    replacements: readonly WorkspacePatchReplacement[],
+    options: WorkspaceMutationOptions,
+  ): Promise<WorkspaceMutationResult> {
+    const expectedHash = validateExpectedHash(options.expectedHash, true);
+    const current = await this.readFile(inputPath, this.#maxWriteBytes);
+    if (current.truncated) {
+      throw new BridgeError(
+        "OUTPUT_TRUNCATED",
+        "Workspace file exceeds the configured patch byte limit",
+        { limitBytes: this.#maxWriteBytes, size: current.size },
+      );
+    }
+    if (current.hash !== expectedHash) {
+      throw new BridgeError(
+        "FILE_CONFLICT",
+        "Workspace file changed since it was read",
+        { actualHash: current.hash, expectedHash },
+      );
+    }
+    const patched = applyWorkspacePatch(
+      Buffer.from(current.contentBase64, "base64"),
+      replacements,
+    );
+    if (patched.length > this.#maxWriteBytes) {
+      throw new BridgeError(
+        "OUTPUT_TRUNCATED",
+        "Patched workspace file exceeds the configured write byte limit",
+        { limitBytes: this.#maxWriteBytes, size: patched.length },
+      );
+    }
+    const result = await this.writeFile(
+      inputPath,
+      patched.toString("base64"),
+      options,
+    );
+    return { ...result, operation: "patch" };
+  }
+
+  async createDirectory(
+    inputPath: string,
+    _options: Omit<WorkspaceMutationOptions, "expectedHash"> = {},
+  ): Promise<WorkspaceMutationResult> {
+    const target = await this.#mutationTarget(inputPath);
+    const existing = await this.#lstatIfPresent(target);
+    if (existing) {
+      if (existing.isSymbolicLink()) {
+        throw new BridgeError(
+          "PATH_OUTSIDE_ROOT",
+          "Local mutation target must not be a symbolic link",
+        );
+      }
+      if (!existing.isDirectory()) {
+        throw new BridgeError(
+          "FILE_CONFLICT",
+          "Workspace directory target already exists as another type",
+        );
+      }
+    } else {
+      try {
+        await mkdir(target, { mode: 0o700 });
+        await this.#syncDirectory(dirname(target));
+      } catch (error) {
+        throw new BridgeError(
+          nodeErrorCode(error) === "EEXIST" ? "FILE_CONFLICT" : "COMMAND_DENIED",
+          "Unable to create the local workspace directory",
+          { path: inputPath },
+          { cause: error },
+        );
+      }
+    }
+    return {
+      operation: "mkdir",
+      canonicalPath: await this.canonicalPath(inputPath),
+      bytesWritten: 0,
+    };
+  }
+
+  async renamePath(
+    inputPath: string,
+    destinationPath: string,
+    options: WorkspaceMutationOptions = {},
+  ): Promise<WorkspaceMutationResult> {
+    const source = await this.canonicalPath(inputPath);
+    const root = await this.#canonicalRoot();
+    if (source === root) {
+      throw new BridgeError("COMMAND_DENIED", "The authorized root cannot be renamed");
+    }
+    const sourceMetadata = await lstat(source);
+    if (sourceMetadata.isSymbolicLink()) {
+      throw new BridgeError(
+        "PATH_OUTSIDE_ROOT",
+        "Local mutation source must not be a symbolic link",
+      );
+    }
+    const destination = await this.#mutationTarget(destinationPath);
+    if (await this.#lstatIfPresent(destination)) {
+      throw new BridgeError(
+        "FILE_CONFLICT",
+        "Workspace rename destination already exists",
+      );
+    }
+    if (sourceMetadata.isFile()) {
+      const expectedHash = validateExpectedHash(options.expectedHash, true);
+      const current = await this.readFile(inputPath, 1);
+      if (current.hash !== expectedHash) {
+        throw new BridgeError(
+          "FILE_CONFLICT",
+          "Workspace file changed since it was read",
+          { actualHash: current.hash, expectedHash },
+        );
+      }
+    } else if (sourceMetadata.isDirectory()) {
+      if (options.expectedHash !== undefined) {
+        throw new BridgeError(
+          "PROTOCOL_MISMATCH",
+          "expectedHash is not valid when renaming a directory",
+        );
+      }
+    } else {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Workspace rename supports only regular files and directories",
+      );
+    }
+    try {
+      await rename(source, destination);
+      await this.#syncDirectory(dirname(source));
+      if (dirname(destination) !== dirname(source)) {
+        await this.#syncDirectory(dirname(destination));
+      }
+    } catch (error) {
+      throw new BridgeError(
+        nodeErrorCode(error) === "EEXIST" ? "FILE_CONFLICT" : "COMMAND_DENIED",
+        "Unable to rename the local workspace path",
+        { path: inputPath },
+        { cause: error },
+      );
+    }
+    return {
+      operation: "rename",
+      canonicalPath: source,
+      destinationCanonicalPath: await this.canonicalPath(destinationPath),
+      bytesWritten: 0,
+    };
+  }
+
+  async deletePath(
+    inputPath: string,
+    options: WorkspaceMutationOptions = {},
+  ): Promise<WorkspaceMutationResult> {
+    const canonicalPath = await this.canonicalPath(inputPath);
+    const root = await this.#canonicalRoot();
+    if (canonicalPath === root) {
+      throw new BridgeError("COMMAND_DENIED", "The authorized root cannot be deleted");
+    }
+    const metadata = await lstat(canonicalPath);
+    if (metadata.isSymbolicLink()) {
+      throw new BridgeError(
+        "PATH_OUTSIDE_ROOT",
+        "Local mutation source must not be a symbolic link",
+      );
+    }
+    try {
+      if (metadata.isFile()) {
+        const expectedHash = validateExpectedHash(options.expectedHash, true);
+        const current = await this.readFile(inputPath, 1);
+        if (current.hash !== expectedHash) {
+          throw new BridgeError(
+            "FILE_CONFLICT",
+            "Workspace file changed since it was read",
+            { actualHash: current.hash, expectedHash },
+          );
+        }
+        await unlink(canonicalPath);
+      } else if (metadata.isDirectory()) {
+        if (options.expectedHash !== undefined) {
+          throw new BridgeError(
+            "PROTOCOL_MISMATCH",
+            "expectedHash is not valid when deleting a directory",
+          );
+        }
+        await rmdir(canonicalPath);
+      } else {
+        throw new BridgeError(
+          "COMMAND_DENIED",
+          "Workspace delete supports only regular files and empty directories",
+        );
+      }
+      await this.#syncDirectory(dirname(canonicalPath));
+    } catch (error) {
+      if (error instanceof BridgeError) {
+        throw error;
+      }
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Unable to delete the local workspace path",
+        { path: inputPath },
+        { cause: error },
+      );
+    }
+    return {
+      operation: "delete",
+      canonicalPath,
+      bytesWritten: 0,
+    };
   }
 
   async listDirectory(inputPath: string): Promise<DirectoryEntry[]> {
@@ -388,6 +748,74 @@ export class LocalWorkspaceExecutor implements WorkspaceExecutor {
         },
       );
     });
+  }
+
+  async #mutationTarget(inputPath: string): Promise<string> {
+    const root = await this.#canonicalRoot();
+    if (typeof inputPath !== "string" || inputPath.includes("\0")) {
+      throw new BridgeError(
+        "PATH_OUTSIDE_ROOT",
+        "Local mutation path must be a NUL-free string",
+      );
+    }
+    const lexicalPath = resolve(root, inputPath || ".");
+    if (!isPathInside(root, lexicalPath)) {
+      throw new BridgeError(
+        "PATH_OUTSIDE_ROOT",
+        "Local mutation path escapes the authorized root",
+        { path: inputPath, rootId: this.rootId },
+      );
+    }
+    const name = basename(lexicalPath);
+    if (!name || name === "." || name === "..") {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Local mutation path must identify a child of the authorized root",
+      );
+    }
+    let canonicalParent: string;
+    try {
+      canonicalParent = await realpath(dirname(lexicalPath));
+    } catch (error) {
+      throw new BridgeError(
+        "PATH_OUTSIDE_ROOT",
+        "Local mutation parent does not exist or cannot be resolved",
+        { path: inputPath, rootId: this.rootId },
+        { cause: error },
+      );
+    }
+    if (!isPathInside(root, canonicalParent)) {
+      throw new BridgeError(
+        "PATH_OUTSIDE_ROOT",
+        "Resolved local mutation parent escapes the authorized root",
+        { path: inputPath, rootId: this.rootId },
+      );
+    }
+    return join(canonicalParent, name);
+  }
+
+  async #lstatIfPresent(path: string): Promise<Stats | null> {
+    try {
+      return await lstat(path);
+    } catch (error) {
+      if (nodeErrorCode(error) === "ENOENT") {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async #syncDirectory(path: string): Promise<void> {
+    try {
+      const handle = await open(path, "r");
+      try {
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      // Directory fsync is not supported on every Controller platform.
+    }
   }
 
   async #canonicalRoot(): Promise<string> {

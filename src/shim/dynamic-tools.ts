@@ -23,11 +23,24 @@ const LEGACY_REMOTE_TOOL_ALIASES: ReadonlyMap<string, string> = new Map([
 ] as const);
 
 export const WORKSPACE_TOOL_NAMES = new Set([
+  "workspace_apply_patch",
+  "workspace_create_directory",
+  "workspace_delete_path",
   "workspace_read_file",
   "workspace_list_directory",
   "workspace_list_tree",
+  "workspace_rename_path",
   "workspace_search",
   "workspace_git_status",
+  "workspace_write_file",
+]);
+
+export const WORKSPACE_MUTATION_TOOL_NAMES = new Set([
+  "workspace_apply_patch",
+  "workspace_create_directory",
+  "workspace_delete_path",
+  "workspace_rename_path",
+  "workspace_write_file",
 ]);
 
 export const REMOTE_TOOL_NAMES = new Set([
@@ -71,6 +84,120 @@ const REMOTE_ROOT_INPUT_PROPERTIES = {
 } as const;
 
 export const REMOTE_DYNAMIC_TOOLS = [
+  {
+    type: "function",
+    name: "workspace_write_file",
+    description:
+      "Atomically create or replace a bounded file in an explicitly selected workspace root. Existing files require the SHA-256 expectedHash returned by workspace_read_file.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path", "contentBase64"],
+      properties: {
+        ...ROOT_INPUT_PROPERTIES,
+        path: { type: "string", description: "File path within the selected root." },
+        contentBase64: {
+          type: "string",
+          description: "Complete replacement content encoded as base64, up to 1 MiB.",
+        },
+        expectedHash: {
+          type: "string",
+          pattern: "^[0-9a-f]{64}$",
+          description:
+            "Required for replacement and forbidden for creation. Must match the latest read.",
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "workspace_apply_patch",
+    description:
+      "Apply bounded, exact, unambiguous UTF-8 text replacements and atomically replace the file. Always requires expectedHash.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path", "expectedHash", "replacements"],
+      properties: {
+        ...ROOT_INPUT_PROPERTIES,
+        path: { type: "string", description: "Text file path within the selected root." },
+        expectedHash: {
+          type: "string",
+          pattern: "^[0-9a-f]{64}$",
+        },
+        replacements: {
+          type: "array",
+          minItems: 1,
+          maxItems: 64,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["oldText", "newText"],
+            properties: {
+              oldText: { type: "string", minLength: 1 },
+              newText: { type: "string" },
+            },
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "workspace_create_directory",
+    description:
+      "Create one directory below an existing parent in an explicitly selected workspace root.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path"],
+      properties: {
+        ...ROOT_INPUT_PROPERTIES,
+        path: { type: "string", description: "New directory path within the selected root." },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "workspace_rename_path",
+    description:
+      "Atomically rename a file or directory without overwriting the destination. Files require expectedHash.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path", "destinationPath"],
+      properties: {
+        ...ROOT_INPUT_PROPERTIES,
+        path: { type: "string", description: "Existing source path." },
+        destinationPath: { type: "string", description: "Nonexistent destination path." },
+        expectedHash: {
+          type: "string",
+          pattern: "^[0-9a-f]{64}$",
+          description: "Required when the source is a file.",
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "workspace_delete_path",
+    description:
+      "Delete a regular file or empty directory. Files require expectedHash; recursive deletion is not supported.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path"],
+      properties: {
+        ...ROOT_INPUT_PROPERTIES,
+        path: { type: "string", description: "Existing file or empty directory path." },
+        expectedHash: {
+          type: "string",
+          pattern: "^[0-9a-f]{64}$",
+          description: "Required when deleting a file.",
+        },
+      },
+    },
+  },
   {
     type: "function",
     name: "workspace_read_file",
@@ -304,7 +431,12 @@ export class DynamicToolRouter {
       target: root.target,
       operation: call.tool,
       outcome: "started",
-      details: { rpcId },
+      details: {
+        rpcId,
+        ...(WORKSPACE_MUTATION_TOOL_NAMES.has(call.tool)
+          ? this.#mutationAuditDetails(args)
+          : {}),
+      },
     });
 
     try {
@@ -339,8 +471,23 @@ export class DynamicToolRouter {
         operation: call.tool,
         outcome: "succeeded",
         durationMs: Math.round(performance.now() - startedAt),
-        ...(isRecord(data) && typeof data.idempotencyOutcome === "string"
-          ? { details: { idempotencyOutcome: data.idempotencyOutcome } }
+        ...(isRecord(data)
+          ? {
+              details: {
+                ...(typeof data.bytesWritten === "number"
+                  ? { bytesWritten: data.bytesWritten }
+                  : {}),
+                ...(typeof data.idempotencyOutcome === "string"
+                  ? { idempotencyOutcome: data.idempotencyOutcome }
+                  : {}),
+                ...(typeof data.hash === "string"
+                  ? { newHash: data.hash }
+                  : {}),
+                ...(WORKSPACE_MUTATION_TOOL_NAMES.has(call.tool)
+                  ? this.#mutationAuditDetails(args)
+                  : {}),
+              },
+            }
           : {}),
       });
       return {
@@ -376,7 +523,12 @@ export class DynamicToolRouter {
               ? "cancelled"
               : "failed",
         durationMs: Math.round(performance.now() - startedAt),
-        details: { error: bridgeError.toPayload() },
+        details: {
+          error: bridgeError.toPayload(),
+          ...(WORKSPACE_MUTATION_TOOL_NAMES.has(call.tool)
+            ? this.#mutationAuditDetails(args)
+            : {}),
+        },
       });
       return {
         success: false,
@@ -449,6 +601,88 @@ export class DynamicToolRouter {
     }
     const executor = this.#workspaceExecutor(root);
     switch (normalizedTool) {
+      case "workspace_write_file": {
+        if (typeof args.contentBase64 !== "string") {
+          throw new BridgeError(
+            "PROTOCOL_MISMATCH",
+            "contentBase64 must be a string",
+          );
+        }
+        return await executor.writeFile(
+          requiredPath(args),
+          args.contentBase64,
+          {
+            ...(typeof args.expectedHash === "string"
+              ? { expectedHash: args.expectedHash }
+              : {}),
+            idempotencyKey: observer.idempotencyKey,
+            signal: observer.signal,
+          },
+        );
+      }
+      case "workspace_apply_patch": {
+        if (
+          !Array.isArray(args.replacements) ||
+          !args.replacements.every(
+            (entry) =>
+              isRecord(entry) &&
+              typeof entry.oldText === "string" &&
+              typeof entry.newText === "string",
+          )
+        ) {
+          throw new BridgeError(
+            "PROTOCOL_MISMATCH",
+            "replacements must be text replacement objects",
+          );
+        }
+        if (typeof args.expectedHash !== "string") {
+          throw new BridgeError(
+            "PROTOCOL_MISMATCH",
+            "expectedHash must be a string",
+          );
+        }
+        return await executor.applyPatch(
+          requiredPath(args),
+          args.replacements as Array<{ oldText: string; newText: string }>,
+          {
+            expectedHash: args.expectedHash,
+            idempotencyKey: observer.idempotencyKey,
+            signal: observer.signal,
+          },
+        );
+      }
+      case "workspace_create_directory":
+        return await executor.createDirectory(requiredPath(args), {
+          idempotencyKey: observer.idempotencyKey,
+          signal: observer.signal,
+        });
+      case "workspace_rename_path": {
+        if (typeof args.destinationPath !== "string") {
+          throw new BridgeError(
+            "PROTOCOL_MISMATCH",
+            "destinationPath must be a string",
+          );
+        }
+        return await executor.renamePath(
+          requiredPath(args),
+          args.destinationPath,
+          {
+            ...(typeof args.expectedHash === "string"
+              ? { expectedHash: args.expectedHash }
+              : {}),
+            idempotencyKey: observer.idempotencyKey,
+            signal: observer.signal,
+          },
+        );
+      }
+      case "workspace_delete_path":
+        return await executor.deletePath(requiredPath(args), {
+          ...(typeof args.expectedHash === "string"
+            ? { expectedHash: args.expectedHash }
+            : {}),
+          idempotencyKey: observer.idempotencyKey,
+          signal: observer.signal,
+        });
       case "workspace_read_file": {
         const limitBytes =
           typeof args.limitBytes === "number" && Number.isInteger(args.limitBytes)
@@ -586,6 +820,18 @@ export class DynamicToolRouter {
         { rootId: root.id, target: root.target },
       );
     }
+  }
+
+  #mutationAuditDetails(args: Record<string, unknown>): Record<string, unknown> {
+    return {
+      ...(typeof args.path === "string" ? { path: args.path } : {}),
+      ...(typeof args.destinationPath === "string"
+        ? { destinationPath: args.destinationPath }
+        : {}),
+      ...(typeof args.expectedHash === "string"
+        ? { expectedHash: args.expectedHash }
+        : {}),
+    };
   }
 
   #toolContext(

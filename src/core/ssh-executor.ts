@@ -17,7 +17,16 @@ import type {
   RemoteCommandResult,
   RemoteFileRead,
   RemoteIdentity,
+  WorkspaceMutationResult,
+  WorkspacePatchReplacement,
 } from "./types.js";
+import type { WorkspaceMutationOptions } from "./workspace-executor.js";
+import {
+  applyWorkspacePatch,
+  decodeWorkspaceContent,
+  MAX_WORKSPACE_WRITE_BYTES,
+  validateExpectedHash,
+} from "./workspace-mutations.js";
 
 export type SpawnProcess = (
   command: string,
@@ -33,6 +42,7 @@ export interface ExecuteOptions {
   onStdout?: (chunk: string) => void;
   signal?: AbortSignal;
   sideEffect?: boolean;
+  stdin?: Buffer;
   timeoutMs?: number;
 }
 
@@ -63,6 +73,122 @@ const REMOTE_WRAPPER = [
   "shift",
   'printf "%s\\0" "$(pwd -P)"',
   'exec "$@"',
+].join("\n");
+
+const REMOTE_WRITE_SCRIPT = [
+  "set -eu",
+  'root=$(realpath -e -- "$1")',
+  'target=$2',
+  'expected=$3',
+  'max_bytes=$4',
+  'parent=$(realpath -e -- "$(dirname -- "$target")") || { printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42; }',
+  'case "$parent" in "$root"|"$root"/*) ;; *) printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42 ;; esac',
+  'target="$parent/$(basename -- "$target")"',
+  '[ ! -L "$target" ] || { printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42; }',
+  'exists=0',
+  'mode=600',
+  'if [ -e "$target" ]; then',
+  '  exists=1',
+  '  [ -f "$target" ] || { printf "%s\\n" "CODEX_BRIDGE:COMMAND_DENIED" >&2; exit 44; }',
+  '  [ -n "$expected" ] || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  '  actual=$(sha256sum -- "$target" | cut -d " " -f 1)',
+  '  [ "$actual" = "$expected" ] || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  '  mode=$(stat -c %a -- "$target")',
+  "else",
+  '  [ -z "$expected" ] || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  "fi",
+  'tmp=$(mktemp -- "$parent/.codex-bridge-write.XXXXXX")',
+  'cleanup() { rm -f -- "$tmp"; }',
+  "trap cleanup EXIT HUP INT TERM",
+  'cat >"$tmp"',
+  'size=$(wc -c <"$tmp" | tr -d "[:space:]")',
+  '[ "$size" -le "$max_bytes" ] || { printf "%s\\n" "CODEX_BRIDGE:OUTPUT_TRUNCATED" >&2; exit 43; }',
+  'chmod "$mode" -- "$tmp"',
+  'if [ "$exists" -eq 1 ]; then',
+  '  actual=$(sha256sum -- "$target" | cut -d " " -f 1)',
+  '  [ "$actual" = "$expected" ] || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  '  command -v sync >/dev/null 2>&1 && sync -f "$tmp" 2>/dev/null || true',
+  '  mv -fT -- "$tmp" "$target"',
+  "else",
+  '  if ! ln -- "$tmp" "$target" 2>/dev/null; then',
+  '    printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2',
+  "    exit 40",
+  "  fi",
+  '  rm -f -- "$tmp"',
+  "fi",
+  "trap - EXIT HUP INT TERM",
+  'hash=$(sha256sum -- "$target" | cut -d " " -f 1)',
+  'mode=$(stat -c %f -- "$target")',
+  'modified=$(stat -c %Y -- "$target")',
+  'printf "%s\\0%s\\0%s\\0%s\\0%s" "$target" "$size" "$mode" "$modified" "$hash"',
+].join("\n");
+
+const REMOTE_MKDIR_SCRIPT = [
+  "set -eu",
+  'root=$(realpath -e -- "$1")',
+  'target=$2',
+  'parent=$(realpath -e -- "$(dirname -- "$target")") || { printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42; }',
+  'case "$parent" in "$root"|"$root"/*) ;; *) printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42 ;; esac',
+  'target="$parent/$(basename -- "$target")"',
+  '[ ! -L "$target" ] || { printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42; }',
+  'if [ -e "$target" ]; then',
+  '  [ -d "$target" ] || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  "else",
+  '  mkdir -- "$target" || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  "fi",
+  'printf "%s" "$target"',
+].join("\n");
+
+const REMOTE_RENAME_SCRIPT = [
+  "set -eu",
+  'root=$(realpath -e -- "$1")',
+  'source_lexical=$2',
+  'destination=$3',
+  'expected=$4',
+  '[ ! -L "$source_lexical" ] || { printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42; }',
+  'source=$(realpath -e -- "$source_lexical") || { printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42; }',
+  'case "$source" in "$root"|"$root"/*) ;; *) printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42 ;; esac',
+  '[ "$source" != "$root" ] || { printf "%s\\n" "CODEX_BRIDGE:COMMAND_DENIED" >&2; exit 44; }',
+  'parent=$(realpath -e -- "$(dirname -- "$destination")") || { printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42; }',
+  'case "$parent" in "$root"|"$root"/*) ;; *) printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42 ;; esac',
+  'destination="$parent/$(basename -- "$destination")"',
+  '[ ! -e "$destination" ] && [ ! -L "$destination" ] || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  'if [ -f "$source" ]; then',
+  '  [ -n "$expected" ] || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  '  actual=$(sha256sum -- "$source" | cut -d " " -f 1)',
+  '  [ "$actual" = "$expected" ] || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  "elif [ -d \"$source\" ]; then",
+  '  [ -z "$expected" ] || { printf "%s\\n" "CODEX_BRIDGE:PROTOCOL_MISMATCH" >&2; exit 45; }',
+  "else",
+  '  printf "%s\\n" "CODEX_BRIDGE:COMMAND_DENIED" >&2',
+  "  exit 44",
+  "fi",
+  'mv -nT -- "$source" "$destination" || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  '[ ! -e "$source" ] || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  'printf "%s\\0%s" "$source" "$destination"',
+].join("\n");
+
+const REMOTE_DELETE_SCRIPT = [
+  "set -eu",
+  'root=$(realpath -e -- "$1")',
+  'source_lexical=$2',
+  'expected=$3',
+  '[ ! -L "$source_lexical" ] || { printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42; }',
+  'source=$(realpath -e -- "$source_lexical") || { printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42; }',
+  'case "$source" in "$root"|"$root"/*) ;; *) printf "%s\\n" "CODEX_BRIDGE:PATH_OUTSIDE_ROOT" >&2; exit 42 ;; esac',
+  '[ "$source" != "$root" ] || { printf "%s\\n" "CODEX_BRIDGE:COMMAND_DENIED" >&2; exit 44; }',
+  'if [ -f "$source" ]; then',
+  '  [ -n "$expected" ] || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  '  actual=$(sha256sum -- "$source" | cut -d " " -f 1)',
+  '  [ "$actual" = "$expected" ] || { printf "%s\\n" "CODEX_BRIDGE:FILE_CONFLICT" >&2; exit 40; }',
+  '  rm -- "$source"',
+  "elif [ -d \"$source\" ]; then",
+  '  [ -z "$expected" ] || { printf "%s\\n" "CODEX_BRIDGE:PROTOCOL_MISMATCH" >&2; exit 45; }',
+  '  rmdir -- "$source" || { printf "%s\\n" "CODEX_BRIDGE:COMMAND_DENIED" >&2; exit 44; }',
+  "else",
+  '  printf "%s\\n" "CODEX_BRIDGE:COMMAND_DENIED" >&2',
+  "  exit 44",
+  "fi",
 ].join("\n");
 
 export function quotePosix(value: string): string {
@@ -275,6 +401,21 @@ export class OpenSshExecutor {
         terminate();
       }, timeoutMs);
       timeout.unref();
+      child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code !== "EPIPE") {
+          finish(() =>
+            reject(
+              new BridgeError(
+                "SSH_DISCONNECTED",
+                `Unable to stream OpenSSH stdin: ${error.message}`,
+                undefined,
+                { cause: error },
+              ),
+            ),
+          );
+        }
+      });
+      child.stdin.end(options.stdin);
 
       child.on("error", (error) => {
         finish(() =>
@@ -489,6 +630,277 @@ export class OpenSshExecutor {
       size,
       truncated: size > safeLimit,
     };
+  }
+
+  async writeFile(
+    inputPath: string,
+    contentBase64: string,
+    options: WorkspaceMutationOptions = {},
+  ): Promise<WorkspaceMutationResult> {
+    const maxBytes = Math.min(
+      MAX_WORKSPACE_WRITE_BYTES,
+      Math.max(1, this.config.maxOutputBytes),
+    );
+    const content = decodeWorkspaceContent(contentBase64, maxBytes);
+    const expectedHash = validateExpectedHash(options.expectedHash, false);
+    const target = normalizeRemotePath(
+      this.config.workspaceRoot,
+      inputPath,
+    ).absolutePath;
+    const result = await this.execute(
+      [
+        "sh",
+        "-c",
+        REMOTE_WRITE_SCRIPT,
+        "codex-bridge-write",
+        this.config.workspaceRoot,
+        target,
+        expectedHash ?? "",
+        String(maxBytes),
+      ],
+      {
+        idempotencyKey: options.idempotencyKey,
+        sideEffect: true,
+        signal: options.signal,
+        stdin: content,
+      },
+    );
+    this.#assertMutationSucceeded(result, "write");
+    const [canonicalPath, sizeText, mode, modifiedText, hash] =
+      result.stdout.split("\0");
+    const size = Number.parseInt(sizeText ?? "", 10);
+    const modifiedSeconds = Number.parseInt(modifiedText ?? "", 10);
+    if (
+      !canonicalPath ||
+      !mode ||
+      !hash ||
+      !Number.isSafeInteger(size) ||
+      !Number.isSafeInteger(modifiedSeconds)
+    ) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "Workspace write returned invalid metadata",
+      );
+    }
+    return {
+      operation: "write",
+      canonicalPath,
+      bytesWritten: content.length,
+      hash,
+      mode,
+      modifiedAtMs: modifiedSeconds * 1_000,
+      size,
+      ...(result.idempotencyOutcome
+        ? { idempotencyOutcome: result.idempotencyOutcome }
+        : {}),
+    };
+  }
+
+  async applyPatch(
+    inputPath: string,
+    replacements: readonly WorkspacePatchReplacement[],
+    options: WorkspaceMutationOptions,
+  ): Promise<WorkspaceMutationResult> {
+    const expectedHash = validateExpectedHash(options.expectedHash, true);
+    const maxBytes = Math.min(
+      MAX_WORKSPACE_WRITE_BYTES,
+      Math.max(1, this.config.maxOutputBytes),
+    );
+    const current = await this.readFile(inputPath, maxBytes);
+    if (current.truncated) {
+      throw new BridgeError(
+        "OUTPUT_TRUNCATED",
+        "Workspace file exceeds the configured patch byte limit",
+        { limitBytes: maxBytes, size: current.size },
+      );
+    }
+    if (current.hash !== expectedHash) {
+      throw new BridgeError(
+        "FILE_CONFLICT",
+        "Workspace file changed since it was read",
+        { actualHash: current.hash, expectedHash },
+      );
+    }
+    const patched = applyWorkspacePatch(
+      Buffer.from(current.contentBase64, "base64"),
+      replacements,
+    );
+    if (patched.length > maxBytes) {
+      throw new BridgeError(
+        "OUTPUT_TRUNCATED",
+        "Patched workspace file exceeds the configured write byte limit",
+        { limitBytes: maxBytes, size: patched.length },
+      );
+    }
+    const result = await this.writeFile(
+      inputPath,
+      patched.toString("base64"),
+      options,
+    );
+    return { ...result, operation: "patch" };
+  }
+
+  async createDirectory(
+    inputPath: string,
+    options: Omit<WorkspaceMutationOptions, "expectedHash"> = {},
+  ): Promise<WorkspaceMutationResult> {
+    const target = normalizeRemotePath(
+      this.config.workspaceRoot,
+      inputPath,
+    ).absolutePath;
+    const result = await this.execute(
+      [
+        "sh",
+        "-c",
+        REMOTE_MKDIR_SCRIPT,
+        "codex-bridge-mkdir",
+        this.config.workspaceRoot,
+        target,
+      ],
+      {
+        idempotencyKey: options.idempotencyKey,
+        sideEffect: true,
+        signal: options.signal,
+      },
+    );
+    this.#assertMutationSucceeded(result, "mkdir");
+    if (!result.stdout) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "Workspace directory creation returned invalid metadata",
+      );
+    }
+    return {
+      operation: "mkdir",
+      canonicalPath: result.stdout,
+      bytesWritten: 0,
+      ...(result.idempotencyOutcome
+        ? { idempotencyOutcome: result.idempotencyOutcome }
+        : {}),
+    };
+  }
+
+  async renamePath(
+    inputPath: string,
+    destinationPath: string,
+    options: WorkspaceMutationOptions = {},
+  ): Promise<WorkspaceMutationResult> {
+    const source = normalizeRemotePath(
+      this.config.workspaceRoot,
+      inputPath,
+    ).absolutePath;
+    const destination = normalizeRemotePath(
+      this.config.workspaceRoot,
+      destinationPath,
+    ).absolutePath;
+    const result = await this.execute(
+      [
+        "sh",
+        "-c",
+        REMOTE_RENAME_SCRIPT,
+        "codex-bridge-rename",
+        this.config.workspaceRoot,
+        source,
+        destination,
+        validateExpectedHash(options.expectedHash, false) ?? "",
+      ],
+      {
+        idempotencyKey: options.idempotencyKey,
+        sideEffect: true,
+        signal: options.signal,
+      },
+    );
+    this.#assertMutationSucceeded(result, "rename");
+    const [canonicalPath, destinationCanonicalPath] = result.stdout.split("\0");
+    if (!canonicalPath || !destinationCanonicalPath) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "Workspace rename returned invalid metadata",
+      );
+    }
+    return {
+      operation: "rename",
+      canonicalPath,
+      destinationCanonicalPath,
+      bytesWritten: 0,
+      ...(result.idempotencyOutcome
+        ? { idempotencyOutcome: result.idempotencyOutcome }
+        : {}),
+    };
+  }
+
+  async deletePath(
+    inputPath: string,
+    options: WorkspaceMutationOptions = {},
+  ): Promise<WorkspaceMutationResult> {
+    const canonicalPath = await this.canonicalPath(inputPath);
+    const source = normalizeRemotePath(
+      this.config.workspaceRoot,
+      inputPath,
+    ).absolutePath;
+    const result = await this.execute(
+      [
+        "sh",
+        "-c",
+        REMOTE_DELETE_SCRIPT,
+        "codex-bridge-delete",
+        this.config.workspaceRoot,
+        source,
+        validateExpectedHash(options.expectedHash, false) ?? "",
+      ],
+      {
+        idempotencyKey: options.idempotencyKey,
+        sideEffect: true,
+        signal: options.signal,
+      },
+    );
+    this.#assertMutationSucceeded(result, "delete");
+    return {
+      operation: "delete",
+      canonicalPath,
+      bytesWritten: 0,
+      ...(result.idempotencyOutcome
+        ? { idempotencyOutcome: result.idempotencyOutcome }
+        : {}),
+    };
+  }
+
+  #assertMutationSucceeded(
+    result: RemoteCommandResult,
+    operation: string,
+  ): void {
+    if (result.exitCode === 0) {
+      return;
+    }
+    const marker = /CODEX_BRIDGE:([A-Z_]+)/.exec(result.stderr)?.[1];
+    switch (marker) {
+      case "FILE_CONFLICT":
+        throw new BridgeError(
+          "FILE_CONFLICT",
+          `Workspace ${operation} conflicted with the current filesystem state`,
+        );
+      case "PATH_OUTSIDE_ROOT":
+        throw new BridgeError(
+          "PATH_OUTSIDE_ROOT",
+          `Workspace ${operation} path escapes the configured root`,
+        );
+      case "OUTPUT_TRUNCATED":
+        throw new BridgeError(
+          "OUTPUT_TRUNCATED",
+          `Workspace ${operation} exceeded the configured byte limit`,
+        );
+      case "PROTOCOL_MISMATCH":
+        throw new BridgeError(
+          "PROTOCOL_MISMATCH",
+          `Workspace ${operation} received incompatible arguments`,
+        );
+      default:
+        throw new BridgeError(
+          "COMMAND_DENIED",
+          `Workspace ${operation} failed`,
+          { exitCode: result.exitCode, stderr: result.stderr },
+        );
+    }
   }
 
   async listDirectory(inputPath: string): Promise<DirectoryEntry[]> {

@@ -9,6 +9,7 @@ import {
 } from "../core/operation-ledger.js";
 import type { ExecuteOptions } from "../core/ssh-executor.js";
 import type { BridgeConfig } from "../core/types.js";
+import { decodeWorkspaceContent } from "../core/workspace-mutations.js";
 import {
   REMOTE_EXECUTOR_CAPABILITIES,
   REMOTE_EXECUTOR_COMMAND,
@@ -205,6 +206,12 @@ async function dispatch(
       }
       const argv = params.argv.map((entry) => stringValue(entry, "params.argv[]"));
       const rawOptions = params.options === undefined ? {} : record(params.options, "params.options");
+      const stdin =
+        rawOptions.stdinBase64 === undefined
+          ? undefined
+          : decodeWorkspaceContent(
+              stringValue(rawOptions.stdinBase64, "params.options.stdinBase64"),
+            );
       let outputQueue = Promise.resolve();
       const emit = (channel: RemoteOutputEvent["channel"], chunk: string): void => {
         outputQueue = outputQueue.then(async () => {
@@ -223,6 +230,7 @@ async function dispatch(
         ...(typeof rawOptions.timeoutMs === "number" ? { timeoutMs: rawOptions.timeoutMs } : {}),
         sideEffect: rawOptions.sideEffect === true,
         signal,
+        ...(stdin ? { stdin } : {}),
         onStdout: (chunk) => emit("stdout", chunk),
         onStderr: (chunk) => emit("stderr", chunk),
       };

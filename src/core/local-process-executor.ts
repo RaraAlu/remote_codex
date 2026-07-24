@@ -210,6 +210,21 @@ export class LocalProcessExecutor extends OpenSshExecutor {
       } else {
         options.signal?.addEventListener("abort", abort, { once: true });
       }
+      child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code !== "EPIPE") {
+          finish(() =>
+            reject(
+              new BridgeError(
+                "REMOTE_TRANSPORT_DISCONNECTED",
+                `Unable to stream remote command stdin: ${error.message}`,
+                undefined,
+                { cause: error },
+              ),
+            ),
+          );
+        }
+      });
+      child.stdin.end(options.stdin);
 
       child.stdout.on("data", (chunk: Buffer) => {
         stdout.append(chunk);

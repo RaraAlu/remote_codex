@@ -85,4 +85,81 @@ describe.skipIf(process.platform === "win32")("LocalProcessExecutor", () => {
       await rm(workspace, { force: true, recursive: true });
     }
   });
+
+  it("streams stdin and performs atomic remote workspace mutations", async () => {
+    const workspace = await realpath(
+      await mkdtemp(join(tmpdir(), "codex-remote-mutation-")),
+    );
+    const executor = new LocalProcessExecutor(
+      parseBridgeConfig({
+        host: "remote-host",
+        workspaceRoot: workspace,
+        connectionMode: "vscode-remote",
+        maxOutputBytes: 1024 * 1024,
+      }),
+    );
+    try {
+      await expect(
+        executor.execute(["sh", "-c", "cat"], {
+          stdin: Buffer.from("stdin payload"),
+        }),
+      ).resolves.toMatchObject({
+        exitCode: 0,
+        stdout: "stdin payload",
+      });
+
+      const created = await executor.writeFile(
+        "remote.txt",
+        Buffer.from("first\n").toString("base64"),
+        { idempotencyKey: "create-remote" },
+      );
+      expect(created).toMatchObject({
+        operation: "write",
+        bytesWritten: 6,
+        size: 6,
+      });
+      await expect(
+        executor.writeFile(
+          "remote.txt",
+          Buffer.from("stale\n").toString("base64"),
+        ),
+      ).rejects.toMatchObject({ code: "FILE_CONFLICT" });
+
+      const patched = await executor.applyPatch(
+        "remote.txt",
+        [{ oldText: "first", newText: "second" }],
+        { expectedHash: created.hash, idempotencyKey: "patch-remote" },
+      );
+      expect(patched).toMatchObject({
+        operation: "patch",
+        bytesWritten: 7,
+        size: 7,
+      });
+      expect(await readFile(join(workspace, "remote.txt"), "utf8")).toBe(
+        "second\n",
+      );
+
+      await executor.createDirectory("nested", {
+        idempotencyKey: "mkdir-remote",
+      });
+      await executor.renamePath("remote.txt", "nested/moved.txt", {
+        expectedHash: patched.hash,
+        idempotencyKey: "rename-remote",
+      });
+      const moved = await executor.readFile("nested/moved.txt");
+      await executor.deletePath("nested/moved.txt", {
+        expectedHash: moved.hash,
+        idempotencyKey: "delete-file-remote",
+      });
+      await executor.deletePath("nested", {
+        idempotencyKey: "delete-directory-remote",
+      });
+      await expect(executor.canonicalPath("nested")).rejects.toMatchObject({
+        code: "PATH_OUTSIDE_ROOT",
+      });
+    } finally {
+      executor.close();
+      await rm(workspace, { force: true, recursive: true });
+    }
+  });
 });

@@ -126,6 +126,30 @@ export interface RemoteFileRead extends RemoteFileMetadata {
   truncated: boolean;
 }
 
+export interface WorkspacePatchReplacement {
+  oldText: string;
+  newText: string;
+}
+
+export type WorkspaceMutationOperation =
+  | "write"
+  | "patch"
+  | "mkdir"
+  | "rename"
+  | "delete";
+
+export interface WorkspaceMutationResult {
+  operation: WorkspaceMutationOperation;
+  canonicalPath: string;
+  destinationCanonicalPath?: string;
+  bytesWritten: number;
+  hash?: string;
+  mode?: string;
+  modifiedAtMs?: number;
+  size?: number;
+  idempotencyOutcome?: "executed" | "joined" | "replayed";
+}
+
 export interface AuditEvent {
   timestamp: string;
   requestId?: string;

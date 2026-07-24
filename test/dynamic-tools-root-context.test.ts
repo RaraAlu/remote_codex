@@ -26,6 +26,15 @@ describe("dynamic tool root context", () => {
       target: { enum: ["local", "remote"] },
       rootId: { type: "string" },
     });
+    const writeTool = REMOTE_DYNAMIC_TOOLS.find(
+      (tool) => tool.name === "workspace_write_file",
+    );
+    expect(writeTool?.inputSchema).toMatchObject({
+      required: ["path", "contentBase64"],
+      properties: {
+        expectedHash: { pattern: "^[0-9a-f]{64}$" },
+      },
+    });
 
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-root-context-"));
     try {
@@ -59,19 +68,43 @@ describe("dynamic tool root context", () => {
         size: 6,
         truncated: false,
       }));
-      const requestControllerWorkspace = vi.fn(async () => ({
-        canonicalPath: "/local/reference/notes.md",
-        contentBase64: "bG9jYWw=",
-        hash: "b".repeat(64),
+      const writeFile = vi.fn(async () => ({
+        operation: "write",
+        canonicalPath: "/remote/workspace/new.txt",
+        bytesWritten: 3,
+        hash: "c".repeat(64),
         mode: "81a4",
-        modifiedAtMs: 2,
-        size: 5,
-        truncated: false,
+        modifiedAtMs: 3,
+        size: 3,
+        idempotencyOutcome: "executed",
       }));
+      const requestControllerWorkspace = vi.fn(
+        async (operation: string) =>
+          operation === "localWriteFile"
+            ? {
+                operation: "write",
+                canonicalPath: "/local/reference/local.txt",
+                bytesWritten: 3,
+                hash: "d".repeat(64),
+                mode: "81a4",
+                modifiedAtMs: 4,
+                size: 3,
+              }
+            : {
+                canonicalPath: "/local/reference/notes.md",
+                contentBase64: "bG9jYWw=",
+                hash: "b".repeat(64),
+                mode: "81a4",
+                modifiedAtMs: 2,
+                size: 5,
+                truncated: false,
+              },
+      );
       const executor = {
         connectionId: "conn-test",
         readFile,
         requestControllerWorkspace,
+        writeFile,
       } as unknown as OpenSshExecutor;
       const router = new DynamicToolRouter(config, executor, new AuditLog(auditPath));
 
@@ -154,6 +187,66 @@ describe("dynamic tool root context", () => {
         { path: "notes.md" },
       );
 
+      const remoteWrite = await router.handle(
+        5,
+        {
+          arguments: {
+            contentBase64: "bmV3",
+            path: "new.txt",
+            rootId: "remote-project",
+            target: "remote",
+          },
+          callId: "call-remote-write",
+          tool: "workspace_write_file",
+        },
+        { idempotencyKey: "write-key" },
+      );
+      expect(parseResult(remoteWrite)).toMatchObject({
+        ok: true,
+        data: {
+          operation: "write",
+          bytesWritten: 3,
+          idempotencyOutcome: "executed",
+        },
+        rootId: "remote-project",
+        target: "remote",
+      });
+      expect(writeFile).toHaveBeenCalledWith("new.txt", "bmV3", {
+        idempotencyKey: "write-key",
+        signal: undefined,
+      });
+
+      const localWrite = await router.handle(
+        6,
+        {
+          arguments: {
+            contentBase64: "bmV3",
+            path: "local.txt",
+            rootId: "local-reference",
+            target: "local",
+          },
+          callId: "call-local-write",
+          tool: "workspace_write_file",
+        },
+        { idempotencyKey: "local-write-key" },
+      );
+      expect(parseResult(localWrite)).toMatchObject({
+        ok: true,
+        data: { operation: "write", bytesWritten: 3 },
+        rootId: "local-reference",
+        target: "local",
+      });
+      expect(requestControllerWorkspace).toHaveBeenCalledWith(
+        "localWriteFile",
+        "local-reference",
+        {
+          contentBase64: "bmV3",
+          idempotencyKey: "local-write-key",
+          path: "local.txt",
+          signal: undefined,
+        },
+      );
+
       const events = (await readFileText(auditPath)).map((line) => JSON.parse(line));
       expect(events).toEqual(
         expect.arrayContaining([
@@ -180,6 +273,16 @@ describe("dynamic tool root context", () => {
             rootRole: "secondary",
             rootPath: "/local/reference",
             target: "local",
+          }),
+          expect.objectContaining({
+            operation: "workspace_write_file",
+            outcome: "succeeded",
+            rootId: "remote-project",
+            details: expect.objectContaining({
+              bytesWritten: 3,
+              idempotencyOutcome: "executed",
+              path: "new.txt",
+            }),
           }),
         ]),
       );
