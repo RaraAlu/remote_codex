@@ -20,7 +20,7 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.5` 候选 | 无版本值门禁；Linux Remote SSH 官方任务、完整固定探针和多上游单次执行通过，Windows 实机待补测 |
+| Bridge Controller | `0.3.6` 候选 | 无版本值门禁；Linux Remote SSH 官方任务、完整固定探针、多上游单次执行和网关正常关闭通过，Windows 实机待补测 |
 | Remote Executor | `0.2.8` 候选 | 按所需能力集合握手；远端命令、读取和 stdio CodeGraph 已实测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
@@ -117,7 +117,7 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 | UX-REMOTE | 远程 URI、Diff 和文件跳转 | 待实施 | Bridge 工具可投影为原生 command item | 没有可打开的远程资源身份和 Diff 提供器 |
 | PACK-DUAL | 双平台产物构建与收集 | 待实施 | 两个平台分别有原生 Shim 构建逻辑 | Linux 无法生成 Windows SEA，`package:all` 依赖预存 `.exe` |
 | VERIFY-P0 | 完整 P0 验收 | 待补测 | 历史 Windows 到 Ubuntu 主链路有部分证据 | 当前兼容集合、取消、写入、安全失败和诱饵文件未闭环 |
-| VERIFY-LIFECYCLE | 设置恢复和进程清理 | 待补测 | 逻辑测试覆盖设置恢复；停止时会关闭部分资源 | 三种关闭方式、遗留进程和断线行为缺少实机证据 |
+| VERIFY-LIFECYCLE | 设置恢复和进程清理 | 部分通过 | Remote SSH 重载时外部连接正常关闭，旧 Shim、描述符和令牌清理，新窗口恢复 `ready`；逻辑测试覆盖设置恢复 | 显式停止、Extension Host 退出、relay/MCP 子进程归零和设置恢复缺少实机证据 |
 | VERIFY-METRICS | 量化指标 | 待补测 | 已有单样本和门禁模板 | 启动、任务、固定探针和 MCP 未达到最低样本数 |
 | CLI-INTERVENE | 当前 Codex CLI 对话控制 VS Code Codex 对话 | Linux 本地与 Remote SSH 实机通过 | 共享网关、持久 MCP、list/read/intervene/interrupt、跨客户端权限跟踪和真实远端工具链路已实现 | 已运行的旧 CLI 不会热加载；Windows 和剩余生命周期待补测 |
 | CLI-BIDIRECTIONAL | CLI 与 VS Code 双向实时共享同一 thread | Linux 本地与 Remote SSH 实机通过 | 长期自维护入口、空 thread 新建回退、全双工流式事件、工具打印、权限继承、取消和断开已实现 | 当前旧 CLI 必须重启；官方 UI 发起方向的 Remote SSH 取消与 Windows 待补测 |

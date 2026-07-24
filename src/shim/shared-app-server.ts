@@ -39,6 +39,9 @@ import {
 const LOOPBACK_HOST = "127.0.0.1";
 const EXTERNAL_TOKEN_ENV = "CODEX_BRIDGE_EXTERNAL_SESSION_TOKEN";
 const NOTIFICATION_DEDUP_MS = 1_000;
+const EXTERNAL_CLOSE_CODE = 1_012;
+const EXTERNAL_CLOSE_REASON = "Bridge app-server restarting";
+const EXTERNAL_CLOSE_GRACE_MS = 250;
 
 interface RelayedNotification {
   expiresAtMs: number;
@@ -467,9 +470,9 @@ export class SharedAppServer {
       };
       input.once("end", () => {
         clientEnded = true;
-        void clientQueue.finally(() => {
-          this.#terminateExternalClients();
-          upstream.terminate();
+        void clientQueue.finally(async () => {
+          await this.#closeExternalClients();
+          upstream.close(1_001, "Bridge client input closed");
           setTimeout(() => this.#child?.kill("SIGTERM"), 25).unref();
         });
       });
@@ -626,7 +629,7 @@ export class SharedAppServer {
   }
 
   async #close(): Promise<void> {
-    this.#terminateExternalClients();
+    await this.#closeExternalClients();
     this.#externalWriters.clear();
     this.#externalRelayCounts.clear();
     this.#stdioWriter = null;
@@ -649,9 +652,32 @@ export class SharedAppServer {
     ]);
   }
 
-  #terminateExternalClients(): void {
-    for (const client of this.#externalServer?.clients ?? []) {
-      client.terminate();
-    }
+  async #closeExternalClients(): Promise<void> {
+    await Promise.all(
+      [...(this.#externalServer?.clients ?? [])].map(
+        (client) =>
+          new Promise<void>((resolvePromise) => {
+            if (client.readyState === WebSocket.CLOSED) {
+              resolvePromise();
+              return;
+            }
+            let timer: NodeJS.Timeout | undefined;
+            const finish = (): void => {
+              if (timer) {
+                clearTimeout(timer);
+              }
+              resolvePromise();
+            };
+            client.once("close", finish);
+            timer = setTimeout(() => {
+              client.terminate();
+              finish();
+            }, EXTERNAL_CLOSE_GRACE_MS);
+            if (client.readyState === WebSocket.OPEN) {
+              client.close(EXTERNAL_CLOSE_CODE, EXTERNAL_CLOSE_REASON);
+            }
+          }),
+      ),
+    );
   }
 }

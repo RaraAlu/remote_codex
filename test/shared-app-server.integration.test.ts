@@ -554,7 +554,6 @@ describe("SharedAppServer", () => {
         : undefined,
     );
 
-    external.close();
     input.write(
       `${JSON.stringify({
         id: 17,
@@ -565,7 +564,18 @@ describe("SharedAppServer", () => {
     await waitFor(() =>
       vscodeMessages.some((message) => message.id === 17) ? true : undefined,
     );
+    const externalClosed = new Promise<{ code: number; reason: string }>(
+      (resolvePromise) => {
+        external.once("close", (code, reason) => {
+          resolvePromise({ code, reason: reason.toString("utf8") });
+        });
+      },
+    );
     input.end();
+    await expect(externalClosed).resolves.toEqual({
+      code: 1_012,
+      reason: "Bridge app-server restarting",
+    });
     await expect(running).resolves.toBe(0);
     await expect(readFile(descriptorPath, "utf8")).rejects.toMatchObject({
       code: "ENOENT",

@@ -233,6 +233,14 @@ thread；外部 CLI 创建的会话会把 `permissions=full-access` 和
 构包通过。当前旧 CLI 仍按设计使用其启动时的 `0.3.4 external-mcp`，其父进程关系已
 确认，不属于孤儿进程；设置恢复、CLI 退出后清理和 Windows 实机仍待处理。
 
+`0.3.6` 继续关闭一个独立生命周期缺口：主 stdio 结束时不再直接 terminate 外部
+WebSocket，而是发送 `1012 / Bridge app-server restarting`，等待至多 250 毫秒后才
+强制终止，并正常关闭官方上游。关闭集成测试连续 5 轮通过。真实 Remote SSH 观察器
+跨用户手动重载收到固定关闭码与原因，`sawError=false`；旧 Shim PID、描述符和两份
+令牌均清理，新窗口约 4.726 秒恢复 `ready`，`initialize/thread/list` 通过。历史
+`notLoaded` thread 的显式恢复返回 `thread not found`，设置恢复和其他关闭类型仍作为
+独立待补项。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -258,7 +266,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 外部 CLI 实机见
 `docs/acceptance/2026-07-23-release-0.3.3-remote-cli-acceptance.md`；多上游远端工具
 单次执行见
-`docs/acceptance/2026-07-23-release-0.3.5-single-tool-execution.md`。
+`docs/acceptance/2026-07-23-release-0.3.5-single-tool-execution.md`；外部网关正常关闭见
+`docs/acceptance/2026-07-23-release-0.3.6-graceful-gateway-close.md`。
 
 ## 本地 MCP 边界
 
