@@ -51,6 +51,20 @@ describe("remote Core policy", () => {
     expect(
       isBlockedLocalClientMessage({ id: 2, method: "thread/start", params: {} }),
     ).toBe(false);
+    expect(
+      isBlockedLocalClientMessage({
+        id: 3,
+        method: "fs/futureMutation",
+        params: {},
+      }),
+    ).toBe(true);
+    expect(
+      isBlockedLocalClientMessage({
+        id: 4,
+        method: "process/futureControl",
+        params: {},
+      }),
+    ).toBe(true);
   });
 
   it("recognizes every local Core approval path without blocking remote tool calls", () => {

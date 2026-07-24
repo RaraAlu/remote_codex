@@ -20,7 +20,7 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.17` 自动化候选 | transport 中断后的新 socket 账本查询、终态恢复和未知结果失败关闭已实现；候选 VSIX 安装、真实断线恢复与 Windows 实机待补测 |
+| Bridge Controller | `0.3.18` 自动化候选 | 本地 Core 风险请求按命名空间失败关闭；未知未来文件/进程/命令方法不能穿透；候选 VSIX 安装、真实诱饵与 Windows 实机待补测 |
 | Remote Executor | `0.2.11` / 诊断协议 6 自动化候选 | 新增有界结果账本和 `resultStatus`；同键请求合并或回放，参数冲突失败关闭；候选实机待补测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
@@ -120,7 +120,7 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 | LIFE-CANCEL | 运行中取消 | 已实施（自动化） | `turn/interrupt` 绑定 thread/turn 活动调用；默认 VS Code Remote transport 显式取消；Executor 按 operation ID 中止 POSIX 进程组；等待审批取消不执行命令 | 真实 Remote SSH 取消耗时/遗留进程、Windows 进程树和 OpenSSH 回退待补测 |
 | LIFE-IDEMP | 幂等和断线结果确认 | 已实施（自动化）/待实机 | 同一 app-server 广播先协调为单次执行；`remote_exec` 使用稳定键；Executor 有界账本可合并、回放并查询五种状态；transport 中断后从新 socket 查询，终态恢复，未知结果不重放 | Extension Host 重启状态、真实 Remote SSH 断线恢复和双平台生命周期待补测 |
 | LIFE-BACKGROUND | 后台任务 | 待实施 | MCP stdio 有长生命周期会话管理 | 普通命令没有 start/status/log/cancel 协议 |
-| SAFE-CORE | Core 本地 Shell/文件工具硬阻断 | 部分实施/待补测 | 专用本地拒绝权限配置已由官方 app-server 激活；Shim 阻断 25 个本地客户端请求和五类 Core 本地审批并失败审计 | 真实模型专用工具诱饵负测和官方 UI 恢复尚未完成；hook 不能作为完整强制边界 |
+| SAFE-CORE | Core 本地 Shell/文件工具硬阻断 | 自动化边界已实施/待实机 | 专用本地拒绝权限配置已激活；Shim 阻断 25 个已知客户端请求、五类 Core 本地审批和风险命名空间中的未来方法并失败审计 | 真实模型专用工具诱饵负测和官方 UI 恢复尚未完成；外部协议边界不能证明 Core 内部不存在未暴露路径 |
 | UX-REMOTE | 远程 URI、Diff 和文件跳转 | 待实施 | Bridge 工具可投影为原生 command item | 没有可打开的远程资源身份和 Diff 提供器 |
 | PACK-DUAL | 双平台产物构建与收集 | 待实施 | 两个平台分别有原生 Shim 构建逻辑 | Linux 无法生成 Windows SEA，`package:all` 依赖预存 `.exe` |
 | VERIFY-P0 | 完整 P0 验收 | 待补测 | 历史 Windows 到 Ubuntu 主链路有部分证据 | 当前兼容集合、取消、写入、安全失败和诱饵文件未闭环 |

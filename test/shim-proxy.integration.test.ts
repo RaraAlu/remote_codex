@@ -303,7 +303,11 @@ describe("ShimProxy JSONL integration", () => {
       spawnCodex: () => fakeAppServer(),
     });
     const running = proxy.run();
-    const blockedMethods = [...BLOCKED_LOCAL_CLIENT_METHODS];
+    const blockedMethods = [
+      ...BLOCKED_LOCAL_CLIENT_METHODS,
+      "fs/futureMutation",
+      "process/futureControl",
+    ];
     blockedMethods.forEach((method, index) => {
       input.write(
         `${JSON.stringify({
@@ -349,11 +353,18 @@ describe("ShimProxy JSONL integration", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(
-      auditEvents.filter(
-        (event) => event.operation === "local_core_request.blocked",
-      ),
-    ).toHaveLength(blockedMethods.length);
+    const blockedAuditEvents = auditEvents.filter(
+      (event) => event.operation === "local_core_request.blocked",
+    );
+    expect(blockedAuditEvents).toHaveLength(blockedMethods.length);
+    expect(blockedAuditEvents).toContainEqual(
+      expect.objectContaining({
+        details: {
+          knownMethod: false,
+          method: "fs/futureMutation",
+        },
+      }),
+    );
     expect(audit).not.toContain("/tmp/local-project-decoy");
   });
 

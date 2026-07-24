@@ -13,6 +13,7 @@ import { OpenSshExecutor, type SpawnProcess } from "../core/ssh-executor.js";
 import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
 import { DynamicToolRouter, REMOTE_TOOL_NAMES } from "./dynamic-tools.js";
 import {
+  isBlockedLocalClientMethod,
   isBlockedLocalClientMessage,
   isBlockedLocalServerApproval,
 } from "./local-core-policy.js";
@@ -412,7 +413,10 @@ export class ShimProxy {
         workspaceRoot: this.#options.config.workspaceRoot,
         operation: "local_core_request.blocked",
         outcome: "failed",
-        details: { method: message.method },
+        details: {
+          knownMethod: isBlockedLocalClientMethod(message.method),
+          method: message.method,
+        },
       });
       if (isRpcRequest(message)) {
         writeClient({

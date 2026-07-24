@@ -63,6 +63,9 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 - 远端缺少 `rg` 时自动使用不跟随目录符号链接的 GNU `grep` 搜索。
 - SSH 子进程只继承必要环境变量，不继承 Codex、OpenAI 或其他应用凭据。
 - 未知 app-server 服务端请求默认拒绝；操作审计日志只保存在本地并结构化脱敏。
+- Remote SSH 会话中的本地 Core 客户端请求按 `fs/`、`process/`、`command/exec`、
+  `fuzzyFileSearch` 和后台终端等风险命名空间整体失败关闭；官方协议未来新增同类方法
+  也不会因尚未进入已知方法清单而穿透。
 - 当前协议子集由实测 `openai.chatgpt@26.721.30844` 内置 Codex
   `0.146.0-alpha.3` 生成；所有版本值只用于诊断、快照索引和回归触发，不作为运行时
   门禁。运行时只因缺少实际能力、消息结构错误或真实操作失败而拒绝。
@@ -352,7 +355,7 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前功能候选为
-`docs/acceptance/2026-07-23-release-0.3.17-disconnect-recovery.md`；在候选包安装、
+`docs/acceptance/2026-07-24-release-0.3.18-core-risk-namespaces.md`；在候选包安装、
 完整生命周期
 和双平台实机闭环通过前，它不会替代已验收基线。
 

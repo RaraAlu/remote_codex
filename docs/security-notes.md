@@ -59,6 +59,9 @@
 - Codex 和 SSH 可执行文件按本地平台发现；Windows 只接受原生 `codex.exe`/`ssh.exe`
   候选，不会执行遗留的 Linux 绝对路径。显式配置仍应指向受信任文件。
 - 未知 app-server 服务端请求默认返回 `-32601`。
+- Remote SSH 会话的本地 Core 客户端请求按风险命名空间阻断，而不只依赖当前协议中的
+  已知方法枚举。未来新增的 `fs/`、`process/`、`command/exec`、`fuzzyFileSearch`
+  或后台终端方法默认失败关闭并记录 `knownMethod=false`。
 
 ## 尚未形成硬保证
 

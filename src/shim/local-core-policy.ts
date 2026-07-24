@@ -63,7 +63,7 @@ export function isLocalClientRiskNamespace(method: string): boolean {
 export function isBlockedLocalClientMessage(
   message: RpcMessage,
 ): message is RpcRequest | RpcNotification {
-  return "method" in message && isBlockedLocalClientMethod(message.method);
+  return "method" in message && isLocalClientRiskNamespace(message.method);
 }
 
 export function isBlockedLocalServerApproval(request: RpcRequest): boolean {

@@ -116,7 +116,7 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 运行中取消 | `0.3.15` 已把 `turn/interrupt` 绑定到活动 Bridge 调用；VS Code Remote 通道显式发送 `cancel`，Remote Executor 按 operation ID 中止 POSIX 进程组；自动化通过，真实 Remote SSH 与 Windows 待补测 |
 | 哈希保护写入和补丁 | 未实现 |
 | 断线结果确认和幂等 | `0.3.17` 已在 transport 中断后用原幂等键从新 socket 查询账本；completed 返回原结果，cancelled/failed 保留终态，running 有界轮询，unknown 或查询不可达返回 `RESULT_UNKNOWN` 且不重放；Extension Host 重启持久化未实现 |
-| Core 内置本地工具硬阻断 | 部分实施；专用权限配置、25 个客户端请求和五类本地审批已失败关闭，真实模型专用工具诱饵待补测 |
+| Core 内置本地工具硬阻断 | 自动化边界已实施；专用权限配置、25 个已知客户端请求、五类本地审批及未来风险命名空间均失败关闭，真实模型专用工具诱饵待补测 |
 
 阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行，0.3.15 完成默认
 VS Code Remote 链路的运行中取消自动化闭环，0.3.16 增加当前 Executor 代次内的有界
@@ -323,6 +323,12 @@ cancelled/failed 还原远端错误；running 在三秒有界窗口内轮询；u
 实现和协议形状没有变化，因此继续使用 `0.2.11` 和诊断协议号 6。真实 Remote SSH
 断线、窗口关闭、Executor 失联和 Extension Host 重启仍按生命周期门禁分别待补测。
 
+`0.3.18` 将 Remote SSH 会话的本地 Core 客户端阻断从已知方法枚举提升为风险命名空间
+失败关闭。`fs/`、`process/`、`command/exec`、`fuzzyFileSearch`、后台终端和
+`thread/shellCommand` 下未来新增的方法即使尚未出现在生成协议清单中，也不会被转发到
+本地 app-server；审计区分已知方法和前向未知方法。真实模型是否存在完全不经过客户端
+请求或审批通道的专用工具路径，仍按统一人工清单执行诱饵负测。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -358,7 +364,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-23-release-0.3.14-dual-read-routing.md`；运行中命令取消见
 `docs/acceptance/2026-07-23-release-0.3.15-command-cancellation.md`；幂等账本见
 `docs/acceptance/2026-07-23-release-0.3.16-idempotency-ledger.md`；断线查询恢复见
-`docs/acceptance/2026-07-23-release-0.3.17-disconnect-recovery.md`。
+`docs/acceptance/2026-07-23-release-0.3.17-disconnect-recovery.md`；Core 风险命名空间
+阻断见 `docs/acceptance/2026-07-24-release-0.3.18-core-risk-namespaces.md`。
 
 ## 本地 MCP 边界
 
