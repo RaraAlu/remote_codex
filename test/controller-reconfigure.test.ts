@@ -53,6 +53,7 @@ vi.mock("vscode", () => ({
       get: <T>(_key: string, fallback?: T) => fallback,
       update: mock.settingsUpdate,
     }),
+    registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
     workspaceFolders: [{ uri: { path: "/home/unitree/rl_sar" } }],
   },
 }));

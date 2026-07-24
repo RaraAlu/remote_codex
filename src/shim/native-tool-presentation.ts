@@ -1,7 +1,6 @@
 import {
   basename,
   isAbsolute,
-  posix,
   relative,
   resolve,
   sep,
@@ -161,14 +160,33 @@ function commandPresentation(
       const command = workspaceCommand(root, "read", ["--", shellQuote(path)]);
       return {
         command,
-        commandActions: [
-          {
-            type: "read",
-            command,
-            name: root.target === "remote" ? posix.basename(path) : basename(path),
-            path,
-          },
-        ],
+        commandActions:
+          root.target === "remote"
+            ? [{ type: "unknown", command }]
+            : [
+                {
+                  type: "read",
+                  command,
+                  name: basename(path),
+                  path,
+                },
+              ],
+        cwd: root.path,
+      };
+    }
+    case "workspace_open_file": {
+      const command = workspaceCommand(root, "open", ["--", shellQuote(path)]);
+      return {
+        command,
+        commandActions: [{ type: "unknown", command }],
+        cwd: root.path,
+      };
+    }
+    case "workspace_show_diff": {
+      const command = workspaceCommand(root, "diff", ["--", shellQuote(path)]);
+      return {
+        command,
+        commandActions: [{ type: "unknown", command }],
         cwd: root.path,
       };
     }
@@ -176,7 +194,10 @@ function commandPresentation(
       const command = workspaceCommand(root, "list", ["--", shellQuote(path)]);
       return {
         command,
-        commandActions: [{ type: "listFiles", command, path }],
+        commandActions:
+          root.target === "remote"
+            ? [{ type: "unknown", command }]
+            : [{ type: "listFiles", command, path }],
         cwd: root.path,
       };
     }
@@ -193,7 +214,10 @@ function commandPresentation(
       ]);
       return {
         command,
-        commandActions: [{ type: "listFiles", command, path }],
+        commandActions:
+          root.target === "remote"
+            ? [{ type: "unknown", command }]
+            : [{ type: "listFiles", command, path }],
         cwd: root.path,
       };
     }
@@ -211,12 +235,14 @@ function commandPresentation(
       return {
         command,
         commandActions: [
-          {
-            type: "search",
-            command,
-            path: paths.length === 1 ? paths[0] : root.path,
-            query,
-          },
+          root.target === "remote"
+            ? { type: "unknown", command }
+            : {
+                type: "search",
+                command,
+                path: paths.length === 1 ? paths[0] : root.path,
+                query,
+              },
         ],
         cwd: root.path,
       };
@@ -315,6 +341,10 @@ function readableFileOutput(data: Record<string, unknown>): string | null {
   return content.toString("utf8");
 }
 
+function resourceOutput(data: Record<string, unknown>): string {
+  return typeof data.resourceUri === "string" ? `Resource: ${data.resourceUri}\n` : "";
+}
+
 function formatToolOutput(tool: string, item: Record<string, unknown>): string | null {
   const normalizedTool = normalizeWorkspaceToolName(tool);
   const result = textResult(item);
@@ -345,10 +375,21 @@ function formatToolOutput(tool: string, item: Record<string, unknown>): string |
           : "";
     const bytesWritten =
       typeof data.bytesWritten === "number" ? ` (${data.bytesWritten} bytes)` : "";
-    return `${operation}: ${canonicalPath}${bytesWritten}`;
+    return `${resourceOutput(data)}${operation}: ${canonicalPath}${bytesWritten}`;
   }
   if (normalizedTool === "workspace_read_file" && isRecord(data)) {
-    return readableFileOutput(data);
+    const content = readableFileOutput(data);
+    return `${resourceOutput(data)}${content ?? ""}`.trimEnd();
+  }
+  if (
+    (normalizedTool === "workspace_open_file" ||
+      normalizedTool === "workspace_show_diff") &&
+    isRecord(data)
+  ) {
+    const action = typeof data.action === "string" ? data.action : "opened";
+    const relativePath =
+      typeof data.relativePath === "string" ? data.relativePath : "";
+    return `${resourceOutput(data)}${action}: ${relativePath}`.trimEnd();
   }
   if (normalizedTool === "workspace_list_directory") {
     const entries = Array.isArray(data)

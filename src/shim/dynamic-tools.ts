@@ -26,11 +26,13 @@ export const WORKSPACE_TOOL_NAMES = new Set([
   "workspace_apply_patch",
   "workspace_create_directory",
   "workspace_delete_path",
+  "workspace_open_file",
   "workspace_read_file",
   "workspace_list_directory",
   "workspace_list_tree",
   "workspace_rename_path",
   "workspace_search",
+  "workspace_show_diff",
   "workspace_git_status",
   "workspace_write_file",
 ]);
@@ -41,6 +43,11 @@ export const WORKSPACE_MUTATION_TOOL_NAMES = new Set([
   "workspace_delete_path",
   "workspace_rename_path",
   "workspace_write_file",
+]);
+
+export const WORKSPACE_RESOURCE_TOOL_NAMES = new Set([
+  "workspace_open_file",
+  "workspace_show_diff",
 ]);
 
 export const REMOTE_BACKGROUND_TOOL_NAMES = new Set([
@@ -293,6 +300,56 @@ export const REMOTE_DYNAMIC_TOOLS = [
   },
   {
     type: "function",
+    name: "workspace_open_file",
+    description:
+      "Open a verified workspace file in the active VS Code editor, optionally selecting a one-based line and column range. Requires the active VS Code Remote transport.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path"],
+      properties: {
+        ...ROOT_INPUT_PROPERTIES,
+        path: { type: "string", description: "File path within the selected root." },
+        line: { type: "integer", minimum: 1 },
+        column: { type: "integer", minimum: 1 },
+        endLine: { type: "integer", minimum: 1 },
+        endColumn: { type: "integer", minimum: 1 },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "workspace_show_diff",
+    description:
+      "Open a VS Code Diff between a verified prior UTF-8 snapshot and the current workspace file. Requires the active VS Code Remote transport.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["path", "beforeContentBase64", "beforeHash"],
+      properties: {
+        ...ROOT_INPUT_PROPERTIES,
+        path: { type: "string", description: "File path within the selected root." },
+        beforeContentBase64: {
+          type: "string",
+          description:
+            "Prior complete UTF-8 file content from workspace_read_file, encoded as base64, up to 1 MiB.",
+        },
+        beforeHash: {
+          type: "string",
+          pattern: "^[0-9a-f]{64}$",
+          description: "SHA-256 hash returned with the prior file content.",
+        },
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: 200,
+          description: "Optional single-line Diff editor title.",
+        },
+      },
+    },
+  },
+  {
+    type: "function",
     name: "workspace_read_file",
     description:
       "Read a file from an explicitly selected authorized local or remote workspace root. Returns base64 content and verified metadata.",
@@ -529,6 +586,9 @@ export class DynamicToolRouter {
         ...(WORKSPACE_MUTATION_TOOL_NAMES.has(call.tool)
           ? this.#mutationAuditDetails(args)
           : {}),
+        ...(WORKSPACE_RESOURCE_TOOL_NAMES.has(call.tool)
+          ? this.#resourceAuditDetails(args)
+          : {}),
       },
     });
 
@@ -536,7 +596,11 @@ export class DynamicToolRouter {
       if (observer.signal?.aborted) {
         throw new BridgeError("CANCELLED", "Workspace tool call was cancelled");
       }
-      const data = await this.#execute(call.tool, args, root, observer);
+      const data = await this.#attachWorkspaceResource(
+        call.tool,
+        await this.#execute(call.tool, args, root, observer),
+        root,
+      );
       if (observer.signal?.aborted) {
         throw new BridgeError("CANCELLED", "Workspace tool call was cancelled");
       }
@@ -582,6 +646,9 @@ export class DynamicToolRouter {
                 ...(WORKSPACE_MUTATION_TOOL_NAMES.has(call.tool)
                   ? this.#mutationAuditDetails(args)
                   : {}),
+                ...(WORKSPACE_RESOURCE_TOOL_NAMES.has(call.tool)
+                  ? this.#resourceAuditDetails(args, data)
+                  : {}),
               },
             }
           : {}),
@@ -626,6 +693,9 @@ export class DynamicToolRouter {
             : {}),
           ...(WORKSPACE_MUTATION_TOOL_NAMES.has(call.tool)
             ? this.#mutationAuditDetails(args)
+            : {}),
+          ...(WORKSPACE_RESOURCE_TOOL_NAMES.has(call.tool)
+            ? this.#resourceAuditDetails(args)
             : {}),
         },
       });
@@ -744,6 +814,60 @@ export class DynamicToolRouter {
     }
     const executor = this.#workspaceExecutor(root);
     switch (normalizedTool) {
+      case "workspace_open_file": {
+        const controller = this.#controllerWorkspace;
+        if (!controller) {
+          throw new BridgeError(
+            "COMMAND_DENIED",
+            "Opening workspace resources requires the active VS Code Remote transport",
+          );
+        }
+        const path = await executor.canonicalPath(requiredPath(args));
+        return await controller.requestControllerWorkspace(
+          "openWorkspaceResource",
+          root.id,
+          {
+            path,
+            ...(["line", "column", "endLine", "endColumn"] as const).reduce<
+              Record<string, unknown>
+            >((params, key) => {
+              if (args[key] !== undefined) {
+                params[key] = args[key];
+              }
+              return params;
+            }, {}),
+          },
+        );
+      }
+      case "workspace_show_diff": {
+        const controller = this.#controllerWorkspace;
+        if (!controller) {
+          throw new BridgeError(
+            "COMMAND_DENIED",
+            "Showing workspace Diff requires the active VS Code Remote transport",
+          );
+        }
+        if (typeof args.beforeContentBase64 !== "string") {
+          throw new BridgeError(
+            "PROTOCOL_MISMATCH",
+            "beforeContentBase64 must be a string",
+          );
+        }
+        if (typeof args.beforeHash !== "string") {
+          throw new BridgeError("PROTOCOL_MISMATCH", "beforeHash must be a string");
+        }
+        const path = await executor.canonicalPath(requiredPath(args));
+        return await controller.requestControllerWorkspace(
+          "showWorkspaceDiff",
+          root.id,
+          {
+            beforeContentBase64: args.beforeContentBase64,
+            beforeHash: args.beforeHash,
+            path,
+            ...(args.title === undefined ? {} : { title: args.title }),
+          },
+        );
+      }
       case "workspace_write_file": {
         if (typeof args.contentBase64 !== "string") {
           throw new BridgeError(
@@ -975,6 +1099,67 @@ export class DynamicToolRouter {
         ? { expectedHash: args.expectedHash }
         : {}),
     };
+  }
+
+  #resourceAuditDetails(
+    args: Record<string, unknown>,
+    data?: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return {
+      ...(typeof args.path === "string" ? { path: args.path } : {}),
+      ...(typeof args.beforeHash === "string" ? { beforeHash: args.beforeHash } : {}),
+      ...(typeof args.title === "string" ? { title: args.title } : {}),
+      ...(typeof args.line === "number" ? { line: args.line } : {}),
+      ...(data && typeof data.resourceUri === "string"
+        ? { resourceUri: data.resourceUri }
+        : {}),
+      ...(data && typeof data.workspaceUri === "string"
+        ? { workspaceUri: data.workspaceUri }
+        : {}),
+    };
+  }
+
+  async #attachWorkspaceResource(
+    tool: string,
+    data: unknown,
+    root: WorkspaceRootConfig,
+  ): Promise<unknown> {
+    if (!isRecord(data) || typeof data.resourceUri === "string") {
+      return data;
+    }
+    const normalizedTool = normalizeWorkspaceToolName(tool);
+    if (
+      normalizedTool !== "workspace_read_file" &&
+      normalizedTool !== "workspace_write_file" &&
+      normalizedTool !== "workspace_apply_patch" &&
+      normalizedTool !== "workspace_rename_path"
+    ) {
+      return data;
+    }
+    const canonicalPath =
+      typeof data.destinationCanonicalPath === "string"
+        ? data.destinationCanonicalPath
+        : typeof data.canonicalPath === "string"
+          ? data.canonicalPath
+          : null;
+    if (!canonicalPath) {
+      return data;
+    }
+    if (!this.#controllerWorkspace) {
+      return data;
+    }
+    const resource = await this.#controllerWorkspace.requestControllerWorkspace<
+      Record<string, unknown>
+    >("registerWorkspaceResource", root.id, { path: canonicalPath });
+    return typeof resource.resourceUri === "string"
+      ? {
+          ...data,
+          resourceUri: resource.resourceUri,
+          ...(typeof resource.workspaceUri === "string"
+            ? { workspaceUri: resource.workspaceUri }
+            : {}),
+        }
+      : data;
   }
 
   #requiredTaskId(args: Record<string, unknown>): string {

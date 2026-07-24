@@ -7,6 +7,9 @@ const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
 - The project primary root exists on the configured remote Ubuntu host.
 - Use workspace_* dynamic tools for bounded file reads and writes, exact patches, directory operations, literal search, and Git status.
 - Before replacing, patching, renaming, or deleting a file, read it and pass its returned SHA-256 as expectedHash. Never retry a FILE_CONFLICT without reading again.
+- Use workspace_open_file for editor jumps; never ask VS Code to open a remote POSIX path as though it were local.
+- After changing a text file, use workspace_show_diff with the complete pre-change content and hash returned by workspace_read_file when a visual review is useful.
+- Preserve and report the returned codex-bridge resourceUri as the stable workspace resource identity.
 - Omitting target and rootId selects the remote primary root.
 - Access a local secondary root only through workspace_* with its explicit target="local" and rootId.
 - For project overviews, prefer one workspace_list_tree call before focused directory listings.

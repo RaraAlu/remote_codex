@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 51 个测试文件通过、1 个真实远端条件文件跳过，200 项通过、6 项
+`npm run test` 为 57 个测试文件通过、1 个真实远端条件文件跳过，237 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -98,7 +98,7 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | Controller 本地只读执行器 | `0.3.13` 已实现读取、目录、树、字面搜索和 Git 状态，并覆盖父路径、符号链接、根替换与撤销防线 |
 | 双端只读路由 | `0.3.14` 已通过统一 `workspace_*` 工具按显式目标和根 ID 路由；本地请求只经已认证 Controller transport，远端维持现有执行器路径 |
 | Bridge 工具原生界面投影 | `0.3.14` 已按本地/远程根显示目标、根 ID、规范化路径和 `cwd`；真实候选窗口观感待补测 |
-| 远程 URI、Diff 和文件跳转 | 未实现 |
+| 远程 URI、Diff 和文件跳转 | `0.3.21` 已实现 host/根/目标端/相对路径资源身份、会话登记内容提供器、实际 Remote SSH URI 跳转和有界旧内容 Diff；OpenSSH 失败关闭，真实同名诱饵与界面待补测 |
 
 阶段 B 的远端执行器与 Shim 动态只读工具已通过真实 SSH 验收，双端路由已通过自动化。
 尚缺候选 VSIX 中的本地同名诱饵、VS Code 当前文件、远程链接和界面侧验收，因此阶段 B
@@ -120,12 +120,13 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 写入幂等与上限 | 默认远端复用 Executor 账本，本地 Controller 有独立有界账本；文件正文最多 1 MiB，经 stdin 传输，不进入 argv |
 | 断线结果确认和幂等 | `0.3.17` 已在 transport 中断后用原幂等键从新 socket 查询账本；completed 返回原结果，cancelled/failed 保留终态，running 有界轮询，unknown 或查询不可达返回 `RESULT_UNKNOWN` 且不重放；Extension Host 重启持久化未实现 |
 | 后台任务 | `0.3.20` 在活动 VS Code Remote transport 上提供 start/status/log/cancel；稳定任务 ID 避免重连重复启动，日志按字节游标有界保留，取消、超时和 Extension Host 关闭终止进程组；OpenSSH 回退失败关闭 |
+| 远程资源映射 | `0.3.21` 提供 `workspace_open_file` 与 `workspace_show_diff`；Controller 只映射已规范化路径，复用实际打开的 Remote SSH URI，并以会话登记、根授权复核、SHA-256 和内存上限保护内容提供器与 Diff 快照 |
 | Core 内置本地工具硬阻断 | 自动化边界已实施；专用权限配置、25 个已知客户端请求、五类本地审批及未来风险命名空间均失败关闭，真实模型专用工具诱饵待补测 |
 
 阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行，0.3.15 完成默认
 VS Code Remote 链路的运行中取消自动化闭环，0.3.16 增加当前 Executor 代次内的有界
 幂等账本与结果查询，0.3.17 增加断线后的查询恢复，0.3.19 交付双端写入自动化，
-0.3.20 交付后台任务生命周期自动化；
+0.3.20 交付后台任务生命周期自动化，0.3.21 交付远程资源、文件跳转和 Diff 自动化；
 本地 Core 真实诱饵、真实写入和生命周期验收完成前，不得用于无人值守的有副作用任务。
 
 ## 当前优先阶段：外部 Codex CLI 介入
@@ -388,7 +389,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-23-release-0.3.17-disconnect-recovery.md`；Core 风险命名空间
 阻断见 `docs/acceptance/2026-07-24-release-0.3.18-core-risk-namespaces.md`；双端安全
 写入见 `docs/acceptance/2026-07-24-release-0.3.19-dual-write.md`；后台任务见
-`docs/acceptance/2026-07-24-release-0.3.20-background-tasks.md`。
+`docs/acceptance/2026-07-24-release-0.3.20-background-tasks.md`；远程资源见
+`docs/acceptance/2026-07-24-release-0.3.21-workspace-resources.md`。
 
 ## 本地 MCP 边界
 

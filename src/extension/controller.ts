@@ -58,6 +58,10 @@ import { ControllerWorkspaceDispatcher } from "./controller-workspace-dispatcher
 import { LocalWorkspaceExecutor } from "./local-workspace-executor.js";
 import { repairCodexViewLocation } from "./view-location.js";
 import { VsCodeTransportServer } from "./vscode-transport-server.js";
+import {
+  isWorkspaceResourceOperation,
+  WorkspaceResourceController,
+} from "./workspace-resource-controller.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -148,6 +152,7 @@ export class BridgeController implements vscode.Disposable {
   readonly #status: vscode.StatusBarItem;
   readonly #sessionConfigPath: string | null;
   readonly #transport: VsCodeTransportServer;
+  readonly #workspaceResources: WorkspaceResourceController;
   #config: BridgeConfig | null = null;
   #executor: OpenSshExecutor | null = null;
   #sessionConfig: BridgeConfig | null = null;
@@ -171,9 +176,16 @@ export class BridgeController implements vscode.Disposable {
       () => this.#sessionConfig ?? this.#config,
       (rootId) => this.#localRoots.find(rootId),
     );
+    this.#workspaceResources = new WorkspaceResourceController(
+      () => this.#sessionConfig ?? this.#config,
+      (rootId) => this.#localRoots.find(rootId),
+    );
     this.#transport = new VsCodeTransportServer(
       () => this.#sessionConfig ?? this.#config,
-      (request) => workspaceDispatcher.execute(request),
+      (request) =>
+        isWorkspaceResourceOperation(request.operation)
+          ? this.#workspaceResources.execute(request)
+          : workspaceDispatcher.execute(request),
     );
     delete process.env.CODEX_BRIDGE_CODEX_EXECUTABLE;
     delete process.env.CODEX_BRIDGE_DEVELOPMENT_CODEX_EXECUTABLE;
@@ -221,6 +233,7 @@ export class BridgeController implements vscode.Disposable {
       vscode.commands.registerCommand(REMOTE_OUTPUT_COMMAND, (event) =>
         this.#transport.handleOutput(event),
       ),
+      this.#workspaceResources.register(),
     ];
   }
 
@@ -634,6 +647,7 @@ export class BridgeController implements vscode.Disposable {
     this.#executor?.close();
     void this.#clearWindowSession().catch(() => undefined);
     this.#transport.dispose();
+    this.#workspaceResources.dispose();
     this.#output.dispose();
     this.#status.dispose();
   }

@@ -21,6 +21,9 @@ export const CONTROLLER_WORKSPACE_OPERATIONS = [
   "localRenamePath",
   "localSearch",
   "localWriteFile",
+  "openWorkspaceResource",
+  "registerWorkspaceResource",
+  "showWorkspaceDiff",
 ] as const;
 
 export type ControllerWorkspaceOperation =

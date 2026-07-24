@@ -89,6 +89,12 @@ describe("app-server request rewriting", () => {
     expect(String(rewritten.params.developerInstructions)).toContain(
       "use remote_background_start once",
     );
+    expect(String(rewritten.params.developerInstructions)).toContain(
+      "Use workspace_open_file for editor jumps",
+    );
+    expect(String(rewritten.params.developerInstructions)).toContain(
+      "use workspace_show_diff",
+    );
     const tools = rewritten.params.dynamicTools as Array<{ name: string }>;
     expect(tools.map((tool) => tool.name)).toEqual([
       "existing",

@@ -29,7 +29,7 @@ const dualConfig = parseBridgeConfig({
 });
 
 describe("native Codex tool presentation", () => {
-  it("projects a remote file read into the native command execution shape", () => {
+  it("does not project a remote POSIX path as a local native file action", () => {
     const projected = projectServerMessage(
       {
         method: "item/started",
@@ -62,9 +62,7 @@ describe("native Codex tool presentation", () => {
       status: "inProgress",
       commandActions: [
         {
-          type: "read",
-          name: "index.ts",
-          path: "/remote/workspace/src/index.ts",
+          type: "unknown",
         },
       ],
     });
@@ -157,10 +155,54 @@ describe("native Codex tool presentation", () => {
       aggregatedOutput: "src/\nsrc/index.ts",
       commandActions: [
         {
-          type: "listFiles",
-          path: "/remote/workspace",
+          type: "unknown",
         },
       ],
+    });
+  });
+
+  it("projects editor open results with their stable resource URI", () => {
+    const resourceUri =
+      "codex-bridge://workspace/remote-primary/src/index.ts?host=training-gpu&target=remote";
+    const projected = projectServerMessage(
+      {
+        method: "item/completed",
+        params: {
+          item: {
+            id: "item-open",
+            type: "dynamicToolCall",
+            tool: "workspace_open_file",
+            arguments: { path: "src/index.ts" },
+            status: "completed",
+            success: true,
+            contentItems: [
+              {
+                type: "inputText",
+                text: JSON.stringify({
+                  ok: true,
+                  data: {
+                    action: "opened",
+                    relativePath: "src/index.ts",
+                    resourceUri,
+                  },
+                }),
+              },
+            ],
+          },
+        },
+      },
+      config,
+    ) as unknown as {
+      params: { item: Record<string, unknown> };
+    };
+
+    expect(projected.params.item).toMatchObject({
+      aggregatedOutput: `Resource: ${resourceUri}\nopened: src/index.ts`,
+      command:
+        "codex-bridge open --target remote --root 'remote-primary' -- '/remote/workspace/src/index.ts'",
+      commandActions: [{ type: "unknown" }],
+      status: "completed",
+      type: "commandExecution",
     });
   });
 

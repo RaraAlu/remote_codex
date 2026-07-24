@@ -20,7 +20,7 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.20` 自动化候选 | 双端有界写入和后台任务生命周期已接通；候选 VSIX 安装、真实运行与 Windows 实机待补测 |
+| Bridge Controller | `0.3.21` 自动化候选 | 双端有界写入、后台任务和远程资源映射已接通；候选 VSIX 安装、真实运行与 Windows 实机待补测 |
 | Remote Executor | `0.2.13` / 诊断协议 8 自动化候选 | 保留结果账本和有界 stdin，新增隔离后台任务、游标日志、状态及进程组取消能力；候选实机待补测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
@@ -35,8 +35,8 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 2026-07-23 在 Linux x64 本机执行 `npm run check`：
 
 - TypeScript 类型检查通过。
-- 51 个测试文件通过，1 个真实远端条件测试文件跳过。
-- 200 项测试通过，6 项条件测试跳过，0 项失败。
+- 57 个测试文件通过，1 个真实远端条件测试文件跳过。
+- 237 项测试通过，6 项条件测试跳过，0 项失败。
 - Controller、Shim 和 Remote Executor 构建通过。
 - 插件内置 `0.146.0-alpha.3` 的本地透传、远程窗口启动和线程创建 Shim 冒烟通过；
   缺少受控运行时指针时，即使 PATH 存在系统 CLI 也失败关闭。
@@ -122,7 +122,7 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 | LIFE-IDEMP | 幂等和断线结果确认 | 已实施（自动化）/待实机 | 同一 app-server 广播先协调为单次执行；`remote_exec` 使用稳定键；Executor 有界账本可合并、回放并查询五种状态；transport 中断后从新 socket 查询，终态恢复，未知结果不重放 | Extension Host 重启状态、真实 Remote SSH 断线恢复和双平台生命周期待补测 |
 | LIFE-BACKGROUND | 后台任务 | 已实施（自动化） | 活动 VS Code Remote transport 提供 start/status/log/cancel；任务按工作区和稳定 ID 隔离，日志、数量、保留时间和寿命有界；取消、超时及 Extension Host 关闭终止进程组 | 真实候选窗口、窗口关闭与 Windows 进程树待补测；OpenSSH 回退明确失败关闭 |
 | SAFE-CORE | Core 本地 Shell/文件工具硬阻断 | 自动化边界已实施/待实机 | 专用本地拒绝权限配置已激活；Shim 阻断 25 个已知客户端请求、五类 Core 本地审批和风险命名空间中的未来方法并失败审计 | 真实模型专用工具诱饵负测和官方 UI 恢复尚未完成；外部协议边界不能证明 Core 内部不存在未暴露路径 |
-| UX-REMOTE | 远程 URI、Diff 和文件跳转 | 待实施 | Bridge 工具可投影为原生 command item | 没有可打开的远程资源身份和 Diff 提供器 |
+| UX-REMOTE | 远程 URI、Diff 和文件跳转 | 已实施（自动化） | host/根 ID/目标端/相对路径组成稳定身份；Controller 只登记已规范化路径，内容提供器复核活动配置和授权；跳转复用实际 Remote SSH URI；旧内容经 SHA-256 校验后进入有界内存 Diff | 当前文件、选区、附件、本地同名诱饵、过期资源和官方界面观感待实机补测；OpenSSH 回退失败关闭 |
 | PACK-DUAL | 双平台产物构建与收集 | 待实施 | 两个平台分别有原生 Shim 构建逻辑 | Linux 无法生成 Windows SEA，`package:all` 依赖预存 `.exe` |
 | VERIFY-P0 | 完整 P0 验收 | 待补测 | 历史 Windows 到 Ubuntu 主链路有部分证据 | 当前兼容集合、取消、写入、安全失败和诱饵文件未闭环 |
 | VERIFY-LIFECYCLE | 设置恢复和进程清理 | 部分通过 | Remote SSH 重载正常关闭；设置恢复、恢复驱动停止、旧状态清理、空闲态和分阶段重新启用实机通过 | 独立停止、Extension Host 退出及 relay/MCP 子进程归零待补测 |
@@ -739,9 +739,10 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 
 实施：
 
-1. 定义包含 host、根 ID 和相对路径的 Bridge 资源 URI。
-2. 提供只读内容提供器和 Diff 两侧资源映射。
-3. 将动态工具投影、修改摘要和错误路径统一为远程资源身份。
+1. [x] 定义包含 host、根 ID、目标端和相对路径的 Bridge 资源 URI。
+2. [x] 提供只接受当前会话登记资源的只读内容提供器和有界 Diff 两侧资源映射。
+3. [x] 将读取、写入、显式跳转和 Diff 结果统一为远程资源身份；远程 POSIX 路径不再
+   投影为可能误开本地同名文件的原生路径动作。
 4. 验证当前文件、选区、附件、Diff 和跳转在 Remote SSH 窗口中仍指向远端。
 
 验收：
@@ -749,6 +750,12 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 - 点击结果打开当前远程工作区文件。
 - Diff 两侧身份明确，不读取本地同名诱饵文件。
 - 官方扩展升级后重新执行任务创建与文件上下文链路。
+
+当前进度：`0.3.21` 已完成前三项实现与自动化。Controller 从当前窗口实际
+`vscode-remote` 工作区 URI 派生文件 URI，不改写工作区根；普通资源必须由活动会话
+登记且每次读取重新校验 host、根配置和本地授权。Diff 旧内容上限 1 MiB，要求与
+`workspace_read_file` 返回的 SHA-256 一致，只保存在有界内存中。第四项以及同名诱饵、
+过期资源和界面观感继续列入 M05 统一补测。
 
 ### 阶段 8：P0 收口和发布
 

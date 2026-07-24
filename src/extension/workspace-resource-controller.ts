@@ -1,0 +1,415 @@
+import { createHash } from "node:crypto";
+import * as vscode from "vscode";
+import { BridgeError } from "../core/errors.js";
+import type { BridgeConfig, WorkspaceRootConfig } from "../core/types.js";
+import type { ControllerWorkspaceRequest } from "../core/vscode-transport.js";
+import {
+  buildWorkspaceResourceUri,
+  parseWorkspaceResourceUri,
+  workspaceRelativePath,
+  WORKSPACE_RESOURCE_SCHEME,
+  type WorkspaceResourceIdentity,
+} from "../core/workspace-resource-uri.js";
+import { detectRemoteWorkspace } from "./remote-context.js";
+
+const MAX_LIVE_RESOURCE_BYTES = 5 * 1024 * 1024;
+const MAX_SNAPSHOT_BYTES = 1024 * 1024;
+const MAX_SNAPSHOT_COUNT = 16;
+const MAX_TOTAL_SNAPSHOT_BYTES = 16 * 1024 * 1024;
+
+interface Snapshot {
+  content: string;
+  size: number;
+}
+
+interface ResolvedResource {
+  actualUri: vscode.Uri;
+  identity: WorkspaceResourceIdentity;
+  resourceUri: vscode.Uri;
+  root: WorkspaceRootConfig;
+}
+
+function requiredString(params: Record<string, unknown>, key: string): string {
+  const value = params[key];
+  if (typeof value !== "string" || value.length === 0 || value.includes("\0")) {
+    throw new BridgeError(
+      "PROTOCOL_MISMATCH",
+      `params.${key} must be a non-empty NUL-free string`,
+    );
+  }
+  return value;
+}
+
+function optionalPosition(
+  params: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = params[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new BridgeError("PROTOCOL_MISMATCH", `params.${key} must be a positive integer`);
+  }
+  return value;
+}
+
+function decodeText(content: Uint8Array, label: string): string {
+  if (content.byteLength > MAX_LIVE_RESOURCE_BYTES) {
+    throw new BridgeError("OUTPUT_TRUNCATED", `${label} exceeds the 5 MiB editor limit`);
+  }
+  if (content.includes(0)) {
+    throw new BridgeError("COMMAND_DENIED", `${label} is binary`);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(content);
+  } catch (error) {
+    throw new BridgeError("COMMAND_DENIED", `${label} is not valid UTF-8 text`, {}, {
+      cause: error,
+    });
+  }
+}
+
+function decodeSnapshot(value: string): Uint8Array {
+  if (
+    value.length > Math.ceil(MAX_SNAPSHOT_BYTES / 3) * 4 + 4 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
+  ) {
+    throw new BridgeError("PROTOCOL_MISMATCH", "params.beforeContentBase64 is invalid");
+  }
+  const content = Buffer.from(value, "base64");
+  if (content.byteLength > MAX_SNAPSHOT_BYTES) {
+    throw new BridgeError(
+      "OUTPUT_TRUNCATED",
+      "The Diff before snapshot exceeds the 1 MiB limit",
+    );
+  }
+  return content;
+}
+
+export function isWorkspaceResourceOperation(
+  operation: string,
+): operation is
+  | "openWorkspaceResource"
+  | "registerWorkspaceResource"
+  | "showWorkspaceDiff" {
+  return (
+    operation === "openWorkspaceResource" ||
+    operation === "registerWorkspaceResource" ||
+    operation === "showWorkspaceDiff"
+  );
+}
+
+export class WorkspaceResourceController
+  implements vscode.TextDocumentContentProvider, vscode.Disposable
+{
+  readonly #config: () => BridgeConfig | null;
+  readonly #resolveAuthorizedRoot: (
+    rootId: string,
+  ) => WorkspaceRootConfig | undefined;
+  readonly #resources = new Map<string, true>();
+  readonly #snapshots = new Map<string, Snapshot>();
+  #snapshotBytes = 0;
+
+  constructor(
+    config: () => BridgeConfig | null,
+    resolveAuthorizedRoot: (rootId: string) => WorkspaceRootConfig | undefined,
+  ) {
+    this.#config = config;
+    this.#resolveAuthorizedRoot = resolveAuthorizedRoot;
+  }
+
+  register(): vscode.Disposable {
+    return vscode.workspace.registerTextDocumentContentProvider(
+      WORKSPACE_RESOURCE_SCHEME,
+      this,
+    );
+  }
+
+  dispose(): void {
+    this.#resources.clear();
+    this.#snapshots.clear();
+    this.#snapshotBytes = 0;
+  }
+
+  async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+    const identity = parseWorkspaceResourceUri(uri.toString());
+    if (identity.revision) {
+      const snapshot = this.#snapshots.get(uri.toString());
+      if (snapshot) {
+        this.#resolve(identity.rootId, identity.relativePath, identity);
+        return snapshot.content;
+      }
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "The requested Diff snapshot has expired",
+      );
+    }
+    if (!this.#resources.has(uri.toString())) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "The workspace resource was not registered by the active Bridge session",
+      );
+    }
+    const resolved = this.#resolve(identity.rootId, identity.relativePath, identity);
+    const metadata = await vscode.workspace.fs.stat(resolved.actualUri);
+    if (metadata.size > MAX_LIVE_RESOURCE_BYTES) {
+      throw new BridgeError(
+        "OUTPUT_TRUNCATED",
+        "Workspace resource exceeds the 5 MiB editor limit",
+      );
+    }
+    return decodeText(
+      await vscode.workspace.fs.readFile(resolved.actualUri),
+      "Workspace resource",
+    );
+  }
+
+  async execute(request: ControllerWorkspaceRequest): Promise<unknown> {
+    const rootId = requiredString(request.params, "rootId");
+    const path = requiredString(request.params, "path");
+    const resolved = this.#resolve(rootId, path);
+    if (request.operation === "registerWorkspaceResource") {
+      this.#rememberResource(resolved);
+      return this.#result("registered", resolved);
+    }
+    if (request.operation === "openWorkspaceResource") {
+      return await this.#open(resolved, request.params);
+    }
+    if (request.operation === "showWorkspaceDiff") {
+      return await this.#showDiff(resolved, request.params);
+    }
+    throw new BridgeError(
+      "COMMAND_DENIED",
+      `Unsupported workspace resource operation: ${request.operation}`,
+    );
+  }
+
+  async #open(
+    resolved: ResolvedResource,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const line = optionalPosition(params, "line");
+    const column = optionalPosition(params, "column") ?? 1;
+    const endLine = optionalPosition(params, "endLine") ?? line;
+    const endColumn = optionalPosition(params, "endColumn") ?? column;
+    if (line === undefined && params.column !== undefined) {
+      throw new BridgeError("PROTOCOL_MISMATCH", "params.line is required with column");
+    }
+    if (line === undefined && (params.endLine !== undefined || params.endColumn !== undefined)) {
+      throw new BridgeError("PROTOCOL_MISMATCH", "params.line is required with an end position");
+    }
+    if (line !== undefined && endLine !== undefined && endLine < line) {
+      throw new BridgeError("PROTOCOL_MISMATCH", "The selection end precedes its start");
+    }
+    if (
+      line !== undefined &&
+      endLine === line &&
+      endColumn !== undefined &&
+      endColumn < column
+    ) {
+      throw new BridgeError("PROTOCOL_MISMATCH", "The selection end precedes its start");
+    }
+
+    const document = await vscode.workspace.openTextDocument(resolved.actualUri);
+    const selection =
+      line === undefined
+        ? undefined
+        : new vscode.Range(
+            line - 1,
+            column - 1,
+            (endLine ?? line) - 1,
+            (endColumn ?? column) - 1,
+          );
+    await vscode.window.showTextDocument(document, {
+      preview: true,
+      ...(selection ? { selection } : {}),
+    });
+    this.#rememberResource(resolved);
+    return this.#result("opened", resolved);
+  }
+
+  async #showDiff(
+    resolved: ResolvedResource,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const beforeHash = requiredString(params, "beforeHash");
+    if (!/^[0-9a-f]{64}$/.test(beforeHash)) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "params.beforeHash must be a SHA-256 digest",
+      );
+    }
+    if (typeof params.beforeContentBase64 !== "string") {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "params.beforeContentBase64 must be a string",
+      );
+    }
+    const content = decodeSnapshot(params.beforeContentBase64);
+    const actualHash = createHash("sha256").update(content).digest("hex");
+    if (actualHash !== beforeHash) {
+      throw new BridgeError(
+        "FILE_CONFLICT",
+        "The Diff before snapshot does not match beforeHash",
+        { actualHash, beforeHash },
+      );
+    }
+    const text = decodeText(content, "Diff before snapshot");
+    const snapshotIdentity = { ...resolved.identity, revision: beforeHash };
+    const snapshotUri = vscode.Uri.parse(buildWorkspaceResourceUri(snapshotIdentity));
+    this.#rememberSnapshot(snapshotUri.toString(), text, content.byteLength);
+    this.#rememberResource(resolved);
+
+    const requestedTitle = params.title;
+    if (
+      requestedTitle !== undefined &&
+      (typeof requestedTitle !== "string" ||
+        requestedTitle.length < 1 ||
+        requestedTitle.length > 200 ||
+        /[\r\n\0]/.test(requestedTitle))
+    ) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "params.title must contain 1 to 200 single-line characters",
+      );
+    }
+    const title =
+      typeof requestedTitle === "string"
+        ? requestedTitle
+        : `${resolved.identity.relativePath} (before <-> workspace)`;
+    await vscode.commands.executeCommand(
+      "vscode.diff",
+      snapshotUri,
+      resolved.actualUri,
+      title,
+      { preview: true },
+    );
+    return {
+      ...this.#result("diffed", resolved),
+      beforeHash,
+      snapshotUri: snapshotUri.toString(),
+    };
+  }
+
+  #resolve(
+    rootId: string,
+    candidatePath: string,
+    expectedIdentity?: WorkspaceResourceIdentity,
+  ): ResolvedResource {
+    const config = this.#config();
+    if (!config || config.connectionMode !== "vscode-remote") {
+      throw new BridgeError(
+        "REMOTE_TRANSPORT_DISCONNECTED",
+        "Workspace resources require an active VS Code Remote session",
+      );
+    }
+    const root = config.roots.find((entry) => entry.id === rootId);
+    if (!root) {
+      throw new BridgeError("COMMAND_DENIED", "The workspace resource root is not configured");
+    }
+    const relativePath = workspaceRelativePath(root.path, candidatePath, root.target);
+    const identity: WorkspaceResourceIdentity = {
+      host: config.host,
+      relativePath,
+      rootId: root.id,
+      target: root.target,
+    };
+    if (
+      expectedIdentity &&
+      (expectedIdentity.host !== identity.host ||
+        expectedIdentity.rootId !== identity.rootId ||
+        expectedIdentity.target !== identity.target ||
+        expectedIdentity.relativePath !== identity.relativePath)
+    ) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Workspace resource identity no longer matches the active configuration",
+      );
+    }
+
+    let actualUri: vscode.Uri;
+    if (root.target === "remote") {
+      if (root.role !== "primary" || root.path !== config.workspaceRoot) {
+        throw new BridgeError("INVALID_CONFIG", "Remote workspace resource root is invalid");
+      }
+      const remote = detectRemoteWorkspace();
+      if (
+        remote.host !== config.host ||
+        remote.workspaceRoot !== config.workspaceRoot
+      ) {
+        throw new BridgeError(
+          "COMMAND_DENIED",
+          "Workspace resource does not match the open Remote SSH workspace",
+        );
+      }
+      actualUri = vscode.Uri.joinPath(remote.workspaceUri, ...relativePath.split("/"));
+    } else {
+      const authorized = this.#resolveAuthorizedRoot(root.id);
+      if (
+        root.role !== "secondary" ||
+        !authorized ||
+        authorized.target !== "local" ||
+        authorized.path !== root.path
+      ) {
+        throw new BridgeError(
+          "COMMAND_DENIED",
+          "The local workspace resource authorization is no longer valid",
+        );
+      }
+      actualUri = vscode.Uri.joinPath(vscode.Uri.file(root.path), ...relativePath.split("/"));
+    }
+    const resourceUri = vscode.Uri.parse(buildWorkspaceResourceUri(identity));
+    return { actualUri, identity, resourceUri, root };
+  }
+
+  #rememberSnapshot(uri: string, content: string, size: number): void {
+    const previous = this.#snapshots.get(uri);
+    if (previous) {
+      this.#snapshotBytes -= previous.size;
+      this.#snapshots.delete(uri);
+    }
+    this.#snapshots.set(uri, { content, size });
+    this.#snapshotBytes += size;
+    while (
+      this.#snapshots.size > MAX_SNAPSHOT_COUNT ||
+      this.#snapshotBytes > MAX_TOTAL_SNAPSHOT_BYTES
+    ) {
+      const oldest = this.#snapshots.entries().next().value as
+        | [string, Snapshot]
+        | undefined;
+      if (!oldest) {
+        break;
+      }
+      this.#snapshots.delete(oldest[0]);
+      this.#snapshotBytes -= oldest[1].size;
+    }
+  }
+
+  #rememberResource(resolved: ResolvedResource): void {
+    const uri = resolved.resourceUri.toString();
+    this.#resources.delete(uri);
+    this.#resources.set(uri, true);
+    while (this.#resources.size > 256) {
+      const oldest = this.#resources.keys().next().value as string | undefined;
+      if (!oldest) {
+        break;
+      }
+      this.#resources.delete(oldest);
+    }
+  }
+
+  #result(
+    action: "diffed" | "opened" | "registered",
+    resolved: ResolvedResource,
+  ): Record<string, unknown> {
+    return {
+      action,
+      relativePath: resolved.identity.relativePath,
+      resourceUri: resolved.resourceUri.toString(),
+      rootId: resolved.root.id,
+      target: resolved.root.target,
+      workspaceUri: resolved.actualUri.toString(),
+    };
+  }
+}

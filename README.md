@@ -7,8 +7,8 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 发现、选择或回退。
 
 > 当前版本是受控读写和受审批非交互命令的技术原型，不是完整 MVP。运行中取消、远端
-> 有界幂等账本、断线查询恢复和受控后台任务已完成自动化验证；真实 Remote SSH 候选
-> 窗口和跨平台生命周期仍未闭环，不要用于无人值守的生产训练。
+> 有界幂等账本、断线查询恢复、受控后台任务和远程资源映射已完成自动化验证；真实
+> Remote SSH 候选窗口和跨平台生命周期仍未闭环，不要用于无人值守的生产训练。
 
 ## 当前实现
 
@@ -37,6 +37,11 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
   上下文刷新全部授权根与 `remote_exec` 提醒，不覆盖官方扩展已有上下文。
 - Bridge 自有工具在返回官方界面前投影为原生 `commandExecution` 项，使用本地 Codex
   相同的读取、列目录、搜索和命令外观，不修改官方扩展文件。
+- `workspace_open_file` 通过 Controller 复用当前窗口的原始 `vscode-remote` 工作区 URI
+  打开文件并定位选区；`workspace_show_diff` 将经 SHA-256 校验的 1 MiB 以内旧内容放入
+  有界内存快照，与当前远程文件打开 VS Code Diff。普通读取和写入结果返回
+  `codex-bridge` 资源 URI；内容提供器只接受当前 Bridge 会话登记过且根授权仍有效的
+  URI，不把远程 POSIX 路径投影为本地文件动作。
 - `remote_exec` 只接受结构化 `argv`；“完全访问”模式不重复询问，其他权限模式使用
   官方命令审批并显示远程主机、规范化 `cwd`、完整命令和环境变量变更。
 - stdout/stderr 实时转发；自动放行和人工审批结果都写入本地审计日志。
@@ -130,7 +135,9 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
   Bridge 会话强制使用本地拒绝权限配置，并在 Shim 边界拒绝 25 个已知本地客户端请求；
   五类 Core 本地审批请求也会直接失败关闭。真实模型对本地诱饵的专用工具负测仍待
   补测；当前写工具只作为自动化候选，不据此宣称 Core 强制边界闭环。
-- 为远程文件提供可打开的资源 URI、Diff 和文件跳转。
+- [x] 为远程文件提供可打开的资源 URI、Diff 和文件跳转；资源身份绑定 host、根 ID、
+  目标端和相对路径，远程映射复用当前窗口实际 URI，OpenSSH 回退失败关闭。真实同名
+  诱饵、选区和 Diff 左右端仍按统一人工清单补测。
 - 建立 Windows/Linux 原生构建与受控产物收集流程，避免单端打包删除另一端产物。
 - 在目标 Remote SSH 主机和 MimicLite 仓库上的完整 P0 验收。
 - [ ] 当前优先实施本地 Codex CLI 对话介入：Bridge 向当前 CLI 对话长期提供 MCP 工具，
@@ -365,7 +372,7 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前功能候选为
-`docs/acceptance/2026-07-24-release-0.3.20-background-tasks.md`；在候选包安装、
+`docs/acceptance/2026-07-24-release-0.3.21-workspace-resources.md`；在候选包安装、
 完整生命周期
 和双平台实机闭环通过前，它不会替代已验收基线。
 
