@@ -88,7 +88,9 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
   处理一个已验证问题，不积压无关改动，缺失的真实环境证据继续标为 `待补测`。
 
 当前重新汇总的任务清单、能力边界和详细实施顺序见
-`docs/capability-boundary-plan.md`。
+`docs/capability-boundary-plan.md`。所有需要用户、真实 VS Code/Remote SSH 或 Windows
+实机参与的项目已统一冻结到 `docs/manual-acceptance-backlog.md`，待产品能力全部落实后
+一次性补测，不再穿插阻塞源码实现。
 
 - [x] 将官方 `openai.chatgpt` 扩展及其内置 Codex 设为 Bridge 唯一 app-server 来源；
   系统 `codex` CLI 不再参与发现、版本选择或运行时回退。
