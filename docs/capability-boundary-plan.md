@@ -20,7 +20,7 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.12` 自动化候选 | 无版本值门禁；远端工具根身份与本地根失败关闭已实现，候选 VSIX 安装、真实显式根选择与 Windows 实机待补测 |
+| Bridge Controller | `0.3.13` 自动化候选 | 无版本值门禁；本地次级根授权、撤销、诊断和只读执行器已实现，双端路由、候选 VSIX 安装与 Windows 实机待补测 |
 | Remote Executor | `0.2.8` 候选 | 按所需能力集合握手；远端命令、读取和 stdio CodeGraph 已实测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
@@ -113,8 +113,8 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 | ROUTE-EXEC | 强化 Remote SSH 下的 `remote_exec` 路由 | 已实施 | 新建/恢复线程注入策略，每次 turn 通过独立上下文键刷新提醒，动态工具描述明确 | Core 本地工具硬阻断仍属于 SAFE-CORE |
 | MCP-ADAPTER | 通用远端 MCP 启动适配 | 已实施 | 受控适配器 ID、共享注册表、VS Code Remote/Remote Executor 与 OpenSSH stdin 控制头均已实现；CodeGraph 八工具实机通过 | 其他服务适配器和 OpenSSH 回退实机仍待按需补充 |
 | ROOT-PRIMARY | 远程工作区成为主工作目录 | 已实施并限定实测 | 配置 v2 固定唯一 `remote/primary`；线程以本地控制目录为物理 `cwd`，以远程主根为逻辑 `runtimeWorkspaceRoots`；外部 CLI 新建同步 thread 的命令和读取默认落到远程主根 | 官方面板新建/恢复、附件和当前文件仍待补测 |
-| ROOT-SECONDARY | 定义本地次级授权目录 | 部分实施 | 配置 v2 已定义并校验 `local/secondary` 根记录，但尚未提供授权入口 | 没有本地根选择、执行器、访问和撤销协议 |
-| DUAL-READ | 双端目录读取、树、搜索和状态 | 部分实施 | 远端工具请求、结果和审计已有显式根 ID、目标端、角色与路径；旧请求默认远端主根，本地根访问失败关闭 | 没有本地授权入口、Controller 本地执行器、双端统一工具和 UI 投影 |
+| ROOT-SECONDARY | 定义本地次级授权目录 | 已实施（自动化） | 命令面板可显式选择和撤销本地目录；授权持久化为规范化次级根，诊断报告可见，撤销后既有执行器立即拒绝 | 候选 VSIX 的真实选择器和重载体验待补测 |
+| DUAL-READ | 双端目录读取、树、搜索和状态 | 部分实施 | 远端工具已有显式根身份；Controller 本地只读执行器具备读取、目录、树、字面文本搜索、Git 状态及词法/真实路径边界 | 双端统一工具路由和原生 UI 投影未接入 |
 | DUAL-WRITE | 双端写入、补丁、重命名和删除 | 待实施 | 读取结果已返回远端 SHA-256 | 没有写工具、`expectedHash`、原子替换或统一错误语义 |
 | LIFE-CANCEL | 运行中取消 | 待实施 | 执行器底层接受 `AbortSignal`，超时能终止子进程 | app-server `turn/interrupt` 没有传到活动远端请求 |
 | LIFE-IDEMP | 幂等和断线结果确认 | 部分实施 | 同一 app-server 内广播的 `threadId + turnId + callId` 已协调为单次执行；有 `requestId`、`connectionId` 和 `RESULT_UNKNOWN` | 没有跨重连幂等账本、结果查询或重连确认 |
@@ -599,9 +599,16 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 
 当前进度：第一个“协议和类型”提交已完成。现有 `remote_*` 工具可显式携带
 `rootId` 和固定的 `target="remote"`；结果与审计返回根 ID、目标端、主次角色和规范化
-根路径，省略选择器仍默认唯一远端主根。配置中的本地次级根在本地执行器交付前返回
-`COMMAND_DENIED`，不会调用远端执行器或向工具结果暴露本地路径。第 1-2、4-7 项的本地
-授权和双端实现仍待后续独立提交。
+根路径，省略选择器仍默认唯一远端主根。配置中的本地次级根在双端路由交付前仍返回
+`COMMAND_DENIED`，不会调用远端执行器或向工具结果暴露本地路径。统一执行器抽象、双端
+结果和 UI 路由仍待后续独立提交。
+
+第二个“本地授权执行器”提交已完成。Controller 命令面板现在提供本地目录选择和撤销，
+扩展全局状态持久化最多 15 个规范化 `local/secondary` 根，并同步到无凭据的 Bridge
+配置和窗口会话配置。Controller 本地只读执行器逐次校验授权是否仍存在，同时执行词法、
+真实路径和符号链接边界检查；支持限额读取、目录、目录树、字面文本搜索和只读 Git
+状态。诊断会探测每个授权根，撤销后已有执行器立即返回 `COMMAND_DENIED`。双端工具路由
+与原生 UI 投影仍待第三个独立提交。
 
 验收：
 

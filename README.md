@@ -139,11 +139,11 @@ OpenSSH 回退通过 stdin 控制头传递已审核的非凭据变化。不会�
 
 目标是在同一个 Codex 任务中显式选择并受控访问本地授权目录或当前 Remote SSH
 工作区。默认仍复用已建立的 VS Code Remote SSH 通道，不为远程文件操作启动第二次
-SSH 认证，也不改写或伪造 VS Code 工作区 URI。以下项目均为 TODO，尚未实现。
+SSH 认证，也不改写或伪造 VS Code 工作区 URI。以下项目按独立验收目标逐项落实。
 
 ### 阶段一：权限边界与协议
 
-- [ ] 定义独立的本地授权根目录，并继续使用规范化的远程 POSIX 工作区根目录。
+- [x] 定义独立的本地授权根目录，并继续使用规范化的远程 POSIX 工作区根目录。
 - [x] Remote Codex 反代启动并识别 Remote SSH 工作区后，将规范化的远程工作区根目录
   登记为 Codex 主工作目录和默认项目上下文；本地控制目录不得冒充项目目录，也不得
   为此改写或伪造 VS Code 工作区 URI。
@@ -151,9 +151,9 @@ SSH 认证，也不改写或伪造 VS Code 工作区 URI。以下项目均为 TO
   记录中显式保留主次角色与 `local | remote` 目标端，避免双端读写时混淆目录归属。
 - [ ] 为目录树、读取、搜索、状态和写入请求增加显式的 `target: local | remote`，
   不根据路径格式猜测目标端。
-- [ ] 明确本地根目录的选择、持久化和撤销流程；配置中不保存密码、私钥、Token 或
+- [x] 明确本地根目录的选择、持久化和撤销流程；配置中不保存密码、私钥、Token 或
   Remote SSH 会话令牌。
-- [ ] 本地和远程绝对路径都必须落在各自授权根目录内，禁止通过 `..`、符号链接或
+- [x] 本地和远程绝对路径都必须落在各自授权根目录内，禁止通过 `..`、符号链接或
   路径编码逃逸。
 
 ### 阶段二：双端文件操作
@@ -328,7 +328,7 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前功能候选为
-`docs/acceptance/2026-07-23-release-0.3.12-root-identity-protocol.md`；在候选包安装、
+`docs/acceptance/2026-07-23-release-0.3.13-local-root-authority.md`；在候选包安装、
 完整生命周期
 和双平台实机闭环通过前，它不会替代已验收基线。
 

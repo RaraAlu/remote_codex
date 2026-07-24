@@ -8,6 +8,7 @@ const mock = vi.hoisted(() => ({
   officialExtension: vi.fn(() => {
     throw new Error("official extension must not be queried before reload");
   }),
+  registeredCommands: new Map<string, (...args: unknown[]) => unknown>(),
   saveConfig: vi.fn(async () => undefined),
   settingsConfigure: vi.fn(async () => true),
   settingsUpdate: vi.fn(async () => undefined),
@@ -21,6 +22,10 @@ vi.mock("vscode", () => ({
   StatusBarAlignment: { Left: 1 },
   commands: {
     executeCommand: mock.executeCommand,
+    registerCommand: (command: string, callback: (...args: unknown[]) => unknown) => {
+      mock.registeredCommands.set(command, callback);
+      return { dispose: vi.fn() };
+    },
   },
   env: {
     machineId: "local-machine",
@@ -118,6 +123,7 @@ function context(): vscode.ExtensionContext {
 describe("BridgeController restored-state configuration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mock.registeredCommands.clear();
   });
 
   it("restores UI settings and reloads before resolving the official runtime", async () => {
@@ -134,5 +140,14 @@ describe("BridgeController restored-state configuration", () => {
     expect(mock.settingsConfigure.mock.invocationCallOrder[0]).toBeLessThan(
       mock.executeCommand.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("registers local root authorization and revocation commands", () => {
+    const controller = new BridgeController(context());
+
+    controller.registerCommands();
+
+    expect(mock.registeredCommands.has("codexRemoteBridge.authorizeLocalRoot")).toBe(true);
+    expect(mock.registeredCommands.has("codexRemoteBridge.revokeLocalRoot")).toBe(true);
   });
 });

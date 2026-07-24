@@ -50,6 +50,11 @@ import {
   OfficialSettingsManager,
   type OfficialSettingsStatus,
 } from "./settings-manager.js";
+import {
+  LocalRootAuthority,
+  type LocalRootDiagnostic,
+} from "./local-root-authority.js";
+import { LocalWorkspaceExecutor } from "./local-workspace-executor.js";
 import { repairCodexViewLocation } from "./view-location.js";
 import { VsCodeTransportServer } from "./vscode-transport-server.js";
 
@@ -83,6 +88,7 @@ interface DiagnosticReport {
     codexExtensionVersion: string | null;
     shimPath: string;
     officialSettings: OfficialSettingsStatus;
+    authorizedRoots: LocalRootDiagnostic[];
   };
   remote: {
     identity: RemoteIdentity | null;
@@ -135,6 +141,7 @@ export class BridgeController implements vscode.Disposable {
   readonly #audit = new AuditLog(bridgeAuditPath());
   readonly #context: vscode.ExtensionContext;
   readonly #output: vscode.OutputChannel;
+  readonly #localRoots: LocalRootAuthority;
   readonly #settings: OfficialSettingsManager;
   readonly #state = new BridgeStateMachine();
   readonly #status: vscode.StatusBarItem;
@@ -157,6 +164,7 @@ export class BridgeController implements vscode.Disposable {
       delete process.env.CODEX_BRIDGE_SESSION_CONFIG;
     }
     this.#output = vscode.window.createOutputChannel("Codex Remote Bridge", { log: true });
+    this.#localRoots = new LocalRootAuthority(context.globalState);
     this.#settings = new OfficialSettingsManager(context);
     this.#transport = new VsCodeTransportServer(() => this.#sessionConfig ?? this.#config);
     delete process.env.CODEX_BRIDGE_CODEX_EXECUTABLE;
@@ -187,6 +195,12 @@ export class BridgeController implements vscode.Disposable {
       vscode.commands.registerCommand("codexRemoteBridge.stop", () => this.stop()),
       vscode.commands.registerCommand("codexRemoteBridge.diagnostics", () => this.showDiagnostics()),
       vscode.commands.registerCommand("codexRemoteBridge.showAuditLog", () => this.showAuditLog()),
+      vscode.commands.registerCommand("codexRemoteBridge.authorizeLocalRoot", () =>
+        this.authorizeLocalRoot(),
+      ),
+      vscode.commands.registerCommand("codexRemoteBridge.revokeLocalRoot", () =>
+        this.revokeLocalRoot(),
+      ),
       vscode.commands.registerCommand("codexRemoteBridge.enableExternalCliMcp", () =>
         this.enableExternalCliMcp(),
       ),
@@ -286,6 +300,103 @@ export class BridgeController implements vscode.Disposable {
   async configure(): Promise<void> {
     this.#autoSuppressed = false;
     await this.#configureCurrentRemote(true);
+  }
+
+  async authorizeLocalRoot(): Promise<void> {
+    try {
+      detectRemoteWorkspace();
+      const selected = await vscode.window.showOpenDialog({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: "Authorize Folder",
+        title: "Authorize a local secondary root for Codex Bridge",
+      });
+      const uri = selected?.[0];
+      if (!uri) {
+        return;
+      }
+      if (uri.scheme !== "file") {
+        throw new BridgeError(
+          "COMMAND_DENIED",
+          "Only a local filesystem folder may be authorized",
+        );
+      }
+      const root = await this.#localRoots.authorize(uri.fsPath);
+      await this.#persistLocalRoots();
+      await this.#audit.write({
+        operation: "local_root.authorize",
+        outcome: "succeeded",
+        rootId: root.id,
+        rootRole: root.role,
+        rootPath: root.path,
+        target: root.target,
+      });
+      const action = await vscode.window.showInformationMessage(
+        `Codex Bridge authorized local root: ${root.displayName}`,
+        "Reload Window",
+      );
+      if (action === "Reload Window") {
+        await vscode.commands.executeCommand("workbench.action.reloadWindow");
+      }
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "COMMAND_DENIED");
+      this.#log(`local root authorization failed: ${bridgeError.message}`);
+      void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+    }
+  }
+
+  async revokeLocalRoot(): Promise<void> {
+    try {
+      const roots = this.#localRoots.roots();
+      if (roots.length === 0) {
+        void vscode.window.showInformationMessage(
+          "Codex Bridge has no authorized local roots.",
+        );
+        return;
+      }
+      const selected = await vscode.window.showQuickPick(
+        roots.map((root) => ({
+          label: root.displayName,
+          description: root.path,
+          root,
+        })),
+        {
+          placeHolder: "Select a local root authorization to revoke",
+          title: "Revoke Codex Bridge Local Root",
+        },
+      );
+      if (!selected) {
+        return;
+      }
+      const confirmation = await vscode.window.showWarningMessage(
+        `Revoke Codex Bridge access to ${selected.root.path}?`,
+        { modal: true },
+        "Revoke",
+      );
+      if (confirmation !== "Revoke") {
+        return;
+      }
+      if (!(await this.#localRoots.revoke(selected.root.id))) {
+        throw new BridgeError("COMMAND_DENIED", "The local root authorization no longer exists");
+      }
+      await this.#persistLocalRoots();
+      await this.#audit.write({
+        operation: "local_root.revoke",
+        outcome: "succeeded",
+        rootId: selected.root.id,
+        rootRole: selected.root.role,
+        rootPath: selected.root.path,
+        target: selected.root.target,
+      });
+      void vscode.window.showInformationMessage(
+        `Codex Bridge revoked local root: ${selected.root.displayName}`,
+      );
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "COMMAND_DENIED");
+      this.#log(`local root revocation failed: ${bridgeError.message}`);
+      void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+    }
   }
 
   async #configureCurrentRemote(interactive: boolean): Promise<void> {
@@ -547,6 +658,41 @@ export class BridgeController implements vscode.Disposable {
     await rm(this.#sessionConfigPath, { force: true });
   }
 
+  async #persistLocalRoots(): Promise<void> {
+    const localRoots = this.#localRoots.roots();
+    const activeRemoteWindow = vscode.env.remoteName === "ssh-remote";
+    let baseConfig = this.#config;
+    if (!baseConfig) {
+      if (activeRemoteWindow) {
+        baseConfig = this.#currentRemoteConfig();
+      } else {
+        try {
+          baseConfig = await loadBridgeConfig(bridgeConfigPath());
+        } catch {
+          return;
+        }
+      }
+    }
+    const primaryRoot = baseConfig.roots.find(
+      (root) => root.target === "remote" && root.role === "primary",
+    );
+    if (!primaryRoot) {
+      throw new BridgeError("INVALID_CONFIG", "The remote primary root is missing");
+    }
+    const config = parseBridgeConfig({
+      ...baseConfig,
+      workspaceRoot: primaryRoot.path,
+      roots: [primaryRoot, ...localRoots],
+    });
+    await saveBridgeConfig(bridgeConfigPath(), config);
+    if (activeRemoteWindow || this.#config) {
+      this.#config = config;
+    }
+    if (this.#sessionConfig) {
+      await this.#saveWindowSession(config);
+    }
+  }
+
   #currentRemoteConfig(): BridgeConfig {
     const remote = detectRemoteWorkspace();
     const settings = vscode.workspace.getConfiguration("codexRemoteBridge");
@@ -558,7 +704,10 @@ export class BridgeController implements vscode.Disposable {
       version: 2,
       host: remote.host,
       workspaceRoot: remote.workspaceRoot,
-      roots: [defaultRemotePrimaryRoot(remote.workspaceRoot)],
+      roots: [
+        defaultRemotePrimaryRoot(remote.workspaceRoot),
+        ...this.#localRoots.roots(),
+      ],
       connectionMode,
       localExecution: "deny",
       remoteHelper: connectionMode === "vscode-remote" ? "vscode-extension" : "none",
@@ -814,6 +963,7 @@ export class BridgeController implements vscode.Disposable {
           (codexExtension?.packageJSON.version as string | undefined) ?? null,
         shimPath,
         officialSettings: this.#settings.status(shimPath),
+        authorizedRoots: await this.#localRootDiagnostics(config),
       },
       remote: {
         identity: remoteIdentity,
@@ -822,6 +972,38 @@ export class BridgeController implements vscode.Disposable {
       },
       effectiveConfig: config,
     };
+  }
+
+  async #localRootDiagnostics(config: BridgeConfig | null): Promise<LocalRootDiagnostic[]> {
+    const diagnostics = await this.#localRoots.diagnostics();
+    if (!config) {
+      return diagnostics;
+    }
+    return await Promise.all(
+      diagnostics.map(async (diagnostic) => {
+        if (!diagnostic.accessible) {
+          return diagnostic;
+        }
+        try {
+          const executor = new LocalWorkspaceExecutor(
+            diagnostic.id,
+            (rootId) => this.#localRoots.find(rootId),
+            {
+              commandTimeoutMs: config.commandTimeoutMs,
+              maxOutputBytes: config.maxOutputBytes,
+            },
+          );
+          await executor.canonicalPath(".");
+          return diagnostic;
+        } catch (error) {
+          return {
+            ...diagnostic,
+            accessible: false,
+            error: asBridgeError(error, "COMMAND_DENIED").message,
+          };
+        }
+      }),
+    );
   }
 
   #officialCodexInstallation(): {
