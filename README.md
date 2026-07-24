@@ -6,8 +6,9 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 执行器保留为回退模式。系统安装的 Codex CLI 不是运行依赖，其版本不会参与 Bridge
 发现、选择或回退。
 
-> 当前版本是读操作和受审批非交互命令的技术原型，不是完整 MVP。远程写入、运行中
-> 取消和断线恢复尚未完成，不要用于无人值守的生产训练。
+> 当前版本是读操作和受审批非交互命令的技术原型，不是完整 MVP。运行中取消已完成
+> 自动化验证，但真实 Remote SSH 候选窗口仍待补测；远程写入、跨重连幂等和断线恢复
+> 尚未完成，不要用于无人值守的生产训练。
 
 ## 当前实现
 
@@ -39,6 +40,9 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 - `remote_exec` 只接受结构化 `argv`；“完全访问”模式不重复询问，其他权限模式使用
   官方命令审批并显示远程主机、规范化 `cwd`、完整命令和环境变量变更。
 - stdout/stderr 实时转发；自动放行和人工审批结果都写入本地审计日志。
+- `turn/interrupt` 会按 thread/turn 取消活动 Bridge 工具调用；默认 VS Code Remote
+  通道发送显式 `cancel` 请求，远端 Executor 终止命令的 POSIX 进程组。取消等待审批
+  不会启动远端进程；真实 Remote SSH 窗口中的取消确认耗时与遗留进程仍待补测。
 - 默认 `vscode-remote` 模式自动部署一个不含 Codex 和凭据的 Workspace Executor，
   通过 VS Code Remote Extension Host 执行结构化操作；密码、公钥和 Agent 认证均由
   已建立的 Remote SSH 窗口处理，Bridge 不再发起第二次认证。
@@ -93,7 +97,10 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
   标识，不复制本机环境或凭据，由远端启动侧解析已审核的参数与环境变化。CodeGraph
   全工具暴露只作为首个适配器和验收样例，不得写成传输层特例。
 - 同一任务受控读写本地授权目录和远程工作区，详见下方双端读写计划。
-- 运行中命令取消、幂等键、后台任务和断线后结果确认。
+- [x] 运行中命令取消已接通 turn、Controller transport、Remote Executor 和 POSIX
+  进程组，并通过自动化验证；真实 Remote SSH 候选窗口、Windows 进程树和取消确认
+  耗时待补测。
+- 幂等键、后台任务和断线后结果确认。
 - [ ] 对 Codex Core 内置本地 Shell 和文件工具执行前硬阻断。阶段 2C 已让 Remote
   Bridge 会话强制使用本地拒绝权限配置，并在 Shim 边界拒绝 25 个已知本地客户端请求；
   五类 Core 本地审批请求也会直接失败关闭。真实模型对本地诱饵的专用工具负测仍待
@@ -333,7 +340,7 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前功能候选为
-`docs/acceptance/2026-07-23-release-0.3.14-dual-read-routing.md`；在候选包安装、
+`docs/acceptance/2026-07-23-release-0.3.15-command-cancellation.md`；在候选包安装、
 完整生命周期
 和双平台实机闭环通过前，它不会替代已验收基线。
 

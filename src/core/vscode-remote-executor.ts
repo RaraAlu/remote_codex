@@ -44,6 +44,11 @@ interface RequestObserver {
   timeoutMs?: number;
 }
 
+interface RemoteCancellationResult {
+  cancelled: boolean;
+  operationId: string;
+}
+
 function errorCode(value: string): BridgeErrorCode {
   return BRIDGE_ERROR_CODES.includes(value as BridgeErrorCode)
     ? (value as BridgeErrorCode)
@@ -169,7 +174,7 @@ export class VsCodeRemoteExecutor
     }
     if (observer.signal?.aborted) {
       throw new BridgeError(
-        observer.sideEffect ? "RESULT_UNKNOWN" : "CANCELLED",
+        "CANCELLED",
         "VS Code remote request was cancelled before it started",
       );
     }
@@ -193,6 +198,8 @@ export class VsCodeRemoteExecutor
       this.#activeSockets.add(socket);
       const lines = createInterface({ input: socket });
       let settled = false;
+      let requestSent = false;
+      let cancellationStarted = false;
       const timeoutMs = (observer.timeoutMs ?? this.config.commandTimeoutMs) + 5_000;
       const finish = (callback: () => void): void => {
         if (settled) {
@@ -214,16 +221,39 @@ export class VsCodeRemoteExecutor
             : message,
         );
       const abort = (): void => {
-        finish(() =>
-          reject(
-            new BridgeError(
-              observer.sideEffect ? "RESULT_UNKNOWN" : "CANCELLED",
-              observer.sideEffect
-                ? "VS Code remote request was cancelled; the side effect is unknown"
-                : "VS Code remote request was cancelled",
+        if (settled || cancellationStarted) {
+          return;
+        }
+        if (!requestSent) {
+          finish(() =>
+            reject(
+              new BridgeError(
+                "CANCELLED",
+                "VS Code remote request was cancelled before it was sent",
+              ),
             ),
-          ),
-        );
+          );
+          return;
+        }
+        cancellationStarted = true;
+        void this.#request<RemoteCancellationResult>(
+          "cancel",
+          { operationId: id },
+          { timeoutMs: 5_000 },
+        ).catch((error) => {
+          finish(() =>
+            reject(
+              new BridgeError(
+                observer.sideEffect ? "RESULT_UNKNOWN" : "REMOTE_TRANSPORT_DISCONNECTED",
+                "VS Code remote cancellation could not be confirmed",
+                {
+                  cause: error instanceof Error ? error.message : String(error),
+                  operationId: id,
+                },
+              ),
+            ),
+          );
+        });
       };
       const timeout = setTimeout(() => {
         finish(() => reject(disconnectError("VS Code remote transport timed out")));
@@ -231,7 +261,13 @@ export class VsCodeRemoteExecutor
       timeout.unref();
       observer.signal?.addEventListener("abort", abort, { once: true });
 
-      socket.once("connect", () => socket.write(`${JSON.stringify(request)}\n`));
+      socket.once("connect", () => {
+        if (settled) {
+          return;
+        }
+        requestSent = true;
+        socket.write(`${JSON.stringify(request)}\n`);
+      });
       socket.once("error", (error) => {
         finish(() =>
           reject(

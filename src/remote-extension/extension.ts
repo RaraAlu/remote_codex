@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { ActiveOperationRegistry } from "../core/active-operation-registry.js";
 import { defaultRemotePrimaryRoot, parseBridgeConfig } from "../core/config.js";
 import { asBridgeError, BridgeError } from "../core/errors.js";
 import { LocalProcessExecutor } from "../core/local-process-executor.js";
@@ -20,6 +21,7 @@ import { matchesRemoteWorkspaceRoot } from "./workspace.js";
 import { RemoteStdioSessions } from "./stdio-sessions.js";
 
 const executors = new Map<string, LocalProcessExecutor>();
+const activeOperations = new ActiveOperationRegistry();
 const stdioSessions = new RemoteStdioSessions(async (event) => {
   await vscode.commands.executeCommand(REMOTE_OUTPUT_COMMAND, event);
 });
@@ -106,6 +108,7 @@ function executorFor(request: RemoteExecutorCommandRequest): LocalProcessExecuto
 async function dispatch(
   request: RemoteExecutorCommandRequest,
   executor: LocalProcessExecutor,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   const params = record(request.params, "params");
   switch (request.operation) {
@@ -159,6 +162,7 @@ async function dispatch(
           : {}),
         ...(typeof rawOptions.timeoutMs === "number" ? { timeoutMs: rawOptions.timeoutMs } : {}),
         sideEffect: rawOptions.sideEffect === true,
+        signal,
         onStdout: (chunk) => emit("stdout", chunk),
         onStderr: (chunk) => emit("stderr", chunk),
       };
@@ -197,7 +201,16 @@ async function dispatch(
     case "stdioStop":
       stdioSessions.stop(request.id);
       return { stopped: true };
+    case "cancel":
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "Cancel requests must be handled before operation dispatch",
+      );
   }
+}
+
+function operationKey(request: RemoteExecutorCommandRequest, operationId: string): string {
+  return [request.hostId, request.workspaceRoot, operationId].join("\0");
 }
 
 async function executeRequest(
@@ -217,8 +230,31 @@ async function executeRequest(
     ) {
       throw new BridgeError("PROTOCOL_MISMATCH", "Invalid remote executor request");
     }
+    if (request.operation === "cancel") {
+      validateWorkspace(request);
+      const operationId = stringValue(
+        record(request.params, "params").operationId,
+        "params.operationId",
+      );
+      return {
+        ok: true,
+        result: {
+          cancelled: activeOperations.cancel(operationKey(request, operationId)),
+          operationId,
+        },
+      };
+    }
     const executor = executorFor(request);
-    return { ok: true, result: await dispatch(request, executor) };
+    if (request.operation !== "execute") {
+      return { ok: true, result: await dispatch(request, executor) };
+    }
+    const key = operationKey(request, request.id);
+    const signal = activeOperations.start(key);
+    try {
+      return { ok: true, result: await dispatch(request, executor, signal) };
+    } finally {
+      activeOperations.finish(key);
+    }
   } catch (error) {
     return {
       ok: false,
@@ -240,6 +276,7 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
+  activeOperations.cancelAll();
   stdioSessions.close();
   for (const executor of executors.values()) {
     executor.close();

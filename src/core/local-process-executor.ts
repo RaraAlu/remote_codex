@@ -73,8 +73,25 @@ export function remoteProcessEnvironment(
   return environment;
 }
 
+function signalProcessTree(
+  child: ChildProcessWithoutNullStreams,
+  signal: NodeJS.Signals,
+): void {
+  if (process.platform !== "win32" && child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+        return;
+      }
+    }
+  }
+  child.kill(signal);
+}
+
 export class LocalProcessExecutor extends OpenSshExecutor {
-  readonly #activeChildren = new Set<ChildProcessWithoutNullStreams>();
+  readonly #activeCancellations = new Set<() => void>();
   #closed = false;
 
   constructor(config: BridgeConfig) {
@@ -127,45 +144,72 @@ export class LocalProcessExecutor extends OpenSshExecutor {
     return await new Promise<RemoteCommandResult>((resolve, reject) => {
       const child = spawn("sh", ["-c", 'exec "$@"', "codex-bridge", ...argv], {
         cwd: actualCwd,
+        detached: process.platform !== "win32",
         env: remoteProcessEnvironment(options.env),
         stdio: "pipe",
       });
-      this.#activeChildren.add(child);
       const stdout = new TailCapture(this.config.maxOutputBytes);
       const stderr = new TailCapture(this.config.maxOutputBytes);
       let settled = false;
       let timedOut = false;
       let aborted = false;
+      let terminating = false;
+      let forceTimer: NodeJS.Timeout | undefined;
+      let timeout: NodeJS.Timeout | undefined;
 
       const finish = (callback: () => void): void => {
         if (settled) {
           return;
         }
         settled = true;
-        clearTimeout(timeout);
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        if (forceTimer) {
+          clearTimeout(forceTimer);
+        }
         options.signal?.removeEventListener("abort", abort);
-        this.#activeChildren.delete(child);
+        this.#activeCancellations.delete(abort);
         callback();
       };
       const terminate = (): void => {
-        child.kill("SIGTERM");
-        const forceTimer = setTimeout(() => child.kill("SIGKILL"), 1_000);
+        if (terminating) {
+          return;
+        }
+        terminating = true;
+        signalProcessTree(child, "SIGTERM");
+        forceTimer = setTimeout(() => {
+          if (!settled) {
+            signalProcessTree(child, "SIGKILL");
+          }
+        }, 1_000);
         forceTimer.unref();
       };
       const abort = (): void => {
+        if (aborted || settled) {
+          return;
+        }
         aborted = true;
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = undefined;
+        }
         terminate();
       };
+      this.#activeCancellations.add(abort);
+      timeout = setTimeout(() => {
+        if (aborted || settled) {
+          return;
+        }
+        timedOut = true;
+        terminate();
+      }, timeoutMs);
+      timeout.unref();
       if (options.signal?.aborted) {
         abort();
       } else {
         options.signal?.addEventListener("abort", abort, { once: true });
       }
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        terminate();
-      }, timeoutMs);
-      timeout.unref();
 
       child.stdout.on("data", (chunk: Buffer) => {
         stdout.append(chunk);
@@ -188,6 +232,9 @@ export class LocalProcessExecutor extends OpenSshExecutor {
         );
       });
       child.once("close", (exitCode, signal) => {
+        if (terminating && process.platform !== "win32") {
+          signalProcessTree(child, "SIGKILL");
+        }
         finish(() => {
           const durationMs = Math.round(performance.now() - startedAt);
           if (timedOut) {
@@ -205,10 +252,14 @@ export class LocalProcessExecutor extends OpenSshExecutor {
           if (aborted) {
             reject(
               new BridgeError(
-                options.sideEffect ? "RESULT_UNKNOWN" : "CANCELLED",
+                "CANCELLED",
                 options.sideEffect
-                  ? "Remote command was cancelled; the side effect is unknown"
-                  : "Remote command was cancelled",
+                  ? "Remote command and its process tree were cancelled; partial side effects may have occurred"
+                  : "Remote command and its process tree were cancelled",
+                {
+                  durationMs,
+                  sideEffectMayHaveOccurred: options.sideEffect === true,
+                },
               ),
             );
             return;
@@ -232,10 +283,10 @@ export class LocalProcessExecutor extends OpenSshExecutor {
       return;
     }
     this.#closed = true;
-    for (const child of this.#activeChildren) {
-      child.kill("SIGTERM");
+    for (const cancel of this.#activeCancellations) {
+      cancel();
     }
-    this.#activeChildren.clear();
+    this.#activeCancellations.clear();
     super.close();
   }
 }

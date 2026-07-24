@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
 import { VsCodeRemoteExecutor } from "../src/core/vscode-remote-executor.js";
 import type { TransportRequest } from "../src/core/vscode-transport.js";
@@ -147,6 +147,51 @@ describe("VsCodeRemoteExecutor", () => {
       code: "PATH_OUTSIDE_ROOT",
       message: "outside",
     });
+    executor.close();
+  });
+
+  it("sends an explicit cancel request and waits for remote cancellation", async () => {
+    let executeId = "";
+    let writeExecute: ((message: unknown) => void) | undefined;
+    const operations: string[] = [];
+    const pipe = await listen((request, write) => {
+      operations.push(request.operation);
+      if (request.operation === "execute") {
+        executeId = request.id;
+        writeExecute = write;
+        return;
+      }
+      expect(request).toMatchObject({
+        operation: "cancel",
+        params: { operationId: executeId },
+      });
+      write({
+        id: request.id,
+        result: { cancelled: true, operationId: executeId },
+        type: "response",
+      });
+      writeExecute?.({
+        error: {
+          code: "CANCELLED",
+          message: "Remote command and its process tree were cancelled",
+          retryable: false,
+        },
+        id: executeId,
+        type: "response",
+      });
+    });
+    const executor = new VsCodeRemoteExecutor(config(pipe));
+    const controller = new AbortController();
+
+    const running = executor.execute(["sleep", "30"], {
+      sideEffect: true,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(executeId).not.toBe(""));
+    controller.abort();
+
+    await expect(running).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(operations).toEqual(["execute", "cancel"]);
     executor.close();
   });
 });

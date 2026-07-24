@@ -33,6 +33,11 @@ interface StdioSocket {
   socket: Socket;
 }
 
+interface ActiveRemoteRequest {
+  request: RemoteExecutorCommandRequest;
+  socket: Socket;
+}
+
 function transportEndpoint(sessionId: string): string {
   if (process.platform === "win32") {
     return `\\\\.\\pipe\\codex-remote-bridge-${sessionId}`;
@@ -56,6 +61,7 @@ function tokenMatches(expected: string, actual: string): boolean {
 export class VsCodeTransportServer implements vscode.Disposable {
   readonly #config: () => BridgeConfig | null;
   readonly #controllerWorkspace: ControllerWorkspaceHandler | null;
+  readonly #activeRemoteRequests = new Map<string, ActiveRemoteRequest>();
   readonly #pending = new Map<string, Socket>();
   readonly #sockets = new Set<Socket>();
   readonly #stdioSockets = new Map<string, StdioSocket>();
@@ -106,6 +112,12 @@ export class VsCodeTransportServer implements vscode.Disposable {
 
   async close(): Promise<void> {
     const endpoint = this.#descriptor?.endpoint;
+    await Promise.allSettled(
+      [...this.#activeRemoteRequests.values()].map(({ request }) =>
+        this.#cancelRemoteOperation(request),
+      ),
+    );
+    this.#activeRemoteRequests.clear();
     await Promise.allSettled(
       [...this.#stdioSockets.values()].map(({ request }) =>
         this.#sendStdioControl(request, "stdioStop", {}),
@@ -174,6 +186,12 @@ export class VsCodeTransportServer implements vscode.Disposable {
       for (const [id, pendingSocket] of this.#pending) {
         if (pendingSocket === socket) {
           this.#pending.delete(id);
+        }
+      }
+      for (const [id, active] of this.#activeRemoteRequests) {
+        if (active.socket === socket) {
+          this.#activeRemoteRequests.delete(id);
+          void this.#cancelRemoteOperation(active.request).catch(() => undefined);
         }
       }
       for (const [id, session] of this.#stdioSockets) {
@@ -279,6 +297,9 @@ export class VsCodeTransportServer implements vscode.Disposable {
       if (request.operation === "stdioStart") {
         this.#stdioSockets.set(id, { request, socket });
       }
+      if (request.operation === "execute") {
+        this.#activeRemoteRequests.set(id, { request, socket });
+      }
       const response = await vscode.commands.executeCommand<RemoteExecutorCommandResponse>(
         REMOTE_EXECUTOR_COMMAND,
         request,
@@ -305,6 +326,7 @@ export class VsCodeTransportServer implements vscode.Disposable {
         type: "response",
       });
     } finally {
+      this.#activeRemoteRequests.delete(id);
       this.#pending.delete(id);
     }
     this.#stdioSockets.delete(id);
@@ -347,6 +369,25 @@ export class VsCodeTransportServer implements vscode.Disposable {
       throw new BridgeError(
         code ?? "REMOTE_TRANSPORT_DISCONNECTED",
         response?.error?.message ?? "Remote stdio control request failed",
+        response?.error?.details,
+      );
+    }
+  }
+
+  async #cancelRemoteOperation(request: RemoteExecutorCommandRequest): Promise<void> {
+    const response = await vscode.commands.executeCommand<RemoteExecutorCommandResponse>(
+      REMOTE_EXECUTOR_COMMAND,
+      {
+        ...request,
+        id: `${request.id}:cancel`,
+        operation: "cancel",
+        params: { operationId: request.id },
+      },
+    );
+    if (!response?.ok) {
+      throw new BridgeError(
+        response?.error?.code ?? "REMOTE_TRANSPORT_DISCONNECTED",
+        response?.error?.message ?? "Remote operation cancellation failed",
         response?.error?.details,
       );
     }

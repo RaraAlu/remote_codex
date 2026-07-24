@@ -20,8 +20,8 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.14` 自动化候选 | 无版本值门禁；本地次级根与远程主根的统一只读路由和原生 UI 投影已实现，候选 VSIX 安装与 Windows 实机待补测 |
-| Remote Executor | `0.2.9` 自动化候选 | 搜索统一为大小写敏感的字面匹配；能力集合和协议形状未变，候选实机待补测 |
+| Bridge Controller | `0.3.15` 自动化候选 | turn 中断、transport cancel 和调用方断线取消已实现；候选 VSIX 安装、真实取消与 Windows 实机待补测 |
+| Remote Executor | `0.2.10` / 诊断协议 5 自动化候选 | 新增 operation ID 绑定、`cancel` 能力和 POSIX 进程组终止；候选实机待补测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
 仓库不固定或门禁任何组件版本；当前生成协议记录的来源扩展为 `26.721.30844`，诊断
@@ -35,16 +35,17 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 2026-07-23 在 Linux x64 本机执行 `npm run check`：
 
 - TypeScript 类型检查通过。
-- 45 个测试文件通过，1 个真实远端条件测试文件跳过。
-- 176 项测试通过，6 项条件测试跳过，0 项失败。
+- 49 个测试文件通过，1 个真实远端条件测试文件跳过。
+- 185 项测试通过，6 项条件测试跳过，0 项失败。
 - Controller、Shim 和 Remote Executor 构建通过。
 - 插件内置 `0.146.0-alpha.3` 的本地透传、远程窗口启动和线程创建 Shim 冒烟通过；
   缺少受控运行时指针时，即使 PATH 存在系统 CLI 也失败关闭。
 - Linux x64 Controller VSIX 和匹配的 Remote Executor VSIX 打包通过。
 
-这些结果证明当前源码自动化基线与 Linux 包构造可用；真实窗口另外证明了官方面板
-与外部 CLI 发起的 Remote SSH 任务、25 个固定远端探针和 CodeGraph。它们仍不证明
-远程命令取消、断线恢复、双端写入、双端读取真实窗口链路或完整生命周期。
+这些结果证明当前源码自动化基线、运行中取消的本地协议闭环与 Linux 包构造可用；
+真实窗口另外证明了官方面板与外部 CLI 发起的 Remote SSH 任务、25 个固定远端探针和
+CodeGraph。它们仍不证明真实 Remote SSH 命令取消、断线恢复、双端写入、双端读取
+真实窗口链路或完整生命周期。
 
 `0.3.5` 使用校验过 SHA-256 的官方 Node `24.18.0` Windows x64 归档在 Linux 生成
 SEA Shim，`npm run package:all` 已成功。该结果证明跨平台构包和内容隔离，不替代
@@ -116,7 +117,7 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 | ROOT-SECONDARY | 定义本地次级授权目录 | 已实施（自动化） | 命令面板可显式选择和撤销本地目录；授权持久化为规范化次级根，诊断报告可见，撤销后既有执行器立即拒绝 | 候选 VSIX 的真实选择器和重载体验待补测 |
 | DUAL-READ | 双端目录读取、树、搜索和状态 | 已实施（自动化） | `workspace_*` 工具按显式目标和根 ID 路由；本地请求经已认证 Controller transport 执行，远端请求保持 Remote Executor/OpenSSH 路径；结果、审计和原生 UI 均保留根身份 | 候选 VSIX 的同任务双端读取与界面观感待实机补测 |
 | DUAL-WRITE | 双端写入、补丁、重命名和删除 | 待实施 | 读取结果已返回远端 SHA-256 | 没有写工具、`expectedHash`、原子替换或统一错误语义 |
-| LIFE-CANCEL | 运行中取消 | 待实施 | 执行器底层接受 `AbortSignal`，超时能终止子进程 | app-server `turn/interrupt` 没有传到活动远端请求 |
+| LIFE-CANCEL | 运行中取消 | 已实施（自动化） | `turn/interrupt` 绑定 thread/turn 活动调用；默认 VS Code Remote transport 显式取消；Executor 按 operation ID 中止 POSIX 进程组；等待审批取消不执行命令 | 真实 Remote SSH 取消耗时/遗留进程、Windows 进程树和 OpenSSH 回退待补测 |
 | LIFE-IDEMP | 幂等和断线结果确认 | 部分实施 | 同一 app-server 内广播的 `threadId + turnId + callId` 已协调为单次执行；有 `requestId`、`connectionId` 和 `RESULT_UNKNOWN` | 没有跨重连幂等账本、结果查询或重连确认 |
 | LIFE-BACKGROUND | 后台任务 | 待实施 | MCP stdio 有长生命周期会话管理 | 普通命令没有 start/status/log/cancel 协议 |
 | SAFE-CORE | Core 本地 Shell/文件工具硬阻断 | 部分实施/待补测 | 专用本地拒绝权限配置已由官方 app-server 激活；Shim 阻断 25 个本地客户端请求和五类 Core 本地审批并失败审计 | 真实模型专用工具诱饵负测和官方 UI 恢复尚未完成；hook 不能作为完整强制边界 |
@@ -241,7 +242,8 @@ VS Code 工作区 URI。2026-07-22 对官方扩展内置 `0.145.0-alpha.27` app-
 边界：
 
 - 所有 `remote_exec` 都按有副作用操作处理，无法声明纯读取命令。
-- 没有进程组或远端作业标识，终止单个父进程不保证清理完整进程树。
+- 默认 VS Code Remote 链路有请求 operation ID 和 POSIX 进程组；OpenSSH 回退仍只有
+  本地 SSH 子进程身份，不能确认远端进程树。
 - 没有稳定幂等键；相同 `callId` 再次出现仍可能重复执行。
 - 审批通过后参数不可变由当前调用对象保证，但没有跨重连审批摘要。
 
@@ -249,17 +251,22 @@ VS Code 工作区 URI。2026-07-22 对官方扩展内置 `0.145.0-alpha.27` app-
 
 已有：
 
-- OpenSSH 和 Remote Extension Host 执行器内部都实现了 `AbortSignal` 处理。
-- 执行超时会发送 `SIGTERM`，随后尝试 `SIGKILL`。
+- `turn/interrupt` 按 `threadId + turnId` 取消活动 Bridge 工具调用，等待审批的调用
+  直接返回 `CANCELLED` 且不启动进程。
+- `VsCodeRemoteExecutor` 以原请求 ID 发送独立 `cancel`；Controller 在调用方 socket
+  断开或自身关闭时也会请求取消。
+- Remote Executor 以 host、workspace 和 operation ID 保存 `AbortController`；
+  POSIX 命令运行在独立进程组，取消依次发送 `SIGTERM` 和 `SIGKILL`。
+- OpenSSH 执行器也接受 `AbortSignal`，但只能终止本地 SSH 进程。
 - VS Code transport 断开时，有副作用请求在本地返回 `RESULT_UNKNOWN`。
 - MCP stdio 会话支持 start/write/end/stop 和窗口关闭清理。
 
 边界：
 
-- `turn/interrupt` 当前透明转发给 app-server，没有关联 `turnId` 下的活动 Bridge 调用。
-- `VsCodeRemoteExecutor` 的 abort 只关闭本地 socket；Controller 没有发送远端 cancel，
-  Remote Executor 也没有按请求 ID 保存 `AbortController`。
-- socket 断开后 Remote Extension Host 中的命令可能继续运行到完成或超时，输出被丢弃。
+- 只有收到 Remote Executor 明确取消响应才返回 `CANCELLED`；确认失败仍按有副作用请求
+  返回 `RESULT_UNKNOWN`，且不会本地回退或自动重放。
+- OpenSSH 回退没有远端 operation ID 或进程树身份，取消后无法确认远端是否仍在运行。
+- Windows 执行器目前只能终止直接子进程，完整进程树行为尚未验证。
 - 没有完成结果账本，恢复连接后无法判断旧副作用是否完成。
 - 普通命令没有后台作业协议；MCP stdio 生命周期不能直接复用于任意训练命令。
 
@@ -639,10 +646,11 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 
 实施：
 
-1. 将 `turn/interrupt` 关联到该 turn 的活动 Bridge 调用。
-2. Remote Executor 协议升级，增加稳定 operation ID、cancel 和 result-status 操作。
-3. Controller、transport 和 Remote Executor 为活动操作保存 `AbortController`；取消时
-   终止进程组而不是只关闭本地 socket。
+1. [x] 将 `turn/interrupt` 关联到该 turn 的活动 Bridge 调用。
+2. [ ] Remote Executor 协议升级：已复用稳定请求 ID 并增加 `cancel`；`result-status`
+   操作留给下一提交的结果账本。
+3. [x] Controller、transport 和 Remote Executor 为活动操作保存取消状态；取消时
+   终止 POSIX 进程组而不是只关闭本地 socket。
 4. 为非幂等操作增加 `idempotencyKey` 和带上限的结果账本，区分 running、completed、
    cancelled、failed 和 unknown。
 5. socket 重连后先查询 operation 状态；已完成调用返回原结果，未知调用不得自动重放。
@@ -657,7 +665,7 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 
 提交边界：
 
-- transport cancel 与进程树终止一个提交。
+- [x] transport cancel 与进程树终止一个提交。
 - 幂等账本和结果查询一个提交。
 - 断线恢复与生命周期证据一个提交。
 

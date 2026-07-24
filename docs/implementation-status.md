@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run check` 为 45 个测试文件通过、1 个真实远端条件文件跳过，176 项通过、6 项
+`npm run test` 为 49 个测试文件通过、1 个真实远端条件文件跳过，185 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -113,13 +113,14 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 命令输出流 | 已映射为 `item/commandExecution/outputDelta` |
 | 权限模式继承 | 已按线程映射 `full-access`/`approvalPolicy=never`，其余模式失败关闭 |
 | 审批绑定 | 人工审批仅匹配一个待处理调用 ID；完全访问的自动放行单独审计 |
-| 运行中取消 | 未实现 |
+| 运行中取消 | `0.3.15` 已把 `turn/interrupt` 绑定到活动 Bridge 调用；VS Code Remote 通道显式发送 `cancel`，Remote Executor 按 operation ID 中止 POSIX 进程组；自动化通过，真实 Remote SSH 与 Windows 待补测 |
 | 哈希保护写入和补丁 | 未实现 |
 | 断线结果确认和幂等 | 部分实现；同一 app-server 广播的同一远端工具请求只执行一次，跨重连账本仍未实现 |
 | Core 内置本地工具硬阻断 | 部分实施；专用权限配置、25 个客户端请求和五类本地审批已失败关闭，真实模型专用工具诱饵待补测 |
 
-阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行；写操作、取消、断线恢复
-和本地执行硬阻断完成前，不得用于无人值守的有副作用任务。
+阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行，0.3.15 完成默认
+VS Code Remote 链路的运行中取消自动化闭环；写操作、断线恢复、本地执行硬阻断和
+真实取消验收完成前，不得用于无人值守的有副作用任务。
 
 ## 当前优先阶段：外部 Codex CLI 介入
 
@@ -293,6 +294,16 @@ Controller 再次核对会话配置与实时授权；请求不会到达 Remote E
 交替读取和界面观感仍待实机补测。远端搜索同时从正则匹配统一为大小写敏感的字面
 匹配，因此 Remote Executor 实现版本升到 `0.2.9`；能力集合和协议形状保持不变。
 
+`0.3.15` 完成阶段 4 的 transport cancel 与进程树终止提交。Shim 将
+`turn/interrupt` 精确关联到同一 thread/turn 的活动工具调用，取消等待审批时不会启动
+命令。默认 `vscode-remote` 链路用原 operation ID 发送独立 `cancel` 请求；Controller
+在调用方 socket 意外断开或自身关闭时也会请求远端取消。Remote Executor 以
+`host + workspace + operation ID` 保存 `AbortController`，本地执行器为 POSIX 命令
+创建独立进程组并依次发送 `SIGTERM`/`SIGKILL`。进程树、断线触发、协议往返和审计
+自动化已通过，因此 Executor 升到 `0.2.10`、诊断协议号升到 5 并声明 `cancel`
+能力。真实 Remote SSH 取消耗时和遗留进程、Windows 行为、OpenSSH 回退远端进程身份、
+跨重连幂等账本与结果查询仍待后续目标。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -325,7 +336,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-23-release-0.3.11-historical-thread-resume.md`；工具根身份见
 `docs/acceptance/2026-07-23-release-0.3.12-root-identity-protocol.md`；本地根授权执行器见
 `docs/acceptance/2026-07-23-release-0.3.13-local-root-authority.md`；双端只读路由见
-`docs/acceptance/2026-07-23-release-0.3.14-dual-read-routing.md`。
+`docs/acceptance/2026-07-23-release-0.3.14-dual-read-routing.md`；运行中命令取消见
+`docs/acceptance/2026-07-23-release-0.3.15-command-cancellation.md`。
 
 ## 本地 MCP 边界
 

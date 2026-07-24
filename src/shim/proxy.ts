@@ -99,17 +99,20 @@ interface RemoteExecContext {
 }
 
 interface PendingApproval {
-  resolve: (approved: boolean) => void;
-  timeout: NodeJS.Timeout;
+  settle: (approved: boolean) => void;
 }
 
 interface CoordinatedRemoteToolCall {
+  controller: AbortController;
   fingerprint: string;
-  operation: () => Promise<unknown>;
+  operation: (signal: AbortSignal) => Promise<unknown>;
   priority: number;
   result: Promise<unknown>;
+  settled: boolean;
   started: boolean;
+  threadId: string;
   timer?: NodeJS.Timeout;
+  turnId: string;
   resolve: (result: unknown) => void;
   reject: (error: unknown) => void;
 }
@@ -123,7 +126,7 @@ export class RemoteToolCallCoordinator {
   async run(
     request: RpcRequest,
     priority: number,
-    operation: () => Promise<unknown>,
+    operation: (signal: AbortSignal) => Promise<unknown>,
   ): Promise<unknown> {
     if (
       !isRecord(request.params) ||
@@ -159,18 +162,28 @@ export class RemoteToolCallCoordinator {
       rejectResult = reject;
     });
     const coordinated: CoordinatedRemoteToolCall = {
+      controller: new AbortController(),
       fingerprint,
       operation,
       priority,
       result,
+      settled: false,
       started: false,
+      threadId: request.params.threadId,
+      turnId: request.params.turnId,
       resolve: resolveResult,
       reject: rejectResult,
     };
     this.#calls.set(key, coordinated);
     void result.then(
-      () => this.#scheduleDelete(key, coordinated),
-      () => this.#scheduleDelete(key, coordinated),
+      () => {
+        coordinated.settled = true;
+        this.#scheduleDelete(key, coordinated);
+      },
+      () => {
+        coordinated.settled = true;
+        this.#scheduleDelete(key, coordinated);
+      },
     );
     if (priority <= 0) {
       this.#start(coordinated);
@@ -184,6 +197,26 @@ export class RemoteToolCallCoordinator {
     return await result;
   }
 
+  cancelTurn(threadId: string, turnId: string): number {
+    let cancelled = 0;
+    for (const call of this.#calls.values()) {
+      if (
+        call.threadId !== threadId ||
+        call.turnId !== turnId ||
+        call.settled ||
+        call.controller.signal.aborted
+      ) {
+        continue;
+      }
+      call.controller.abort();
+      cancelled += 1;
+      if (!call.started) {
+        this.#start(call);
+      }
+    }
+    return cancelled;
+  }
+
   #start(call: CoordinatedRemoteToolCall): void {
     if (call.started) {
       return;
@@ -194,7 +227,7 @@ export class RemoteToolCallCoordinator {
       call.timer = undefined;
     }
     void Promise.resolve()
-      .then(call.operation)
+      .then(() => call.operation(call.controller.signal))
       .then(call.resolve, call.reject);
   }
 
@@ -331,6 +364,30 @@ export class ShimProxy {
     if (isRpcResponse(message) && this.#resolveApproval(message)) {
       return;
     }
+    if (
+      this.#options.config &&
+      isRpcRequest(message) &&
+      message.method === "turn/interrupt" &&
+      isRecord(message.params) &&
+      typeof message.params.threadId === "string" &&
+      typeof message.params.turnId === "string"
+    ) {
+      const cancelledCalls = this.#remoteToolCalls.cancelTurn(
+        message.params.threadId,
+        message.params.turnId,
+      );
+      await this.#audit.write({
+        hostId: this.#options.config.host,
+        workspaceRoot: this.#options.config.workspaceRoot,
+        operation: "remote_tool.cancel",
+        outcome: cancelledCalls > 0 ? "cancelled" : "succeeded",
+        details: {
+          cancelledCalls,
+          threadId: message.params.threadId,
+          turnId: message.params.turnId,
+        },
+      });
+    }
     if (this.#options.config && isBlockedLocalClientMessage(message)) {
       await this.#audit.write({
         hostId: this.#options.config.host,
@@ -406,17 +463,31 @@ export class ShimProxy {
         const result = await this.#remoteToolCalls.run(
           message,
           this.#options.remoteToolPriority ?? 0,
-          async () => {
+          async (signal) => {
             let context: RemoteExecContext | null = null;
             if (isRemoteExecToolCall(message)) {
               context = this.#remoteExecContext(message);
+              if (signal.aborted) {
+                return await this.#router!.handle(message.id, message.params, {
+                  signal,
+                });
+              }
               const requiresApproval = this.#remoteApprovalPolicies.requiresApproval(
                 context.threadId,
               );
               if (
                 requiresApproval &&
-                !(await this.#requestRemoteCommandApproval(context, writeClient))
+                !(await this.#requestRemoteCommandApproval(
+                  context,
+                  writeClient,
+                  signal,
+                ))
               ) {
+                if (signal.aborted) {
+                  return await this.#router!.handle(message.id, message.params, {
+                    signal,
+                  });
+                }
                 return await this.#router!.decline(
                   message.id,
                   message.params,
@@ -440,6 +511,7 @@ export class ShimProxy {
             }
 
             return await this.#router!.handle(message.id, message.params, {
+              signal,
               onOutput: context
                 ? (delta) => {
                     writeClient({
@@ -518,19 +590,34 @@ export class ShimProxy {
   async #requestRemoteCommandApproval(
     context: RemoteExecContext,
     writeClient: RpcMessageWriter,
+    signal: AbortSignal,
   ): Promise<boolean> {
     const config = this.#options.config;
     if (!config) {
       throw new TypeError("Remote command approval requires Bridge configuration");
     }
+    if (signal.aborted) {
+      return false;
+    }
     const approvalId = `codex-bridge-approval:${randomUUID()}`;
     const approved = new Promise<boolean>((resolve) => {
-      const timeout = setTimeout(() => {
+      let settled = false;
+      let timeout: NodeJS.Timeout;
+      const abort = (): void => settle(false);
+      const settle = (value: boolean): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeout);
         this.#pendingApprovals.delete(approvalId);
-        resolve(false);
-      }, 10 * 60_000);
+        signal.removeEventListener("abort", abort);
+        resolve(value);
+      };
+      timeout = setTimeout(() => settle(false), 10 * 60_000);
       timeout.unref();
-      this.#pendingApprovals.set(approvalId, { resolve, timeout });
+      this.#pendingApprovals.set(approvalId, { settle });
+      signal.addEventListener("abort", abort, { once: true });
     });
     writeClient({
       id: approvalId,
@@ -555,20 +642,17 @@ export class ShimProxy {
     if (!pending) {
       return false;
     }
-    this.#pendingApprovals.delete(response.id);
-    clearTimeout(pending.timeout);
     const decision =
       isRecord(response.result) && typeof response.result.decision === "string"
         ? response.result.decision
         : "";
-    pending.resolve(decision === "accept");
+    pending.settle(decision === "accept");
     return true;
   }
 
   #cancelApprovals(): void {
     for (const pending of this.#pendingApprovals.values()) {
-      clearTimeout(pending.timeout);
-      pending.resolve(false);
+      pending.settle(false);
     }
     this.#pendingApprovals.clear();
   }

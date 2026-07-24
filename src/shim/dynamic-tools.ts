@@ -219,6 +219,7 @@ interface DynamicToolCall {
 
 export interface DynamicToolObserver {
   onOutput?: (chunk: string) => void;
+  signal?: AbortSignal;
 }
 
 function parseToolCall(value: unknown): DynamicToolCall {
@@ -306,7 +307,13 @@ export class DynamicToolRouter {
     });
 
     try {
+      if (observer.signal?.aborted) {
+        throw new BridgeError("CANCELLED", "Workspace tool call was cancelled");
+      }
       const data = await this.#execute(call.tool, args, root, observer);
+      if (observer.signal?.aborted) {
+        throw new BridgeError("CANCELLED", "Workspace tool call was cancelled");
+      }
       const truncated = isRecord(data) && data.truncated === true;
       const result: ToolResult<unknown> = {
         ok: true,
@@ -358,7 +365,12 @@ export class DynamicToolRouter {
         rootPath: root.path,
         target: root.target,
         operation: call.tool,
-        outcome: bridgeError.code === "RESULT_UNKNOWN" ? "unknown" : "failed",
+        outcome:
+          bridgeError.code === "RESULT_UNKNOWN"
+            ? "unknown"
+            : bridgeError.code === "CANCELLED"
+              ? "cancelled"
+              : "failed",
         durationMs: Math.round(performance.now() - startedAt),
         details: { error: bridgeError.toPayload() },
       });
@@ -419,6 +431,7 @@ export class DynamicToolRouter {
         env: request.env,
         timeoutMs: request.timeoutMs,
         sideEffect: true,
+        signal: observer.signal,
         onStdout: observer.onOutput,
         onStderr: observer.onOutput,
       });
