@@ -19,8 +19,13 @@ import {
   bridgeUpstreamTokenPath,
 } from "../core/locations.js";
 import type { SpawnProcess } from "../core/ssh-executor.js";
-import type { BridgeConfig } from "../core/types.js";
+import type {
+  AuditEvent,
+  BridgeClientIdentity,
+  BridgeConfig,
+} from "../core/types.js";
 import {
+  RemoteTurnClientTracker,
   RemoteToolCallCoordinator,
   ShimProxy,
   type RpcMessageWriter,
@@ -46,6 +51,19 @@ const EXTERNAL_CLOSE_GRACE_MS = 250;
 interface RelayedNotification {
   expiresAtMs: number;
   sources: Set<string>;
+}
+
+interface PendingClientRequest {
+  clientIdentity: BridgeClientIdentity;
+  method: string;
+  threadId?: string;
+  turnId?: string;
+}
+
+interface PendingExternalRequest {
+  details: Record<string, unknown>;
+  operationId: string;
+  startedAtMs: number;
 }
 
 export interface ExternalCliSessionDescriptor {
@@ -181,6 +199,7 @@ export class SharedAppServer {
   readonly #audit: AuditLog;
   readonly #approvalPolicies = new RemoteApprovalPolicyTracker();
   readonly #remoteToolCalls = new RemoteToolCallCoordinator();
+  readonly #turnClients = new RemoteTurnClientTracker();
   readonly #sessionPath = bridgeExternalCliSessionPath();
   readonly #externalTokenPath = bridgeExternalCliTokenPath();
   readonly #upstreamTokenPath = bridgeUpstreamTokenPath();
@@ -193,6 +212,7 @@ export class SharedAppServer {
   #upstreamEndpoint = "";
   #upstreamToken = "";
   #descriptorQueue = Promise.resolve();
+  #auditQueue = Promise.resolve();
   #stdioWriter: RpcMessageWriter | null = null;
   readonly #externalWriters = new Map<string, RpcMessageWriter>();
   readonly #externalRelayCounts = new Map<string, number>();
@@ -310,8 +330,13 @@ export class SharedAppServer {
 
   async #serveExternalClient(socket: WebSocket, errorOutput: Writable): Promise<void> {
     const clientId = randomUUID();
+    const clientIdentity: BridgeClientIdentity = {
+      clientId,
+      clientSource: "external-cli",
+    };
     const buffered: string[] = [];
-    const pendingThreadRequests = new Map<RpcId, string>();
+    const pendingClientRequests = new Map<RpcId, PendingClientRequest>();
+    const pendingExternalRequests = new Map<RpcId, PendingExternalRequest>();
     let closed = false;
     socket.once("close", () => {
       closed = true;
@@ -328,28 +353,92 @@ export class SharedAppServer {
         upstream.close();
         return;
       }
-      session = this.#createSession(true, 1);
+      for (const raw of buffered) {
+        try {
+          this.#observeExternalClientIdentity(parseRpcLine(raw), clientIdentity);
+        } catch {
+          break;
+        }
+      }
+      session = this.#createSession(true, 1, clientIdentity);
       const writeUpstream = webSocketWriter(upstream);
-      const writeExternal = webSocketWriter(socket);
+      const writeExternalTransport = webSocketWriter(socket);
+      const writeExternal: RpcMessageWriter = (message) => {
+        if (isRpcResponse(message)) {
+          const pending = pendingExternalRequests.get(message.id);
+          if (pending) {
+            pendingExternalRequests.delete(message.id);
+            void this.#queueAudit({
+              ...clientIdentity,
+              operationId: pending.operationId,
+              operation: "external_cli.request",
+              outcome: message.error ? "failed" : "succeeded",
+              durationMs: Date.now() - pending.startedAtMs,
+              hostId: this.#options.config?.host ?? "local",
+              workspaceRoot: this.#activeWorkspaceRoot,
+              details: pending.details,
+            });
+          }
+        }
+        writeExternalTransport(message);
+      };
       this.#externalWriters.set(clientId, writeExternal);
       this.#externalRelayCounts.set(clientId, 0);
       const writeClient = this.#downstreamWriter(clientId, writeExternal);
       const handleClient = (raw: string): void => {
         try {
           const message = parseRpcLine(raw);
-          this.#observeClientMessage(message, pendingThreadRequests);
+          this.#observeExternalClientIdentity(message, clientIdentity);
+          this.#observeClientMessage(
+            message,
+            pendingClientRequests,
+            clientIdentity,
+          );
           if ("method" in message) {
-            void this.#audit.write({
+            const operationId = isRpcRequest(message)
+              ? String(message.id)
+              : randomUUID();
+            const details = this.#externalRequestAuditDetails(message);
+            if (isRpcRequest(message)) {
+              pendingExternalRequests.set(message.id, {
+                details,
+                operationId,
+                startedAtMs: Date.now(),
+              });
+            }
+            void this.#queueAudit({
+              ...clientIdentity,
+              operationId,
               operation: "external_cli.request",
-              outcome: "started",
+              outcome: isRpcRequest(message) ? "started" : "succeeded",
               hostId: this.#options.config?.host ?? "local",
               workspaceRoot: this.#activeWorkspaceRoot,
-              details: { clientId, method: message.method },
+              details,
             });
           }
           void session
             ?.handleClientMessage(message, writeUpstream, writeClient)
             .catch((error) => {
+              if (isRpcRequest(message)) {
+                const pending = pendingExternalRequests.get(message.id);
+                if (pending) {
+                  pendingExternalRequests.delete(message.id);
+                  void this.#queueAudit({
+                    ...clientIdentity,
+                    operationId: pending.operationId,
+                    operation: "external_cli.request",
+                    outcome: "failed",
+                    durationMs: Date.now() - pending.startedAtMs,
+                    hostId: this.#options.config?.host ?? "local",
+                    workspaceRoot: this.#activeWorkspaceRoot,
+                    details: {
+                      ...pending.details,
+                      errorType:
+                        error instanceof Error ? error.name : typeof error,
+                    },
+                  });
+                }
+              }
               errorOutput.write(
                 `codex-bridge: external client request failed: ${String(error)}\n`,
               );
@@ -361,10 +450,18 @@ export class SharedAppServer {
       };
       socket.off("message", bufferMessage);
       socket.on("message", (data) => handleClient(rawMessage(data)));
+      await this.#queueAudit({
+        ...clientIdentity,
+        operationId: clientId,
+        operation: "external_cli.connect",
+        outcome: "succeeded",
+        hostId: this.#options.config?.host ?? "local",
+        workspaceRoot: this.#activeWorkspaceRoot,
+      });
       upstream.on("message", (data) => {
         try {
           const message = parseRpcLine(rawMessage(data));
-          this.#observeServerMessage(message, pendingThreadRequests);
+          this.#observeServerMessage(message, pendingClientRequests);
           void session
             ?.handleServerMessage(message, writeUpstream, writeClient)
             .catch((error) => {
@@ -380,25 +477,36 @@ export class SharedAppServer {
       for (const raw of buffered) {
         handleClient(raw);
       }
-      await this.#audit.write({
-        operation: "external_cli.connect",
-        outcome: "succeeded",
-        hostId: this.#options.config?.host ?? "local",
-        workspaceRoot: this.#activeWorkspaceRoot,
-        details: { clientId },
-      });
       socket.once("close", () => {
         const notificationsRelayedToVsCode = this.#externalRelayCounts.get(clientId) ?? 0;
+        for (const pending of pendingExternalRequests.values()) {
+          void this.#queueAudit({
+            ...clientIdentity,
+            operationId: pending.operationId,
+            operation: "external_cli.request",
+            outcome: "cancelled",
+            durationMs: Date.now() - pending.startedAtMs,
+            hostId: this.#options.config?.host ?? "local",
+            workspaceRoot: this.#activeWorkspaceRoot,
+            details: {
+              ...pending.details,
+              reason: "client-disconnected",
+            },
+          });
+        }
+        pendingExternalRequests.clear();
         this.#externalWriters.delete(clientId);
         this.#externalRelayCounts.delete(clientId);
         upstream?.close();
         session?.closeSession();
-        void this.#audit.write({
+        void this.#queueAudit({
+          ...clientIdentity,
+          operationId: clientId,
           operation: "external_cli.disconnect",
           outcome: "succeeded",
           hostId: this.#options.config?.host ?? "local",
           workspaceRoot: this.#activeWorkspaceRoot,
-          details: { clientId, notificationsRelayedToVsCode },
+          details: { notificationsRelayedToVsCode },
         });
       });
     } catch (error) {
@@ -417,8 +525,12 @@ export class SharedAppServer {
     output: Writable,
     errorOutput: Writable,
   ): Promise<number> {
-    const session = this.#createSession(true, 0);
-    const pendingThreadRequests = new Map<RpcId, string>();
+    const clientIdentity: BridgeClientIdentity = {
+      clientId: "stdio",
+      clientSource: "vscode",
+    };
+    const session = this.#createSession(true, 0, clientIdentity);
+    const pendingClientRequests = new Map<RpcId, PendingClientRequest>();
     const writeUpstream = webSocketWriter(upstream);
     const writeClient = streamWriter(output);
     this.#stdioWriter = writeClient;
@@ -429,7 +541,11 @@ export class SharedAppServer {
       clientQueue = clientQueue
         .then(async () => {
           const message = parseRpcLine(line);
-          this.#observeClientMessage(message, pendingThreadRequests);
+          this.#observeClientMessage(
+            message,
+            pendingClientRequests,
+            clientIdentity,
+          );
           await session.handleClientMessage(message, writeUpstream, writeDownstream);
         })
         .catch((error) => {
@@ -439,7 +555,7 @@ export class SharedAppServer {
     upstream.on("message", (data) => {
       try {
         const message = parseRpcLine(rawMessage(data));
-        this.#observeServerMessage(message, pendingThreadRequests);
+        this.#observeServerMessage(message, pendingClientRequests);
         void session.handleServerMessage(message, writeUpstream, writeDownstream).catch((error) => {
           errorOutput.write(`codex-bridge: server request handling failed: ${String(error)}\n`);
         });
@@ -484,7 +600,11 @@ export class SharedAppServer {
     });
   }
 
-  #createSession(observeApprovalPolicy: boolean, remoteToolPriority: number): ShimProxy {
+  #createSession(
+    observeApprovalPolicy: boolean,
+    remoteToolPriority: number,
+    clientIdentity: BridgeClientIdentity,
+  ): ShimProxy {
     return new ShimProxy({
       appServerArgs: this.#options.appServerArgs,
       auditPath: this.#options.auditPath,
@@ -492,8 +612,10 @@ export class SharedAppServer {
       config: this.#options.config,
       controlDir: this.#options.controlDir,
       approvalPolicies: this.#approvalPolicies,
+      clientIdentity,
       remoteToolCalls: this.#remoteToolCalls,
       remoteToolPriority,
+      turnClients: this.#turnClients,
       observeApprovalPolicy,
       rewriteClientMessages: this.#options.config !== null,
       spawnSsh: this.#options.spawnSsh,
@@ -545,32 +667,79 @@ export class SharedAppServer {
 
   #observeClientMessage(
     message: ReturnType<typeof parseRpcLine>,
-    pendingThreadRequests: Map<RpcId, string>,
+    pendingClientRequests: Map<RpcId, PendingClientRequest>,
+    clientIdentity: BridgeClientIdentity,
   ): void {
+    if (!isRpcRequest(message)) {
+      return;
+    }
+    const params = isRecord(message.params) ? message.params : {};
     if (
-      isRpcRequest(message) &&
-      (message.method === "thread/start" || message.method === "thread/resume")
+      message.method === "thread/start" ||
+      message.method === "thread/resume" ||
+      message.method === "turn/start" ||
+      message.method === "turn/steer"
     ) {
-      pendingThreadRequests.set(message.id, message.method);
+      pendingClientRequests.set(message.id, {
+        clientIdentity: { ...clientIdentity },
+        method: message.method,
+        ...(typeof params.threadId === "string"
+          ? { threadId: params.threadId }
+          : {}),
+        ...(typeof params.expectedTurnId === "string"
+          ? { turnId: params.expectedTurnId }
+          : {}),
+      });
+    }
+    if (message.method === "thread/start" || message.method === "thread/resume") {
       if (
         !this.#options.config &&
-        isRecord(message.params) &&
-        typeof message.params.cwd === "string" &&
-        isAbsolute(message.params.cwd)
+        typeof params.cwd === "string" &&
+        isAbsolute(params.cwd)
       ) {
-        this.#setActiveWorkspaceRoot(message.params.cwd);
+        this.#setActiveWorkspaceRoot(params.cwd);
       }
     }
   }
 
   #observeServerMessage(
     message: ReturnType<typeof parseRpcLine>,
-    pendingThreadRequests: Map<RpcId, string>,
+    pendingClientRequests: Map<RpcId, PendingClientRequest>,
   ): void {
-    if (isRpcResponse(message) && pendingThreadRequests.delete(message.id)) {
-      const thread = isRecord(message.result) ? message.result.thread : undefined;
-      if (isRecord(thread) && typeof thread.id === "string") {
-        this.#setActiveThread(thread.id);
+    if (isRpcResponse(message)) {
+      const pending = pendingClientRequests.get(message.id);
+      if (pending) {
+        pendingClientRequests.delete(message.id);
+        const result = isRecord(message.result) ? message.result : {};
+        const thread = result.thread;
+        if (isRecord(thread) && typeof thread.id === "string") {
+          this.#setActiveThread(thread.id);
+        }
+        const turn = result.turn;
+        if (
+          pending.method === "turn/start" &&
+          pending.threadId &&
+          isRecord(turn) &&
+          typeof turn.id === "string"
+        ) {
+          this.#turnClients.record(
+            pending.threadId,
+            turn.id,
+            pending.clientIdentity,
+          );
+        }
+        if (
+          !message.error &&
+          pending.method === "turn/steer" &&
+          pending.threadId &&
+          pending.turnId
+        ) {
+          this.#turnClients.record(
+            pending.threadId,
+            pending.turnId,
+            pending.clientIdentity,
+          );
+        }
       }
       return;
     }
@@ -581,6 +750,59 @@ export class SharedAppServer {
     if (isRecord(thread) && typeof thread.id === "string") {
       this.#setActiveThread(thread.id);
     }
+    if (
+      message.method === "turn/completed" &&
+      typeof message.params.threadId === "string" &&
+      isRecord(message.params.turn) &&
+      typeof message.params.turn.id === "string"
+    ) {
+      this.#turnClients.complete(
+        message.params.threadId,
+        message.params.turn.id,
+      );
+    }
+  }
+
+  #observeExternalClientIdentity(
+    message: ReturnType<typeof parseRpcLine>,
+    clientIdentity: BridgeClientIdentity,
+  ): void {
+    if (
+      !("method" in message) ||
+      message.method !== "initialize" ||
+      !isRecord(message.params) ||
+      !isRecord(message.params.clientInfo)
+    ) {
+      return;
+    }
+    if (message.params.clientInfo.name === "codex_vscode_bridge_mcp") {
+      clientIdentity.clientSource = "external-mcp";
+    }
+  }
+
+  #externalRequestAuditDetails(
+    message: ReturnType<typeof parseRpcLine>,
+  ): Record<string, unknown> {
+    if (!("method" in message)) {
+      return {};
+    }
+    const details: Record<string, unknown> = { method: message.method };
+    const params = isRecord(message.params) ? message.params : {};
+    for (const key of ["threadId", "turnId", "expectedTurnId", "callId"] as const) {
+      if (typeof params[key] === "string") {
+        details[key] = params[key];
+      }
+    }
+    return details;
+  }
+
+  #queueAudit(
+    event: Omit<AuditEvent, "timestamp"> & { timestamp?: string },
+  ): Promise<void> {
+    this.#auditQueue = this.#auditQueue
+      .catch(() => undefined)
+      .then(() => this.#audit.write(event));
+    return this.#auditQueue;
   }
 
   #setActiveThread(threadId: string): void {
@@ -645,6 +867,7 @@ export class SharedAppServer {
     this.#child?.kill("SIGTERM");
     this.#child = null;
     await this.#descriptorQueue.catch(() => undefined);
+    await this.#auditQueue.catch(() => undefined);
     await Promise.all([
       rm(this.#sessionPath, { force: true }),
       rm(this.#externalTokenPath, { force: true }),

@@ -81,6 +81,10 @@ describe("workspace mutation approval", () => {
         host: "remote-host",
         workspaceRoot: "/remote/workspace",
       }),
+      clientIdentity: {
+        clientId: "external-cli-1",
+        clientSource: "external-cli",
+      },
       controlDir: join(directory, "control"),
       spawnSsh,
     });
@@ -130,7 +134,10 @@ describe("workspace mutation approval", () => {
         expect.arrayContaining([
           expect.objectContaining({
             operation: "workspace_mutation.approval",
+            operationId: "mutation-item",
             outcome: "succeeded",
+            clientId: "external-cli-1",
+            clientSource: "external-cli",
             rootId: "remote-primary",
             target: "remote",
             details: expect.objectContaining({
@@ -142,7 +149,10 @@ describe("workspace mutation approval", () => {
           }),
           expect.objectContaining({
             operation: "workspace_write_file",
+            operationId: "mutation-item",
             outcome: "succeeded",
+            clientId: "external-cli-1",
+            clientSource: "external-cli",
             details: expect.objectContaining({
               bytesWritten: 8,
               newHash: contentHash,
@@ -186,6 +196,10 @@ describe("workspace mutation approval", () => {
         host: "remote-host",
         workspaceRoot: "/remote/workspace",
       }),
+      clientIdentity: {
+        clientId: "external-cli-2",
+        clientSource: "external-cli",
+      },
       controlDir: join(directory, "control"),
       spawnSsh,
     });
@@ -204,6 +218,9 @@ describe("workspace mutation approval", () => {
       const audit = await readFile(auditPath, "utf8");
       expect(audit).toContain('"permissionMode":"full-access"');
       expect(audit).toContain('"operation":"workspace_mutation.approval"');
+      expect(audit).toContain('"clientSource":"external-cli"');
+      expect(audit).toContain('"clientId":"external-cli-2"');
+      expect(audit).toContain('"operationId":"mutation-item"');
     } finally {
       proxy.closeSession();
       await rm(directory, { force: true, recursive: true });

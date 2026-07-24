@@ -9,7 +9,10 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { AuditLog } from "../core/audit-log.js";
 import { normalizeRemotePath } from "../core/path-policy.js";
-import type { BridgeConfig } from "../core/types.js";
+import type {
+  BridgeClientIdentity,
+  BridgeConfig,
+} from "../core/types.js";
 import { OpenSshExecutor, type SpawnProcess } from "../core/ssh-executor.js";
 import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
 import {
@@ -62,8 +65,10 @@ export interface ShimProxyOptions {
   output?: Writable;
   errorOutput?: Writable;
   approvalPolicies?: RemoteApprovalPolicyTracker;
+  clientIdentity?: BridgeClientIdentity;
   remoteToolCalls?: RemoteToolCallCoordinator;
   remoteToolPriority?: number;
+  turnClients?: RemoteTurnClientTracker;
   observeApprovalPolicy?: boolean;
   rewriteClientMessages?: boolean;
   spawnCodex?: (
@@ -172,6 +177,10 @@ interface CoordinatedRemoteToolCall {
 
 const REMOTE_TOOL_PRIMARY_GRACE_MS = 25;
 const REMOTE_TOOL_RESULT_RETENTION_MS = 1_000;
+const DEFAULT_CLIENT_IDENTITY: BridgeClientIdentity = {
+  clientId: "stdio",
+  clientSource: "vscode",
+};
 
 export class RemoteToolCallCoordinator {
   readonly #calls = new Map<string, CoordinatedRemoteToolCall>();
@@ -294,6 +303,51 @@ export class RemoteToolCallCoordinator {
   }
 }
 
+export class RemoteTurnClientTracker {
+  readonly #clients = new Map<string, BridgeClientIdentity>();
+  readonly #maxEntries: number;
+
+  constructor(maxEntries = 512) {
+    if (!Number.isInteger(maxEntries) || maxEntries < 1) {
+      throw new TypeError("Remote turn client tracker maxEntries must be positive");
+    }
+    this.#maxEntries = maxEntries;
+  }
+
+  record(
+    threadId: string,
+    turnId: string,
+    identity: BridgeClientIdentity,
+  ): void {
+    const key = this.#key(threadId, turnId);
+    this.#clients.delete(key);
+    this.#clients.set(key, { ...identity });
+    while (this.#clients.size > this.#maxEntries) {
+      const oldest = this.#clients.keys().next().value as string | undefined;
+      if (oldest === undefined) {
+        break;
+      }
+      this.#clients.delete(oldest);
+    }
+  }
+
+  resolve(
+    threadId: string,
+    turnId: string,
+    fallback: BridgeClientIdentity,
+  ): BridgeClientIdentity {
+    return { ...(this.#clients.get(this.#key(threadId, turnId)) ?? fallback) };
+  }
+
+  complete(threadId: string, turnId: string): void {
+    this.#clients.delete(this.#key(threadId, turnId));
+  }
+
+  #key(threadId: string, turnId: string): string {
+    return `${threadId}\0${turnId}`;
+  }
+}
+
 export function isUnknownServerRequest(request: RpcRequest): boolean {
   return !KNOWN_SERVER_REQUESTS.has(request.method);
 }
@@ -301,19 +355,23 @@ export function isUnknownServerRequest(request: RpcRequest): boolean {
 export class ShimProxy {
   readonly #options: ShimProxyOptions;
   readonly #audit: AuditLog;
+  readonly #clientIdentity: BridgeClientIdentity;
   readonly #executor: OpenSshExecutor | null;
   readonly #router: DynamicToolRouter | null;
   readonly #remoteApprovalPolicies: RemoteApprovalPolicyTracker;
   readonly #remoteToolCalls: RemoteToolCallCoordinator;
+  readonly #turnClients: RemoteTurnClientTracker;
   readonly #pendingApprovals = new Map<RpcId, PendingApproval>();
   #child: ChildProcessWithoutNullStreams | null = null;
 
   constructor(options: ShimProxyOptions) {
     this.#options = options;
     this.#audit = new AuditLog(options.auditPath);
+    this.#clientIdentity = options.clientIdentity ?? DEFAULT_CLIENT_IDENTITY;
     this.#remoteApprovalPolicies =
       options.approvalPolicies ?? new RemoteApprovalPolicyTracker();
     this.#remoteToolCalls = options.remoteToolCalls ?? new RemoteToolCallCoordinator();
+    this.#turnClients = options.turnClients ?? new RemoteTurnClientTracker();
     this.#executor = options.config
       ? options.config.connectionMode === "vscode-remote"
         ? new VsCodeRemoteExecutor(options.config)
@@ -430,6 +488,8 @@ export class ShimProxy {
         message.params.turnId,
       );
       await this.#audit.write({
+        ...this.#clientIdentity,
+        operationId: String(message.id),
         hostId: this.#options.config.host,
         workspaceRoot: this.#options.config.workspaceRoot,
         operation: "remote_tool.cancel",
@@ -443,6 +503,8 @@ export class ShimProxy {
     }
     if (this.#options.config && isBlockedLocalClientMessage(message)) {
       await this.#audit.write({
+        ...this.#clientIdentity,
+        ...("id" in message ? { operationId: String(message.id) } : {}),
         hostId: this.#options.config.host,
         workspaceRoot: this.#options.config.workspaceRoot,
         operation: "local_core_request.blocked",
@@ -488,6 +550,8 @@ export class ShimProxy {
 
     if (this.#options.config && isBlockedLocalServerApproval(message)) {
       await this.#audit.write({
+        ...this.#clientIdentity,
+        operationId: String(message.id),
         hostId: this.#options.config.host,
         workspaceRoot: this.#options.config.workspaceRoot,
         operation: "local_core_approval.blocked",
@@ -516,6 +580,7 @@ export class ShimProxy {
         return;
       }
       try {
+        const clientIdentity = this.#remoteToolClientIdentity(message);
         const result = await this.#remoteToolCalls.run(
           message,
           this.#options.remoteToolPriority ?? 0,
@@ -526,7 +591,9 @@ export class ShimProxy {
               execContext = this.#remoteExecContext(message);
               if (signal.aborted) {
                 return await this.#router!.handle(message.id, message.params, {
+                  clientIdentity,
                   idempotencyKey,
+                  operationId: execContext.callId,
                   signal,
                 });
               }
@@ -548,6 +615,8 @@ export class ShimProxy {
               if (requiresApproval) {
                 await this.#audit.write({
                   requestId: execContext.callId,
+                  operationId: execContext.callId,
+                  ...clientIdentity,
                   connectionId: this.#executor?.connectionId,
                   hostId: this.#options.config?.host,
                   workspaceRoot: this.#options.config?.workspaceRoot,
@@ -570,7 +639,9 @@ export class ShimProxy {
               ) {
                 if (signal.aborted) {
                   return await this.#router!.handle(message.id, message.params, {
+                    clientIdentity,
                     idempotencyKey,
+                    operationId: execContext.callId,
                     signal,
                   });
                 }
@@ -578,11 +649,17 @@ export class ShimProxy {
                   message.id,
                   message.params,
                   "Remote command execution was declined by the user",
+                  {
+                    clientIdentity,
+                    operationId: execContext.callId,
+                  },
                 );
               }
               if (!requiresApproval) {
                 await this.#audit.write({
                   requestId: execContext.callId,
+                  operationId: execContext.callId,
+                  ...clientIdentity,
                   hostId: this.#options.config?.host,
                   workspaceRoot: this.#options.config?.workspaceRoot,
                   remoteCwd: execContext.cwd,
@@ -598,7 +675,9 @@ export class ShimProxy {
               const context = this.#workspaceMutationContext(message);
               if (signal.aborted) {
                 return await this.#router!.handle(message.id, message.params, {
+                  clientIdentity,
                   idempotencyKey,
+                  operationId: context.callId,
                   signal,
                 });
               }
@@ -615,7 +694,9 @@ export class ShimProxy {
               ) {
                 if (signal.aborted) {
                   return await this.#router!.handle(message.id, message.params, {
+                    clientIdentity,
                     idempotencyKey,
+                    operationId: context.callId,
                     signal,
                   });
                 }
@@ -623,6 +704,10 @@ export class ShimProxy {
                   message.id,
                   message.params,
                   "Workspace mutation was declined by the user",
+                  {
+                    clientIdentity,
+                    operationId: context.callId,
+                  },
                 );
               }
               if (!context.requiresApproval || !permissionRequiresApproval) {
@@ -636,7 +721,12 @@ export class ShimProxy {
             }
 
             return await this.#router!.handle(message.id, message.params, {
+              clientIdentity,
               idempotencyKey,
+              operationId:
+                isRecord(message.params) && typeof message.params.callId === "string"
+                  ? message.params.callId
+                  : String(message.id),
               signal,
               onOutput: isRemoteExecToolCall(message) && execContext
                 ? (delta) => {
@@ -669,6 +759,8 @@ export class ShimProxy {
 
     if (isUnknownServerRequest(message)) {
       await this.#audit.write({
+        ...this.#clientIdentity,
+        operationId: String(message.id),
         operation: "protocol.unknown_server_request",
         outcome: "failed",
         details: { method: message.method },
@@ -684,6 +776,21 @@ export class ShimProxy {
     }
 
     writeClient(projectServerMessage(message, this.#options.config));
+  }
+
+  #remoteToolClientIdentity(request: RpcRequest): BridgeClientIdentity {
+    if (
+      isRecord(request.params) &&
+      typeof request.params.threadId === "string" &&
+      typeof request.params.turnId === "string"
+    ) {
+      return this.#turnClients.resolve(
+        request.params.threadId,
+        request.params.turnId,
+        this.#clientIdentity,
+      );
+    }
+    return { ...this.#clientIdentity };
   }
 
   #remoteExecContext(request: RpcRequest): RemoteExecContext {
@@ -828,6 +935,12 @@ export class ShimProxy {
   ): Promise<void> {
     await this.#audit.write({
       requestId: context.callId,
+      operationId: context.callId,
+      ...this.#turnClients.resolve(
+        context.threadId,
+        context.turnId,
+        this.#clientIdentity,
+      ),
       connectionId: this.#executor?.connectionId,
       hostId: this.#options.config?.host,
       workspaceRoot: this.#options.config?.workspaceRoot,

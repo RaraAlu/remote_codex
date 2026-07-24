@@ -186,11 +186,21 @@ export interface RemoteBackgroundLogResult {
   hasMore: boolean;
 }
 
+export type BridgeClientSource = "vscode" | "external-cli" | "external-mcp";
+
+export interface BridgeClientIdentity {
+  clientId: string;
+  clientSource: BridgeClientSource;
+}
+
 export interface AuditEvent {
   timestamp: string;
   requestId?: string;
+  operationId?: string;
   connectionId?: string;
   sessionId?: string;
+  clientId?: string;
+  clientSource?: BridgeClientSource;
   hostId?: string;
   workspaceRoot?: string;
   remoteCwd?: string;

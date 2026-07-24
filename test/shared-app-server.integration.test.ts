@@ -55,6 +55,7 @@ function fakeWebSocketAppServer(
     let turnNumber = 0;
     const broadcastNotifications = process.env.FAKE_BROADCAST_NOTIFICATIONS === "1";
     const broadcastServerRequests = process.env.FAKE_BROADCAST_SERVER_REQUESTS === "1";
+    const workspaceWrite = process.env.FAKE_WORKSPACE_WRITE === "1";
     const notify = (origin, message) => {
       const raw = JSON.stringify(message);
       if (!broadcastNotifications) {
@@ -135,8 +136,14 @@ function fakeWebSocketAppServer(
               callId: "remote-item",
               threadId: "thread-shared",
               turnId: activeTurnId,
-              tool: "remote_exec",
-              arguments: { argv: ["printf", "hello"] },
+              tool: workspaceWrite ? "workspace_write_file" : "remote_exec",
+              arguments: workspaceWrite
+                ? {
+                    contentBase64: Buffer.from("updated\\n").toString("base64"),
+                    expectedHash: "a".repeat(64),
+                    path: "note.txt",
+                  }
+                : { argv: ["printf", "hello"] },
             },
           };
           const rawRequest = JSON.stringify(request);
@@ -152,7 +159,10 @@ function fakeWebSocketAppServer(
         if (message.method === "turn/steer") {
           socket.send(JSON.stringify({
             id: message.id,
-            result: { turnId: "turn-shared" },
+            result: {
+              turnId: "turn-shared",
+              observedExpectedTurnId: message.params.expectedTurnId,
+            },
           }));
           notify(socket, {
             method: "bridge/fakeSteered",
@@ -193,6 +203,7 @@ function fakeWebSocketAppServer(
       FAKE_BROADCAST_SERVER_REQUESTS: command.includes("broadcast-requests")
         ? "1"
         : "0",
+      FAKE_WORKSPACE_WRITE: command.includes("workspace-write") ? "1" : "0",
     },
     stdio: "pipe",
   });
@@ -395,7 +406,10 @@ describe("SharedAppServer", () => {
     ).resolves.toMatchObject({
       threadId: "thread-shared",
       action: "steer",
-      result: { turnId: "turn-shared" },
+      result: {
+        turnId: "turn-shared",
+        observedExpectedTurnId: "turn-shared",
+      },
     });
     await expect(
       interruptVsCodeConversation({
@@ -485,7 +499,10 @@ describe("SharedAppServer", () => {
     }));
     expect(externalMessages).toContainEqual({
       id: 13,
-      result: { turnId: "turn-shared" },
+      result: {
+        turnId: "turn-shared",
+        observedExpectedTurnId: "turn-shared",
+      },
     });
     await waitFor(() => (sshSpawns === 2 ? true : undefined));
     expect(sshSpawns).toBe(2);
@@ -599,6 +616,51 @@ describe("SharedAppServer", () => {
         (entry) => entry.operation === "remote_exec" && entry.outcome === "started",
       ),
     ).toHaveLength(3);
+    expect(
+      auditEntries
+        .filter(
+          (entry) =>
+            entry.operation === "remote_exec" && entry.outcome === "started",
+        )
+        .map((entry) => entry.clientSource)
+        .sort(),
+    ).toEqual(["external-cli", "external-mcp", "vscode"]);
+    const completedExternalRequests = auditEntries.filter(
+      (entry) =>
+        entry.operation === "external_cli.request" &&
+        entry.outcome === "succeeded",
+    );
+    expect(completedExternalRequests.length).toBeGreaterThan(0);
+    expect(
+      completedExternalRequests.every(
+        (entry) =>
+          typeof entry.clientId === "string" &&
+          typeof entry.clientSource === "string" &&
+          typeof entry.operationId === "string",
+      ),
+    ).toBe(true);
+    expect(
+      new Set(completedExternalRequests.map((entry) => entry.clientSource)),
+    ).toEqual(new Set(["external-cli", "external-mcp"]));
+    const startedExternalRequests = auditEntries.filter(
+      (entry) =>
+        entry.operation === "external_cli.request" &&
+        entry.outcome === "started",
+    );
+    expect(startedExternalRequests.length).toBeGreaterThan(0);
+    expect(
+      startedExternalRequests.every((started) =>
+        completedExternalRequests.some(
+          (entry) =>
+            entry.clientId === started.clientId &&
+            entry.operationId === started.operationId,
+        ),
+      ),
+    ).toBe(true);
+    const rawAudit = await readFile(join(directory, "audit.jsonl"), "utf8");
+    expect(rawAudit).not.toContain("start self-test");
+    expect(rawAudit).not.toContain("add verification");
+    expect(rawAudit).not.toContain("intervene");
   });
 
   it("honors full-access for a thread started by an external CLI client", async () => {
@@ -613,7 +675,7 @@ describe("SharedAppServer", () => {
     const server = new SharedAppServer({
       appServerArgs: ["app-server", "--listen", "stdio://"],
       auditPath,
-      codexExecutable: "fake-codex-external-full-access",
+      codexExecutable: "fake-codex-external-full-access-workspace-write",
       config: parseBridgeConfig({
         host: "g1_1",
         workspaceRoot: "/remote/workspace",
@@ -625,9 +687,23 @@ describe("SharedAppServer", () => {
       spawnCodex: fakeWebSocketAppServer,
       spawnSsh: () => {
         sshSpawns += 1;
+        const source = `
+          process.stdin.resume();
+          process.stdin.on("end", () => {
+            const zero = String.fromCharCode(0);
+            process.stdout.write(
+              "/remote/workspace" + zero +
+              "/remote/workspace/note.txt" + zero +
+              "8" + zero +
+              "81a4" + zero +
+              "1721779200" + zero +
+              "${"b".repeat(64)}"
+            );
+          });
+        `;
         return spawn(
           process.execPath,
-          ["-e", "process.stdout.write('/remote/workspace\\\\0hello\\\\n')"],
+          ["-e", source],
           { stdio: "pipe" },
         );
       },
@@ -717,12 +793,27 @@ describe("SharedAppServer", () => {
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(auditEntries).toContainEqual(
       expect.objectContaining({
-        operation: "remote_exec.approval",
+        operation: "workspace_mutation.approval",
         outcome: "succeeded",
-        details: {
+        clientSource: "external-cli",
+        operationId: "remote-item",
+        details: expect.objectContaining({
           automatic: true,
           permissionMode: "full-access",
-        },
+          tool: "workspace_write_file",
+        }),
+      }),
+    );
+    expect(auditEntries).toContainEqual(
+      expect.objectContaining({
+        operation: "workspace_write_file",
+        outcome: "succeeded",
+        clientSource: "external-cli",
+        operationId: "remote-item",
+        details: expect.objectContaining({
+          bytesWritten: 8,
+          path: "note.txt",
+        }),
       }),
     );
   });

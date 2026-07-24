@@ -817,21 +817,32 @@ app-server，并按目标 thread 的权限模式提交 turn、追加输入和取
 7. 依赖官方 app-server 的 `expectedTurnId` 与 turn 状态处理同时提交；Bridge 不另设
    限制 `full-access` 的单写者租约，冲突响应和有序事件原样投影并审计来源连接。
 
-当前进度：第 1-7 项源码和自动化已完成。`npm run check` 为 37 个测试文件通过、1 个
-真实远端条件文件跳过，157 项通过、5 项跳过；真实官方 app-server 冒烟已覆盖普通
+当前进度：第 1-7 项及写入扩展源码和自动化已完成。`0.3.23` 的 `npm run check` 为
+58 个测试文件通过、1 个真实远端条件文件跳过，243 项通过、6 项跳过；真实官方
+app-server 冒烟已覆盖普通
 本地窗口和 Remote SSH 窗口的受鉴权外部连接及 MCP 四工具列表，双客户端集成已覆盖
 list/read/new-turn/steer/interrupt、跨客户端 `full-access` 权限继承和 `remote_exec`
 无二次审批。`0.3.3` 已在真实普通本地和 Remote SSH 窗口验证当前 CLI 接入、VS Code
 UI 投影、审计、远端命令/读取和 CodeGraph；Windows x64、旧 CLI 热切换、官方面板
 发起的取消和完整生命周期待补测。
 
-后续写入扩展：
+写入扩展（`0.3.23` 已实施）：
 
 1. CLI 发起的远程文件修改只能调用阶段 5 的 Bridge 写入协议，继续执行目标端、
    `expectedHash`、原子替换、幂等和审计；审批直接继承 thread 的 Codex 权限模式，
    `full-access` 自动放行。禁止另开 SSH 或直接写远端。
 2. 审计对话读取、turn 写入、项目写入、审批、取消和断开，记录外部客户端
    实例 ID 与 operation ID，不记录对话正文、文件正文或凭据。
+
+实现结果：
+
+- 共享网关按 thread/turn 记录实际发起客户端。即使官方 app-server 将同一工具请求
+  广播到 stdio 与外部连接、最终由高优先级 stdio 代理执行，项目操作和审批审计仍
+  归因到发起 turn 的 CLI 或 MCP 客户端。
+- 外部项目写入继续经过同一 `DynamicToolRouter`、工作区根、`expectedHash`、原子替换
+  和幂等协调器；来源身份只用于审计，不参与权限判定，也不会建立第二条 SSH 通道。
+- 外部 RPC 请求按连接实例和请求 ID 记录开始、成功、失败或断开取消；审计仅提取
+  method、thread/turn/call 关联字段，不记录输入正文。
 
 验收：
 

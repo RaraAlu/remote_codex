@@ -351,6 +351,13 @@ Remote Executor 按工作区与稳定任务 ID 隔离任务，最多保留 8 项
 Executor 升到 `0.2.13`、诊断协议号 8，并新增四项 background 能力；真实 Remote SSH
 候选窗口、窗口关闭和 Windows 进程树仍按统一人工清单补测。
 
+`0.3.23` 完成外部 CLI 项目写入和审计闭环。CLI 触发的文件修改继续复用双端安全
+写入协议、thread 权限、原子替换和幂等协调器；共享网关按 thread/turn 保存实际发起
+客户端，使广播工具请求即使由 stdio 代理执行，操作和审批仍归因到 CLI/MCP 来源。
+外部 RPC 的开始、终态和断开取消均记录客户端实例与 operation ID，且不记录输入或
+文件正文。真实 `test_40` / Zklab 双客户端写入、冲突、权限撤销和 Windows 实机仍按
+统一人工清单补测。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -391,7 +398,9 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 写入见 `docs/acceptance/2026-07-24-release-0.3.19-dual-write.md`；后台任务见
 `docs/acceptance/2026-07-24-release-0.3.20-background-tasks.md`；远程资源见
 `docs/acceptance/2026-07-24-release-0.3.21-workspace-resources.md`；双原生产物收集见
-`docs/acceptance/2026-07-24-release-0.3.22-native-artifact-collection.md`。
+`docs/acceptance/2026-07-24-release-0.3.22-native-artifact-collection.md`；外部 CLI
+项目写入见
+`docs/acceptance/2026-07-24-release-0.3.23-external-cli-workspace-write.md`。
 
 ## 本地 MCP 边界
 

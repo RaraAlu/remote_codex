@@ -274,12 +274,12 @@ turn、取消等稳定工具。Bridge 只负责本机鉴权、请求改写、权
   和最终历史都能实时到达另一端；任一端断开不得终止另一端。普通本地与真实 Remote
   SSH 窗口已验证 CLI 发起 turn、多轮流式通知和工具过程投影；Windows 以及官方 UI
   发起方向的 Remote SSH 取消仍待补测。
-- [ ] CLI 发起的项目文件写入必须复用 Bridge 的远程工具、目标端、`expectedHash`、
+- [x] CLI 发起的项目文件写入复用 Bridge 的远程工具、目标端、`expectedHash`、
   原子替换、幂等和审计；审批完全继承 thread 的 Codex 权限模式，`full-access` 不追加
   Bridge 二次确认，但不允许 CLI 绕过插件另开通道写远端工作区。
-- [ ] 保留并验证官方 `expectedTurnId`、turn 状态和事件顺序；Bridge 不另加会降低
+- [x] 保留并验证官方 `expectedTurnId`、turn 状态和事件顺序；Bridge 不另加会降低
   `full-access` 能力的单写者租约，协议明确拒绝的并发冲突直接投影给两个客户端。
-- [ ] 外部 CLI 的接入、读取、turn 写入、项目写入、审批、取消和断开均记录来源客户端
+- [x] 外部 CLI 的接入、读取、turn 写入、项目写入、审批、取消和断开均记录来源客户端
   与 operation ID；插件 UI 可见并可撤销接入权限。
 - [ ] 完成双客户端诱饵、并发、恢复、权限撤销、敏感信息和 Linux/Windows 实机验收，
   再重新执行完整 P0 发布门禁。

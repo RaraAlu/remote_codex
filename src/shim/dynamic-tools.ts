@@ -3,6 +3,7 @@ import { asBridgeError, BridgeError } from "../core/errors.js";
 import type { AuditLog } from "../core/audit-log.js";
 import type { OpenSshExecutor } from "../core/ssh-executor.js";
 import type {
+  BridgeClientIdentity,
   BridgeConfig,
   ToolRequestContext,
   ToolResult,
@@ -495,8 +496,10 @@ interface DynamicToolCall {
 }
 
 export interface DynamicToolObserver {
+  clientIdentity?: BridgeClientIdentity;
   idempotencyKey?: string;
   onOutput?: (chunk: string) => void;
+  operationId?: string;
   signal?: AbortSignal;
 }
 
@@ -571,6 +574,8 @@ export class DynamicToolRouter {
     const startedAt = performance.now();
     await this.#audit.write({
       requestId,
+      operationId: observer.operationId ?? requestId,
+      ...observer.clientIdentity,
       connectionId: this.#executor.connectionId,
       hostId: this.#config.host,
       workspaceRoot: this.#config.workspaceRoot,
@@ -617,6 +622,8 @@ export class DynamicToolRouter {
       };
       await this.#audit.write({
         requestId,
+        operationId: observer.operationId ?? requestId,
+        ...observer.clientIdentity,
         connectionId: this.#executor.connectionId,
         hostId: this.#config.host,
         workspaceRoot: this.#config.workspaceRoot,
@@ -670,6 +677,8 @@ export class DynamicToolRouter {
       };
       await this.#audit.write({
         requestId,
+        operationId: observer.operationId ?? requestId,
+        ...observer.clientIdentity,
         connectionId: this.#executor.connectionId,
         hostId: this.#config.host,
         workspaceRoot: this.#config.workspaceRoot,
@@ -706,7 +715,12 @@ export class DynamicToolRouter {
     }
   }
 
-  async decline(rpcId: RpcId, rawParams: unknown, reason: string): Promise<unknown> {
+  async decline(
+    rpcId: RpcId,
+    rawParams: unknown,
+    reason: string,
+    observer: DynamicToolObserver = {},
+  ): Promise<unknown> {
     const call = parseToolCall(rawParams);
     const args = argumentObject(call.arguments);
     const root = this.#requestedRoot(args);
@@ -724,6 +738,8 @@ export class DynamicToolRouter {
     };
     await this.#audit.write({
       requestId,
+      operationId: observer.operationId ?? requestId,
+      ...observer.clientIdentity,
       connectionId: this.#executor.connectionId,
       hostId: this.#config.host,
       workspaceRoot: this.#config.workspaceRoot,
