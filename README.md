@@ -138,7 +138,8 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 - [x] 为远程文件提供可打开的资源 URI、Diff 和文件跳转；资源身份绑定 host、根 ID、
   目标端和相对路径，远程映射复用当前窗口实际 URI，OpenSSH 回退失败关闭。真实同名
   诱饵、选区和 Diff 左右端仍按统一人工清单补测。
-- 建立 Windows/Linux 原生构建与受控产物收集流程，避免单端打包删除另一端产物。
+- [x] 建立 Windows/Linux 原生构建与受控产物收集流程；双端 stage、清单和临时目录
+  验证已实现，缺少任一原生平台时失败关闭。Windows stage 与最终双端收集待补测。
 - 在目标 Remote SSH 主机和 MimicLite 仓库上的完整 P0 验收。
 - [ ] 当前优先实施本地 Codex CLI 对话介入：Bridge 向当前 CLI 对话长期提供 MCP 工具，
   用于列出、读取和介入官方扩展正在进行的 thread，并继续经现有 `remote_exec` 路由
@@ -328,8 +329,24 @@ npm run check
 打包。
 协议生成和 Shim 冒烟都自动发现最新安装的官方 Codex 扩展，不调用 PATH 或
 `~/.local/bin` 中的 Codex CLI。
-当前平台的 VSIX 使用 `npm run package`；在 Windows 构建机上可用
-`npm run package:all` 同时产出 Windows x64 和 Linux x64 两个目标包。
+当前平台的 VSIX 使用 `npm run package`。发布候选不能在一个平台伪造另一平台：
+
+```bash
+# 分别在 Linux x64 和 Windows x64 原生构建机执行
+npm run check
+npm run package:stage
+
+# 把两个 artifacts/controller-<version>-<target>/ 目录放到同一收集机后执行
+npm run package:collect -- <linux-stage-dir> <windows-stage-dir>
+npm run package:verify
+```
+
+`npm run package:all` 是使用标准 `artifacts/` 路径执行收集的简写，不再跨平台构建。
+每个 stage 清单固定来源平台、架构、Controller/Executor 版本、文件大小和 SHA-256。
+收集器重新核对清单、VSIX 元数据、平台启动器隔离、内嵌 Executor 实现以及两个 stage
+的一致性；全部在临时目录验证通过后才更新 `dist/`，并删除历史版本 VSIX。Linux
+stage 不能替代 Windows 原生 SEA 构建，构包也不能替代对应平台的 Extension Host 和
+Remote SSH 实机验收。
 
 真实远端只读验收使用环境变量提供目标，不把主机和私钥路径写入仓库：
 
@@ -351,6 +368,7 @@ npm run test:remote
 - `dist/codex-remote-bridge-<version>-win32-x64.vsix`
 - `dist/codex-remote-bridge-<version>-linux-x64.vsix`
 - `dist/codex-remote-bridge-executor-<version>-linux-x64.vsix`
+- `dist/codex-remote-bridge-executor.vsix`
 
 它们属于同一个扩展 ID 和同一套源码，只是针对本地 Extension Host 平台的两个分发
 产物。Controller VSIX 内嵌匹配版本的远端 Executor，并在 Remote SSH 窗口中通过
@@ -372,13 +390,14 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前功能候选为
-`docs/acceptance/2026-07-24-release-0.3.21-workspace-resources.md`；在候选包安装、
+`docs/acceptance/2026-07-24-release-0.3.22-native-artifact-collection.md`；在候选包安装、
 完整生命周期
 和双平台实机闭环通过前，它不会替代已验收基线。
 
-Windows x64 和 Linux x64 必须分别填写运行结果。`npm run package:all` 能证明两个目标
-VSIX 已生成并完成平台内容隔离，但不能用 Windows 构建机上的 Linux 包替代 Linux 本地
-Extension Host、CJS Shim、官方任务创建和真实 Remote SSH 验收。缺少的数据写
+Windows x64 和 Linux x64 必须分别填写运行结果。`npm run package:all` 只会收集并
+验证两个原生 stage，不会生成异平台启动器；该结果能证明两个目标 VSIX 已完成版本、
+摘要、Executor 和平台内容隔离，但不能替代任一平台的 Extension Host、Shim、官方
+任务创建和真实 Remote SSH 验收。缺少的数据写
 `待补测`，并限制兼容性声明范围。
 
 ## 试用流程

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { cleanupHistoricalVersionedArtifacts } from "./package-artifacts.mjs";
 
 const require = createRequire(import.meta.url);
 const { createVSIX } = require("@vscode/vsce");
@@ -19,7 +20,12 @@ const currentTarget =
     : process.platform === "linux" && process.arch === "x64"
       ? "linux-x64"
       : null;
-const targets = mode === "all" ? ["win32-x64", "linux-x64"] : [currentTarget];
+if (mode !== "current") {
+  throw new Error(
+    "Foreign-platform packaging is disabled; use native package:stage outputs and package:collect",
+  );
+}
+const targets = [currentTarget];
 
 if (targets.some((target) => !target)) {
   throw new Error(`Unsupported packaging host: ${process.platform}-${process.arch}`);
@@ -69,3 +75,18 @@ for (const target of targets) {
     target,
   });
 }
+
+await cleanupHistoricalVersionedArtifacts(
+  packageJson.version,
+  executorPackageJson.version,
+);
+await Promise.all([
+  access(
+    resolve(
+      "dist",
+      `codex-remote-bridge-${packageJson.version}-${currentTarget}.vsix`,
+    ),
+  ),
+  access(executorPackagePath),
+  access(resolve("dist", "codex-remote-bridge-executor.vsix")),
+]);

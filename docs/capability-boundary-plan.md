@@ -20,7 +20,7 @@
 | 官方 Codex 扩展 | `openai.chatgpt@26.721.30844` | 普通本地、Remote SSH 官方任务与外部 CLI 双向投影通过 |
 | 官方扩展内置 Codex | `0.146.0-alpha.3` | 当前唯一 app-server 来源；版本仅作诊断和协议快照索引 |
 | 系统 Codex CLI/app-server | 任意或未安装 | 不属于运行时兼容集合；外部对话控制仅把当前 CLI 作为可选 MCP 客户端，不固定版本 |
-| Bridge Controller | `0.3.21` 自动化候选 | 双端有界写入、后台任务和远程资源映射已接通；候选 VSIX 安装、真实运行与 Windows 实机待补测 |
+| Bridge Controller | `0.3.22` 自动化候选 | 双端有界写入、后台任务、远程资源映射和双原生 stage 收集流程已接通；候选 VSIX 安装、真实运行与 Windows stage/实机待补测 |
 | Remote Executor | `0.2.13` / 诊断协议 8 自动化候选 | 保留结果账本和有界 stdin，新增隔离后台任务、游标日志、状态及进程组取消能力；候选实机待补测 |
 | Remote SSH | `0.124.0` | 活动 transport、远程主根和外部 CLI 双向链路通过 |
 
@@ -35,8 +35,8 @@ Shim 从受限运行时指针读取同一二进制。扩展和 Codex 版本字�
 2026-07-23 在 Linux x64 本机执行 `npm run check`：
 
 - TypeScript 类型检查通过。
-- 57 个测试文件通过，1 个真实远端条件测试文件跳过。
-- 237 项测试通过，6 项条件测试跳过，0 项失败。
+- 58 个测试文件通过，1 个真实远端条件测试文件跳过。
+- 243 项测试通过，6 项条件测试跳过，0 项失败。
 - Controller、Shim 和 Remote Executor 构建通过。
 - 插件内置 `0.146.0-alpha.3` 的本地透传、远程窗口启动和线程创建 Shim 冒烟通过；
   缺少受控运行时指针时，即使 PATH 存在系统 CLI 也失败关闭。
@@ -123,7 +123,7 @@ Windows 原生构建、Shim 冒烟和真实 Extension Host 验收。
 | LIFE-BACKGROUND | 后台任务 | 已实施（自动化） | 活动 VS Code Remote transport 提供 start/status/log/cancel；任务按工作区和稳定 ID 隔离，日志、数量、保留时间和寿命有界；取消、超时及 Extension Host 关闭终止进程组 | 真实候选窗口、窗口关闭与 Windows 进程树待补测；OpenSSH 回退明确失败关闭 |
 | SAFE-CORE | Core 本地 Shell/文件工具硬阻断 | 自动化边界已实施/待实机 | 专用本地拒绝权限配置已激活；Shim 阻断 25 个已知客户端请求、五类 Core 本地审批和风险命名空间中的未来方法并失败审计 | 真实模型专用工具诱饵负测和官方 UI 恢复尚未完成；外部协议边界不能证明 Core 内部不存在未暴露路径 |
 | UX-REMOTE | 远程 URI、Diff 和文件跳转 | 已实施（自动化） | host/根 ID/目标端/相对路径组成稳定身份；Controller 只登记已规范化路径，内容提供器复核活动配置和授权；跳转复用实际 Remote SSH URI；旧内容经 SHA-256 校验后进入有界内存 Diff | 当前文件、选区、附件、本地同名诱饵、过期资源和官方界面观感待实机补测；OpenSSH 回退失败关闭 |
-| PACK-DUAL | 双平台产物构建与收集 | 待实施 | 两个平台分别有原生 Shim 构建逻辑 | Linux 无法生成 Windows SEA，`package:all` 依赖预存 `.exe` |
+| PACK-DUAL | 双平台产物构建与收集 | 已实施（流程自动化）/待 Windows stage | Linux/Windows 各自在原生 x64 主机执行 check、构包和 stage；清单绑定平台、架构、版本、大小与摘要；收集器复核 VSIX 元数据、启动器隔离、内嵌 Executor 实现一致性，并在临时目录通过后更新 `dist/` 和清理历史包 | Linux stage 已可生成；Windows 原生 stage、双 stage 收集及两端实机属于人工补测，不能以交叉构包替代 |
 | VERIFY-P0 | 完整 P0 验收 | 待补测 | 历史 Windows 到 Ubuntu 主链路有部分证据 | 当前兼容集合、取消、写入、安全失败和诱饵文件未闭环 |
 | VERIFY-LIFECYCLE | 设置恢复和进程清理 | 部分通过 | Remote SSH 重载正常关闭；设置恢复、恢复驱动停止、旧状态清理、空闲态和分阶段重新启用实机通过 | 独立停止、Extension Host 退出及 relay/MCP 子进程归零待补测 |
 | VERIFY-METRICS | 量化指标 | 待补测 | 已有单样本和门禁模板 | 启动、任务、固定探针和 MCP 未达到最低样本数 |
@@ -321,9 +321,10 @@ Codex `0.145.0` 的权限配置和 `PreToolUse` hooks 提供可探查的防线�
 
 - 审计已有 `target`、主次角色、相对路径、写入字节数、冲突错误和幂等
   executed/joined/replayed 结果；取消确认耗时仍待实机测量。
-- 远程文件没有稳定的可打开 URI、Diff 或跳转提供器。
-- `package:all` 不是跨平台编译器；Linux 构建会删除 Windows SEA，不能单机重建完整
-  双平台发布目录。
+- `0.3.21` 已提供会话登记的远程资源 URI、Diff 和跳转；真实同名诱饵、附件与官方
+  界面链路仍待补测。
+- `package:all` 不是跨平台编译器；`0.3.22` 起它只收集 Linux/Windows 原生 stage，
+  缺少任一平台清单时失败关闭。
 - 当前发布证据主要是旧 Windows 基线；本次 Linux 探查不能覆盖未执行的人工链路。
 
 ### 3.9 远程 MCP 访问与服务适配
@@ -759,12 +760,20 @@ VS Code transport 的 `remote_exec(["pwd"])` 回环通过。25 个已知本地�
 
 ### 阶段 8：P0 收口和发布
 
-1. 在 Linux 与 Windows 分别运行定向测试、`npm run check` 和本平台打包。
-2. 建立受控产物收集步骤，再运行双平台包完整性检查；不得依赖 Linux 生成 Windows
+1. 在 Linux 与 Windows 分别运行定向测试、`npm run check`、本平台打包和
+   `npm run package:stage`。
+2. [x] 建立受控产物收集步骤，再运行双平台包完整性检查；不得依赖 Linux 生成 Windows
    SEA，也不得让后一次本机构建删除已收集的另一平台产物。
-3. 清理 `dist/`，只保留当前双平台 Controller、版本化 Executor 和无版本嵌入副本。
+3. [x] 清理 `dist/`，只保留当前双平台 Controller、版本化 Executor 和无版本嵌入副本。
 4. Windows x64 与 Linux x64 分别执行官方任务、Shim、Remote SSH、MCP、设置恢复和
    生命周期验收。
+
+当前进度：`0.3.22` 已把 `package:all` 从伪交叉构包改为双原生 stage 收集。每个
+stage 只接受当前主机对应的 x64 Controller，记录版本、大小和 SHA-256；收集器不信任
+清单本身，会再次解析 Controller/Executor VSIX，检查 `ui`/`workspace` extensionKind、
+Windows `.exe` 与 Linux `.cjs` 隔离、内嵌 Executor 版本及实现摘要。两个 stage 全部
+在临时目录通过后才覆盖 `dist/`，并移除历史版本包。Linux stage 已自动验证；Windows
+stage、最终双端收集和实机仍按 M13/M14 补测。
 5. 采集 `docs/upgrade-tracking.md` 的最低样本数、P50、最大值和硬指标。
 6. 检查 Codex 日志与 Bridge 审计，确认本地项目操作、额外认证、远端 Codex、敏感信息
    和遗留进程均为 0。

@@ -2,7 +2,7 @@
   "name": "codex-vscode-remote-bridge",
   "displayName": "Codex Remote Bridge",
   "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
-  "version": "0.3.21",
+  "version": "0.3.22",
   "private": true,
   "publisher": "zkbot",
   "license": "MIT",
@@ -193,7 +193,10 @@
     "build": "node scripts/build.mjs",
     "check": "npm run typecheck && npm run test && npm run build && npm run smoke:shim && npm run package",
     "package": "node scripts/package.mjs current",
-    "package:all": "node scripts/package.mjs all",
+    "package:all": "node scripts/package-artifacts.mjs collect",
+    "package:stage": "node scripts/package-artifacts.mjs stage",
+    "package:collect": "node scripts/package-artifacts.mjs collect",
+    "package:verify": "node scripts/package-artifacts.mjs verify",
     "protocol:generate": "node scripts/generate-protocol.mjs",
     "smoke:shim": "node scripts/smoke-shim.mjs",
     "test": "vitest run",
@@ -209,7 +212,8 @@
     "esbuild": "^0.25.5",
     "postject": "1.0.0-alpha.6",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "yauzl": "^3.4.0"
   },
   "codexProtocolSnapshotVersion": "0.146.0-alpha.3",
   "dependencies": {

@@ -3,6 +3,7 @@
 .gitignore
 .github/**
 AGENTS.md
+artifacts/**
 .vscodeignore*
 coverage/**
 docs/**

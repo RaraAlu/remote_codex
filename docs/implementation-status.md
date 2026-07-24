@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 57 个测试文件通过、1 个真实远端条件文件跳过，237 项通过、6 项
+`npm run test` 为 58 个测试文件通过、1 个真实远端条件文件跳过，243 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -58,7 +58,7 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 版本无门禁 | Controller、Shim 和 Executor 不按任何组件、包或协议版本值接纳；只校验实际路径、能力、消息结构和操作结果 | `OfficialCodexRuntime` / `isRemoteExecutorPing` |
 | 旧 CLI 配置迁移 | 已删除公开设置；旧配置字段被解析器忽略 | `parseBridgeConfig` |
 | Windows 原生 Shim | Node SEA `codex-bridge-shim.exe` 已构建并通过真实 Codex 冒烟 | `scripts/build.mjs` |
-| 双平台发布 | 同一扩展 ID 分别生成 `win32-x64` 和 `linux-x64` VSIX | `scripts/package.mjs` |
+| 双平台发布 | `0.3.22` 要求 Linux/Windows 原生构建分别生成带摘要清单的 stage；收集器复核版本、启动器隔离和 Executor 实现后才更新 `dist/`，不再用预存异平台启动器交叉构包 | `scripts/package.mjs` / `scripts/package-artifacts.mjs` |
 | VS Code Remote 通道 | 已实现本机 IPC、远端 Workspace Executor 和内嵌 VSIX 自动部署；真实 Remote SSH 窗口只读回环已通过 | `VsCodeTransportServer` / `LocalProcessExecutor` |
 | 密码/密钥认证复用 | `vscode-remote` 模式不新建 SSH，复用当前 Remote SSH 窗口认证 | `codexRemoteBridge.connectionMode` |
 | 稳定启动器安装 | 已实现；Controller 激活时默认安装并随内容哈希变化刷新，显式停用会持久保留 | `reconcileExternalCliLauncher` |
@@ -390,7 +390,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 阻断见 `docs/acceptance/2026-07-24-release-0.3.18-core-risk-namespaces.md`；双端安全
 写入见 `docs/acceptance/2026-07-24-release-0.3.19-dual-write.md`；后台任务见
 `docs/acceptance/2026-07-24-release-0.3.20-background-tasks.md`；远程资源见
-`docs/acceptance/2026-07-24-release-0.3.21-workspace-resources.md`。
+`docs/acceptance/2026-07-24-release-0.3.21-workspace-resources.md`；双原生产物收集见
+`docs/acceptance/2026-07-24-release-0.3.22-native-artifact-collection.md`。
 
 ## 本地 MCP 边界
 

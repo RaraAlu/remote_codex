@@ -15,7 +15,7 @@ Codex CLI 仅作为可选外部客户端按能力探测，不固定版本，也�
 | --- | --- | --- | --- |
 | VS Code | `1.130.0`（Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | 官方面板和外部 CLI 发起的 Remote SSH 任务通过 |
 | 官方 Codex 扩展 | 本次探测 `openai.chatgpt@26.721.30844` | 固定扩展 ID，不固定版本；使用 VS Code 当前实际加载版本 | 普通本地窗口、Remote SSH 官方新任务和外部 CLI 双向投影通过 |
-| Bridge Controller | `0.3.21` 自动化候选；`0.2.7` 支持基线 | 同一扩展 ID，分别发布 `win32-x64` 和 `linux-x64` VSIX | 双端写入、后台任务和远程资源映射已通过自动化；候选 VSIX 安装与双平台实机待补测 |
+| Bridge Controller | `0.3.22` 自动化候选；`0.2.7` 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | 双端写入、后台任务、远程资源映射和收集流程已通过自动化；Windows stage、候选安装与双平台实机待补测 |
 | Remote Executor | `0.2.13`，诊断协议 8，Linux x64 自动化候选 | Workspace 扩展；通过当前 Remote SSH 通道自动部署；ping 按所需能力集合验收，不按包版本或协议号门禁 | 保留账本和 stdin 能力，新增隔离任务、游标日志、状态及进程组取消四项能力；候选实机待补测 |
 | 官方扩展内置 Codex/app-server | 本次探测 `0.146.0-alpha.3` | 只从当前官方扩展安装目录启动；版本仅作诊断和协议快照索引 | 真实 Shim 冒烟、普通本地、Remote SSH 官方面板和外部 CLI thread 通过 |
 | 系统 Codex CLI | 本次探针 `0.145.0`，不固定 | 仅用于 MCP、远程外部客户端和 POSIX 普通入口；运行时探测所需参数，官方扩展内置 app-server 仍是唯一服务端 | 普通 `codex` 本地接管和 `codex-vscode` Remote SSH 多轮实机通过；Windows 待验证 |
@@ -46,7 +46,8 @@ CLI 实机证据见
 `docs/acceptance/2026-07-23-release-0.3.17-disconnect-recovery.md`，Core 风险命名空间
 双端写入候选见 `docs/acceptance/2026-07-24-release-0.3.19-dual-write.md`；后台任务候选见
 `docs/acceptance/2026-07-24-release-0.3.20-background-tasks.md`；远程资源候选见
-`docs/acceptance/2026-07-24-release-0.3.21-workspace-resources.md`；风险命名空间
+`docs/acceptance/2026-07-24-release-0.3.21-workspace-resources.md`；双原生产物收集见
+`docs/acceptance/2026-07-24-release-0.3.22-native-artifact-collection.md`；风险命名空间
 阻断见 `docs/acceptance/2026-07-24-release-0.3.18-core-risk-namespaces.md`；上一支持基线见
 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 
@@ -89,8 +90,9 @@ Bridge 不会通过伪造或改写 VS Code 工作区 URI 绕过项目校验；
    变化时才运行 `npm run protocol:generate`。脚本从最新安装的官方扩展生成诊断快照；
    审查新增/删除服务端请求、动态工具字段和 MCP 启动行为，不生成版本门禁。
 4. 运行命中触发项的定向测试，再运行 `npm run check`，记录通过、失败、跳过和耗时。
-5. 运行 `npm run package:all`，核对双平台包内版本、平台 Shim、嵌入 Executor、大小和
-   SHA-256；清理 `dist/` 历史版本但保留当前产物。
+5. 在 Linux 与 Windows 原生 x64 主机分别运行 `npm run check` 和
+   `npm run package:stage`，再运行 `npm run package:all` 收集两个 stage，核对包内版本、
+   平台 Shim、嵌入 Executor、大小和 SHA-256；清理 `dist/` 历史版本但保留当前产物。
 6. 按本地平台分别执行 `docs/upgrade-tracking.md` 的分平台矩阵。没有 Linux 实机结果时
    必须写“Linux 打包通过、运行时待补测”。
 7. 在隔离 Remote SSH 工作区重跑受影响的官方任务、远端操作、MCP、生命周期和安全

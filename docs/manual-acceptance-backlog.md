@@ -126,6 +126,10 @@ Zklab Remote SSH 会话可由 Codex 通过插件注入执行无需安装或重�
 ### M13 Windows 原生构建与运行
 
 - 在 Windows x64 原生执行依赖安装、类型检查、测试、构建、SEA Shim 冒烟和构包。
+- 在 Windows 执行 `npm run package:stage`，与同版本 Linux stage 一并运行
+  `npm run package:collect -- <linux-stage-dir> <windows-stage-dir>` 和
+  `npm run package:verify`；核对 `dist/` 只保留当前双平台 Controller、版本化
+  Executor 和无版本副本。
 - 安装 Windows Controller VSIX，确认只使用 `.exe` Shim，包内没有 Linux CJS Shim。
 - 重跑 M01-M11 中所有平台相关链路，不得复用 Linux 结果。
 - 特别核对 Named Pipe、官方任务创建、Remote SSH、进程树取消、MCP relay、设置恢复、

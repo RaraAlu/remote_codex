@@ -2,6 +2,7 @@
 .git/**
 .gitignore
 .github/**
+artifacts/**
 .vscodeignore*
 coverage/**
 docs/**
