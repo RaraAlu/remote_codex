@@ -27,7 +27,17 @@
 ## Compatibility
 
 - Treat the official `openai.chatgpt` extension, Codex CLI/app-server protocol, Bridge Controller, and Remote Executor as a compatibility set.
-- The currently verified official extension is `openai.chatgpt@26.707.91948` with `codex-cli 0.144.5`.
+- Component, package, extension, CLI, app-server, and Executor protocol version values are
+  diagnostic evidence and regression-test triggers only. Never use one of those version values,
+  version equality, or a missing diagnostic version as a runtime admission gate. Gate only on the
+  actual executable, required capability set, message shape, or a failed operation. A serialized
+  format's schema discriminator may select its parser, but rejection must be grounded in an
+  unsupported message shape. Enter `incompatible` only after a concrete capability or protocol
+  behavior fails.
+- Record observed official extension and bundled Codex versions in dated acceptance evidence; do
+  not designate an exact pair as a permanent required version. The latest Linux Remote SSH
+  evidence is recorded in `docs/acceptance/2026-07-23-release-0.3.3-remote-cli-acceptance.md`;
+  Windows keeps its own last fully verified baseline until rerun.
 - Newer official extension versions must be tested for task-creation behavior before being declared supported; `26.715.31925` rejects the Windows UI representation of a Remote SSH root as `Unknown local project`.
 - In `vscode-remote` mode, do not claim that a workspace MCP is remotely routed unless it is actually bridged through the VS Code transport. The legacy SSH stdio MCP route only applies to `openssh` mode.
 - Use `docs/upgrade-tracking.md` as the release gate whenever any compatibility-set component, VS Code, Remote SSH, OpenSSH, MCP routing, or a supported local platform changes. Create or update a dated release record from `docs/acceptance/release-template.md` instead of overwriting old evidence.

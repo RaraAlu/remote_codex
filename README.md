@@ -50,9 +50,9 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 - 远端缺少 `rg` 时自动使用不跟随目录符号链接的 GNU `grep` 搜索。
 - SSH 子进程只继承必要环境变量，不继承 Codex、OpenAI 或其他应用凭据。
 - 未知 app-server 服务端请求默认拒绝；操作审计日志只保存在本地并结构化脱敏。
-- 当前协议子集由实测 `openai.chatgpt@26.715.61943` 内置 Codex
-  `0.145.0-alpha.27` 生成；扩展版本只记录为生成证据，不作为启动门禁，内置
-  app-server 必须与已验证协议匹配。
+- 当前协议子集由实测 `openai.chatgpt@26.721.30844` 内置 Codex
+  `0.146.0-alpha.3` 生成；所有版本值只用于诊断、快照索引和回归触发，不作为运行时
+  门禁。运行时只因缺少实际能力、消息结构错误或真实操作失败而拒绝。
 - Remote SSH 窗口自动扫描本机 Codex MCP：本机能力继续留在本机；满足安全条件的工作区
   stdio MCP 在默认模式下复用当前 VS Code Remote 通道，在回退模式下通过 OpenSSH 中转。
 - 可按窗口切换 MCP 访问范围；显式选择 `all` 时启用全部已配置服务、清空工具禁用
@@ -224,8 +224,9 @@ turn、取消等稳定工具。Bridge 只负责本机鉴权、请求改写、权
   `codex resume <thread> --remote ...`；令牌只通过子进程环境传递，不进入命令行、
   日志或仓库。
 - [x] 自动化验证同一 thread 中来自 CLI 和 VS Code 的输入、流式 item、工具状态、取消
-  和最终历史都能实时到达另一端；任一端断开不得终止另一端。普通本地官方界面已验证
-  CLI 发起 turn 的实时通知接收，Remote SSH 与 Windows 官方界面仍待补测。
+  和最终历史都能实时到达另一端；任一端断开不得终止另一端。普通本地与真实 Remote
+  SSH 窗口已验证 CLI 发起 turn、多轮流式通知和工具过程投影；Windows 以及官方 UI
+  发起方向的 Remote SSH 取消仍待补测。
 - [ ] CLI 发起的项目文件写入必须复用 Bridge 的远程工具、目标端、`expectedHash`、
   原子替换、幂等和审计；审批完全继承 thread 的 Codex 权限模式，`full-access` 不追加
   Bridge 二次确认，但不允许 CLI 绕过插件另开通道写远端工作区。
@@ -235,8 +236,9 @@ turn、取消等稳定工具。Bridge 只负责本机鉴权、请求改写、权
   与 operation ID；插件 UI 可见并可撤销接入权限。
 - [ ] 完成双客户端诱饵、并发、恢复、权限撤销、敏感信息和 Linux/Windows 实机验收，
   再重新执行完整 P0 发布门禁。
-- [ ] 在安装候选后的真实 Remote SSH 窗口完成 CLI 工具列表、对话读取、介入、
-  `remote_exec`、取消、VS Code UI 投影和审计闭环；完成前保持候选状态。
+- [ ] 完成真实 Remote SSH 剩余闭环：CLI 新建同步 thread、`remote_exec`、远程读取、
+  CodeGraph、权限继承、VS Code UI 投影和审计已通过；官方 UI 发起输入、取消、断线、
+  附件/当前文件和完整生命周期仍待补测。
 
 本批次已经按“所有待实现功能的实施前置流程”重新汇总清单并完成能力探查；MCP 控制
 模式见 `docs/capability-boundary-plan.md` 的阶段 2D，双向实时同 thread 模式见阶段
