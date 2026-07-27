@@ -5,7 +5,10 @@ import {
 } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import { BridgeError } from "../core/errors.js";
-import { remoteProcessEnvironment } from "../core/local-process-executor.js";
+import {
+  remoteProcessEnvironment,
+  signalProcessTree,
+} from "../core/local-process-executor.js";
 import { resolveRemoteMcpLaunch } from "../core/remote-mcp-adapters.js";
 import {
   assertRemoteMcpLaunch,
@@ -21,6 +24,8 @@ export type SpawnStdioProcess = (
 
 interface StdioSession {
   child: ChildProcessWithoutNullStreams;
+  descendantPids: number[];
+  forceTimer?: NodeJS.Timeout;
   outputQueue: Promise<void>;
 }
 
@@ -73,10 +78,15 @@ export class RemoteStdioSessions {
     }
     const child = this.#spawn(executable, launch.args, {
       cwd,
+      detached: process.platform !== "win32",
       env: remoteProcessEnvironment(launch.environment),
       stdio: "pipe",
     });
-    const session: StdioSession = { child, outputQueue: Promise.resolve() };
+    const session: StdioSession = {
+      child,
+      descendantPids: [],
+      outputQueue: Promise.resolve(),
+    };
     this.#sessions.set(request.id, session);
 
     const queueEvent = (event: RemoteStdioEvent): void => {
@@ -95,6 +105,10 @@ export class RemoteStdioSessions {
     child.stdout.on("data", (chunk: Buffer) => queueData("stdout", chunk));
     child.stderr.on("data", (chunk: Buffer) => queueData("stderr", chunk));
     child.once("close", (exitCode, signal) => {
+      if (session.forceTimer) {
+        clearTimeout(session.forceTimer);
+        session.forceTimer = undefined;
+      }
       this.#sessions.delete(request.id);
       queueEvent({
         event: "exit",
@@ -157,9 +171,22 @@ export class RemoteStdioSessions {
       return;
     }
     this.#sessions.delete(id);
-    session.child.kill("SIGTERM");
-    const force = setTimeout(() => session.child.kill("SIGKILL"), 1_000);
-    force.unref();
+    session.descendantPids = signalProcessTree(
+      session.child,
+      "SIGTERM",
+      session.descendantPids,
+    );
+    session.forceTimer = setTimeout(
+      () => {
+        session.descendantPids = signalProcessTree(
+          session.child,
+          "SIGKILL",
+          session.descendantPids,
+        );
+      },
+      1_000,
+    );
+    session.forceTimer.unref();
   }
 
   close(): void {

@@ -142,6 +142,7 @@ interface BackgroundTask {
   cancellationRequested: boolean;
   child: ChildProcessWithoutNullStreams;
   completedAtMs: number | null;
+  descendantPids: number[];
   exitCode: number | null;
   fingerprint: string;
   forceTimer?: NodeJS.Timeout;
@@ -309,6 +310,7 @@ export class RemoteBackgroundTasks {
       cancellationRequested: false,
       child,
       completedAtMs: null,
+      descendantPids: [],
       exitCode: null,
       fingerprint,
       log: new BoundedTaskLog(this.#maxLogBytes),
@@ -531,13 +533,21 @@ export class RemoteBackgroundTasks {
       clearTimeout(task.timeout);
       task.timeout = undefined;
     }
-    signalProcessTree(task.child, "SIGTERM");
+    task.descendantPids = signalProcessTree(
+      task.child,
+      "SIGTERM",
+      task.descendantPids,
+    );
     if (immediate) {
       if (task.forceTimer) {
         clearTimeout(task.forceTimer);
         task.forceTimer = undefined;
       }
-      signalProcessTree(task.child, "SIGKILL");
+      task.descendantPids = signalProcessTree(
+        task.child,
+        "SIGKILL",
+        task.descendantPids,
+      );
       return;
     }
     if (task.forceTimer) {
@@ -545,7 +555,11 @@ export class RemoteBackgroundTasks {
     }
     task.forceTimer = setTimeout(() => {
       if (task.status === "running") {
-        signalProcessTree(task.child, "SIGKILL");
+        task.descendantPids = signalProcessTree(
+          task.child,
+          "SIGKILL",
+          task.descendantPids,
+        );
       }
     }, 1_000);
     task.forceTimer.unref();

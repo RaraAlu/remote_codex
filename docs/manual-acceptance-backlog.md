@@ -19,7 +19,9 @@ transport 注入安全探针并提前积累证据，完整 UI 操作和最低样
 ## 已积累证据（不替代完整门禁）
 
 `docs/acceptance/2026-07-26-release-0.3.26-fresh-conversation.md` 已记录 Zklab 的前期
-样本，以及最终 `0.3.26` 在 `g1_1` 的新 thread、后台任务和远端 CodeGraph 样本。
+样本，以及最终 `0.3.26` 在 `g1_1` 的新 thread、后台任务和远端 CodeGraph 样本；
+`docs/acceptance/2026-07-26-release-0.3.28-lifecycle-cleanup.md` 继续记录 Executor
+`0.2.15` 和 Controller/Shim `0.3.28` 的窗口重载生命周期修复。
 下面只表示对应子链已有一次成功证据；因平台、方向、故障矩阵或最低样本数不足，
 M01-M14 的总体状态仍全部是 `待补测`。
 
@@ -40,18 +42,22 @@ M01-M14 的总体状态仍全部是 `待补测`。
   5 次，首次状态查询丢失也可恢复；同键 5 次只执行一次，同键改参 5/5 拒绝。账本
   过期、Executor 失联和 Extension Host 重启仍待补。
 - M08：`g1_1` 已覆盖后台成功、失败、超时、4 MiB 日志截断、客户端断开后继续、
-  幂等/改参冲突和运行中取消；窗口关闭、Extension Host 退出和 Bridge 停止清理仍待补。
+  幂等/改参冲突和运行中取消；`0.3.28` 重载样本确认 Extension Host 退出后前台和
+  后台标记进程均为 0。显式 Bridge 停止和 Remote SSH 窗口关闭仍待补。
 - M09：`g1_1` 启动审计为 `remoteMcpServers=["codegraph"]`；真实 VS Code transport
-  relay 的 `initialize`/`tools/list` 各 3 次、固定 `codegraph_status` 5 次均通过，
-  三个临时 relay 正常退出。访问模式和异常/窗口关闭清理矩阵仍待补。
+  relay 的 `initialize`/`tools/list` 各 3 次、固定 `codegraph_status` 5 次均通过。
+  Executor `0.2.15` 主动停止和 `0.3.28` Extension Host 重载均确认两层 CodeGraph
+  进程与本地测试 relay 为 0。访问模式、显式停止和窗口关闭矩阵仍待补。
 - M10：外部 MCP 方向完成新 thread、steer、3 次取消、历史观察、安全写入和
   `expectedTurnId` 冲突拒绝；官方 UI 反向操作、断开、重启、描述符过期和权限撤销
   仍待补。
 - M11：活动 Token 对审计、Code 日志、Git 跟踪文件和本地进程参数的精确泄漏扫描为
   0，私钥/Bearer/`sk-` 形式命中为 0；远端 Codex/app-server 和测试探针进程均为 0，
-  成功本地项目操作为 0。设置恢复差异、窗口关闭和 Extension Host 退出仍待补。
-- Linux Controller `0.3.26` 已安装并在 `g1_1` 重载；三次冷/热启动已完成，
-  M01 仅余官方面板直接新建和直接恢复的最低样本。
+  成功本地项目操作为 0。`0.3.26 -> 0.3.28` 迁移中 Executor 按能力自动升级到
+  `0.2.15`；重载后旧 Extension Host、relay、MCP、前后台任务、会话文件和 socket
+  均清理。设置恢复差异、显式 Bridge 停止和 Remote SSH 窗口关闭仍待补。
+- Linux Controller `0.3.28` 与 Executor `0.2.15` 已安装并在 `g1_1` 重载；
+  M01 的三次冷/热启动沿用 `0.3.26` 样本，仍余官方面板直接新建和直接恢复的最低样本。
 
 ## A. Linux 本地与 Remote SSH
 

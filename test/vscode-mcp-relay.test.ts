@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, rm } from "node:fs/promises";
-import { createServer, type Server } from "node:net";
+import {
+  createConnection,
+  createServer,
+  type Server,
+  type Socket,
+} from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { PassThrough } from "node:stream";
-import { afterEach, describe, expect, it } from "vitest";
+import { Duplex, PassThrough } from "node:stream";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
 import { VsCodeMcpRelay } from "../src/shim/vscode-mcp-relay.js";
 
@@ -115,5 +120,48 @@ describe("VsCodeMcpRelay", () => {
     });
     expect(observedInput).toBe("request\n");
     expect(Buffer.concat(outputChunks).toString()).toBe("response\n");
+  });
+
+  it("exits when a ready window transport closes without an end event", async () => {
+    let socket: Socket;
+    const transport = new Duplex({
+      read() {},
+      write(chunk, _encoding, callback) {
+        const request = JSON.parse(Buffer.from(chunk).toString()) as Record<string, unknown>;
+        queueMicrotask(() => {
+          transport.push(`${JSON.stringify({ id: request.id, type: "stdioReady" })}\n`);
+          setImmediate(() => transport.emit("close", false));
+        });
+        callback();
+      },
+    });
+    socket = transport as unknown as Socket;
+    const connect = (() => {
+      queueMicrotask(() => socket.emit("connect"));
+      return socket;
+    }) as unknown as typeof createConnection;
+    const input = new PassThrough();
+    const pause = vi.spyOn(input, "pause");
+    const config = parseBridgeConfig({
+      host: "remote-host",
+      workspaceRoot: "/workspace",
+      connectionMode: "vscode-remote",
+      remoteHelper: "vscode-extension",
+      vscodeTransport: {
+        endpoint: "/unused",
+        sessionId: "test-session",
+        token: "0123456789abcdef0123456789abcdef",
+      },
+    });
+    const relay = new VsCodeMcpRelay({
+      args: ["serve", "--mcp", "--path", "/workspace"],
+      config,
+      connect,
+      executable: "codegraph",
+      input,
+    });
+
+    await expect(relay.run()).resolves.toBe(1);
+    expect(pause).toHaveBeenCalled();
   });
 });

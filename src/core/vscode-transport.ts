@@ -5,7 +5,7 @@ export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
 export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
 export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 8;
-export const REMOTE_EXECUTOR_VERSION = "0.2.13";
+export const REMOTE_EXECUTOR_VERSION = "0.2.15";
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
@@ -45,6 +45,8 @@ export const REMOTE_EXECUTOR_CAPABILITIES = [
   "resultStatus",
   "search",
   "stdioEnd",
+  "stdioDetachedDescendantStop",
+  "stdioProcessTreeStop",
   "stdioStart",
   "stdioStop",
   "stdioWrite",

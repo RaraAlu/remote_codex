@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   controller: null as null | {
     initialize: ReturnType<typeof vi.fn>;
+    shutdown: ReturnType<typeof vi.fn>;
   },
   configurationListener: null as null | ((event: { affectsConfiguration(key: string): boolean }) => void),
   extensionsListener: null as null | (() => void),
@@ -33,6 +34,7 @@ vi.mock("vscode", () => ({
 vi.mock("../src/extension/controller.js", () => ({
   BridgeController: class {
     initialize = vi.fn(async () => undefined);
+    shutdown = vi.fn(async () => undefined);
 
     constructor() {
       mock.controller = this;
@@ -44,7 +46,7 @@ vi.mock("../src/extension/controller.js", () => ({
   },
 }));
 
-import { activate } from "../src/extension/extension.js";
+import { activate, deactivate } from "../src/extension/extension.js";
 
 describe("extension activation", () => {
   beforeEach(() => {
@@ -54,7 +56,7 @@ describe("extension activation", () => {
     mock.workspaceListener = null;
   });
 
-  it("initializes immediately and retries when workspace, settings, or extensions change", () => {
+  it("initializes immediately, retries changes, and awaits shutdown", async () => {
     const subscriptions: unknown[] = [];
     activate({ subscriptions } as never);
 
@@ -68,5 +70,8 @@ describe("extension activation", () => {
     mock.extensionsListener?.();
     expect(mock.controller?.initialize).toHaveBeenCalledTimes(4);
     expect(subscriptions).toHaveLength(4);
+    const activeController = mock.controller;
+    await deactivate();
+    expect(activeController?.shutdown).toHaveBeenCalledTimes(1);
   });
 });

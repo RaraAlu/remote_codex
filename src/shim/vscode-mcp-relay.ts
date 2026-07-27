@@ -82,6 +82,7 @@ export class VsCodeMcpRelay {
         settled = true;
         input.off("data", onInput);
         input.off("end", onInputEnd);
+        input.pause();
         lines.close();
         socket.destroy();
         callback();
@@ -128,6 +129,11 @@ export class VsCodeMcpRelay {
         );
       });
       socket.once("end", () => {
+        if (!settled) {
+          finish(() => resolve(ready ? 1 : 127));
+        }
+      });
+      socket.once("close", () => {
         if (!settled) {
           finish(() => resolve(ready ? 1 : 127));
         }

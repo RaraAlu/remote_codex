@@ -23,7 +23,7 @@ export function activate(context: vscode.ExtensionContext): void {
   void controller.initialize();
 }
 
-export function deactivate(): void {
-  controller?.dispose();
+export async function deactivate(): Promise<void> {
+  await controller?.shutdown();
   controller = undefined;
 }

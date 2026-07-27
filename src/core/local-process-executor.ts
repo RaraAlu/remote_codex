@@ -3,6 +3,7 @@ import {
   type ChildProcessWithoutNullStreams,
   type SpawnOptionsWithoutStdio,
 } from "node:child_process";
+import { readFileSync, readdirSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import { BridgeError } from "./errors.js";
@@ -76,18 +77,73 @@ export function remoteProcessEnvironment(
 export function signalProcessTree(
   child: ChildProcessWithoutNullStreams,
   signal: NodeJS.Signals,
-): void {
+  knownDescendants: readonly number[] = [],
+): number[] {
   if (process.platform !== "win32" && child.pid) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ESRCH") {
-        return;
+    const descendants =
+      process.platform === "linux"
+        ? collectLinuxDescendants(child.pid)
+        : [];
+    const targets = [...new Set([...descendants, ...knownDescendants])];
+    for (const pid of targets) {
+      try {
+        process.kill(pid, signal);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+          child.kill(signal);
+        }
       }
     }
+    try {
+      process.kill(-child.pid, signal);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+        child.kill(signal);
+      }
+    }
+    return targets;
   }
   child.kill(signal);
+  return [];
+}
+
+function collectLinuxDescendants(rootPid: number): number[] {
+  const childrenByParent = new Map<number, number[]>();
+  let entries: string[];
+  try {
+    entries = readdirSync("/proc");
+  } catch {
+    return [];
+  }
+  for (const entry of entries) {
+    if (!/^[1-9]\d*$/.test(entry)) {
+      continue;
+    }
+    const pid = Number.parseInt(entry, 10);
+    try {
+      const status = readFileSync(`/proc/${pid}/status`, "utf8");
+      const match = /^PPid:\s+(\d+)$/m.exec(status);
+      if (!match) {
+        continue;
+      }
+      const parentPid = Number.parseInt(match[1]!, 10);
+      const children = childrenByParent.get(parentPid) ?? [];
+      children.push(pid);
+      childrenByParent.set(parentPid, children);
+    } catch {
+      // Processes may exit while /proc is being scanned.
+    }
+  }
+
+  const descendants: number[] = [];
+  const visit = (pid: number): void => {
+    for (const childPid of childrenByParent.get(pid) ?? []) {
+      visit(childPid);
+      descendants.push(childPid);
+    }
+  };
+  visit(rootPid);
+  return descendants;
 }
 
 export class LocalProcessExecutor extends OpenSshExecutor {
@@ -154,6 +210,7 @@ export class LocalProcessExecutor extends OpenSshExecutor {
       let timedOut = false;
       let aborted = false;
       let terminating = false;
+      let descendantPids: number[] = [];
       let forceTimer: NodeJS.Timeout | undefined;
       let timeout: NodeJS.Timeout | undefined;
 
@@ -177,10 +234,10 @@ export class LocalProcessExecutor extends OpenSshExecutor {
           return;
         }
         terminating = true;
-        signalProcessTree(child, "SIGTERM");
+        descendantPids = signalProcessTree(child, "SIGTERM", descendantPids);
         forceTimer = setTimeout(() => {
           if (!settled) {
-            signalProcessTree(child, "SIGKILL");
+            descendantPids = signalProcessTree(child, "SIGKILL", descendantPids);
           }
         }, 1_000);
         forceTimer.unref();
@@ -248,7 +305,7 @@ export class LocalProcessExecutor extends OpenSshExecutor {
       });
       child.once("close", (exitCode, signal) => {
         if (terminating && process.platform !== "win32") {
-          signalProcessTree(child, "SIGKILL");
+          descendantPids = signalProcessTree(child, "SIGKILL", descendantPids);
         }
         finish(() => {
           const durationMs = Math.round(performance.now() - startedAt);

@@ -157,6 +157,7 @@ export class BridgeController implements vscode.Disposable {
   #executor: OpenSshExecutor | null = null;
   #sessionConfig: BridgeConfig | null = null;
   #initialization: Promise<void> | null = null;
+  #shutdown: Promise<void> | null = null;
   #autoSuppressed = false;
   #remoteIdentity: RemoteIdentity | null = null;
 
@@ -643,13 +644,31 @@ export class BridgeController implements vscode.Disposable {
       .get<string>("externalCliExecutable", "codex");
   }
 
+  async shutdown(): Promise<void> {
+    if (this.#shutdown) {
+      return await this.#shutdown;
+    }
+    this.#shutdown = this.#shutdownOnce();
+    return await this.#shutdown;
+  }
+
   dispose(): void {
+    void this.shutdown();
+  }
+
+  async #shutdownOnce(): Promise<void> {
     this.#executor?.close();
-    void this.#clearWindowSession().catch(() => undefined);
-    this.#transport.dispose();
-    this.#workspaceResources.dispose();
-    this.#output.dispose();
-    this.#status.dispose();
+    this.#executor = null;
+    try {
+      await Promise.allSettled([
+        this.#clearWindowSession(),
+        this.#transport.close(),
+      ]);
+    } finally {
+      this.#workspaceResources.dispose();
+      this.#output.dispose();
+      this.#status.dispose();
+    }
   }
 
   async #saveWindowSession(config: BridgeConfig): Promise<void> {

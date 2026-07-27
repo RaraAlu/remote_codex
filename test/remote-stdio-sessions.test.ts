@@ -13,6 +13,7 @@ import {
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
 });
 
@@ -58,6 +59,7 @@ describe("RemoteStdioSessions", () => {
 
     expect(Buffer.concat(input).toString()).toBe("request\n");
     expect(spawnOptions?.cwd).toBe(workspace);
+    expect(spawnOptions?.detached).toBe(process.platform !== "win32");
     expect((spawnOptions?.env as NodeJS.ProcessEnv).CODEX_HOME).toBeUndefined();
     expect(events).toEqual([
       {
@@ -110,5 +112,45 @@ describe("RemoteStdioSessions", () => {
       "search,callers,callees,impact,node,explore,status,files",
     );
     sessions.stop("adapter-session");
+  });
+
+  it("signals the detached remote MCP process group when stopping", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "codex-stdio-stop-"));
+    temporaryDirectories.push(workspace);
+    const child = Object.assign(new EventEmitter(), {
+      pid: 456_789,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(() => true),
+    });
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let spawnOptions: Record<string, unknown> | undefined;
+    const sessions = new RemoteStdioSessions(
+      async () => undefined,
+      (_command, _args, options) => {
+        spawnOptions = options as Record<string, unknown>;
+        queueMicrotask(() => child.emit("spawn"));
+        return child as never;
+      },
+      async () => "/remote/bin/codegraph",
+    );
+
+    await sessions.start({
+      args: ["serve", "--mcp", "--path", workspace],
+      executable: "codegraph",
+      id: "stop-session",
+      maxFrameBytes: 1024,
+      workspaceRoot: workspace,
+    });
+    sessions.stop("stop-session");
+
+    expect(spawnOptions?.detached).toBe(process.platform !== "win32");
+    if (process.platform === "win32") {
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    } else {
+      expect(processKill).toHaveBeenCalledWith(-456_789, "SIGTERM");
+    }
+    child.emit("close", null, "SIGTERM");
   });
 });
