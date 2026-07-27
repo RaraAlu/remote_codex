@@ -9,6 +9,11 @@
 `g1_1` / `/home/unitree/mimiclite-sim2real`。Codex 可通过当前已认证的 VS Code Remote
 transport 注入安全探针并提前积累证据，完整 UI 操作和最低样本仍按本文统一收口。
 
+- 当前主动收敛范围仅为 Linux x64 Controller、Linux Shim、远端 Ubuntu Executor 和
+  `g1_1` 的 VS Code Remote SSH 链路。Windows x64 暂停推进，继续保留为未验证范围，
+  不阻塞 Linux 限定声明，也不得由 Linux 结果推断。
+- OpenSSH 是 Linux 上的可选回退链路，只有用户后续显式选择 `openssh` 才进入本轮
+  实测；在此之前继续复用活动 VS Code Remote transport。
 - 不为中间开发版本反复安装 VSIX；统一安装最终候选。
 - 新建 Remote SSH 连接、窗口重载和官方 UI 操作由用户执行；当前已认证窗口优先复用，
   不启动第二条 SSH 认证链路。
@@ -181,6 +186,8 @@ M01-M14 的总体状态仍全部是 `待补测`。
 
 ### M13 Windows 原生构建与运行
 
+当前状态：暂停推进，不属于本轮 Linux 收敛范围；恢复双平台发布目标时再整体执行。
+
 - 在 Windows x64 原生执行依赖安装、类型检查、测试、构建、SEA Shim 冒烟和构包。
 - 在 Windows 执行 `npm run package:stage`，与同版本 Linux stage 一并运行
   `npm run package:collect -- <linux-stage-dir> <windows-stage-dir>` 和
@@ -195,6 +202,8 @@ M01-M14 的总体状态仍全部是 `待补测`。
 ## D. 最终 P0
 
 ### M14 MimicLite 真实项目闭环
+
+当前状态：先完成 Linux 范围闭环；双平台最终支持声明随 Windows 范围恢复后再收口。
 
 - 在目标 Remote SSH 主机与 MimicLite 仓库完成官方任务新建、恢复和多轮执行。
 - 覆盖读取、搜索、Git、命令、MCP、双端写入、远程 Diff、后台任务、取消和断线恢复。
