@@ -236,7 +236,7 @@ export async function startVsCodeConversation(options: {
     ...(options.permissionMode === "full-access"
       ? {
           approvalPolicy: "never",
-          permissions: "full-access",
+          sandbox: "danger-full-access",
         }
       : {}),
   });

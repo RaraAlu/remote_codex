@@ -104,7 +104,7 @@ describe("VS Code conversation client", () => {
     expect(requestMethods).toEqual(["initialize", "thread/start", "turn/start"]);
     expect(requestParams.get("thread/start")).toEqual({
       approvalPolicy: "never",
-      permissions: "full-access",
+      sandbox: "danger-full-access",
     });
     expect(requestParams.get("turn/start")).toMatchObject({
       threadId,

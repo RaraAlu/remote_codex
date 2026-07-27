@@ -103,6 +103,25 @@ describe("app-server request rewriting", () => {
     ]);
   });
 
+  it("maps an external full-access sandbox request to the remote permission profile", () => {
+    const rewritten = rewriteClientMessage(
+      {
+        id: 3,
+        method: "thread/start",
+        params: {
+          approvalPolicy: "never",
+          sandbox: "danger-full-access",
+        },
+      },
+      config,
+      "/local/control",
+    ) as { params: Record<string, unknown> };
+
+    expect(rewritten.params.permissions).toBe(REMOTE_PERMISSION_PROFILE_ID);
+    expect(rewritten.params.approvalPolicy).toBe("never");
+    expect(rewritten.params).not.toHaveProperty("sandbox");
+  });
+
   it("forces the local-deny permission profile when resuming", () => {
     const rewritten = rewriteClientMessage(
       {

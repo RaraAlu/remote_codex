@@ -1,6 +1,6 @@
 # 实施状态
 
-更新日期：2026-07-24
+更新日期：2026-07-26
 
 ## 能力边界复核
 
@@ -11,15 +11,15 @@
 
 同日先完成外部稳定版 `0.145.0` 协议探针，随后按用户确认的边界将官方
 `openai.chatgpt` 扩展设为唯一运行时权威。当前源码只启动 VS Code 实际加载的
-`openai.chatgpt` 所内置的 Codex；最新探测组合为 `26.721.30844` /
-`0.146.0-alpha.3`。源码删除公开
+`openai.chatgpt` 所内置的 Codex；最新探测组合为 `26.721.41059` /
+`0.146.0-alpha.3.1`。源码删除公开
 `codexExecutable` 设置、系统 CLI 发现和 PATH/`~/.local/bin` 回退；旧配置中的该字段
 会被忽略。官方扩展和内置 Codex 版本只用于诊断、证据和协议快照索引；Controller
 保存受限运行时指针，Shim 直接使用该指针。版本值不同、未知或缺失均不阻断启动。
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 58 个测试文件通过、1 个真实远端条件文件跳过，243 项通过、6 项
+`npm run test` 为 59 个测试文件通过、1 个真实远端条件文件跳过，262 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -36,15 +36,16 @@
 `0.3.5` 已完成官方面板新任务、完整固定探针和多上游单次执行实机回归。Windows x64
 仍待补测。
 
-当前仍是候选状态：用户已重载活动 Remote SSH 窗口，进程和运行时指针确认目标窗口只
-使用官方插件内置 Codex，Bridge 对规范化远端根进入 `ready`，已有会话恢复成功。
+当前仍是候选状态：用户已重载普通本地与活动 Remote SSH 窗口，进程和运行时指针确认
+两个窗口均使用官方插件内置 Codex 和精确 `0.3.33` Shim，Bridge 对规范化远端根进入
+`ready`。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知
 本地客户端请求和五类 Core 本地审批，官方 app-server 实际激活
 `codex-remote-bridge` 权限配置，活动
-transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、官方 UI 恢复、附件、
-当前文件和本地窗口共享附着仍待补测。`0.3.5` 已用校验过的官方 Windows Node 归档
+transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、当前候选官方 UI 恢复、
+视觉和完整生命周期仍待补测。`0.3.5` 已用校验过的官方 Windows Node 归档
 完成双平台构包，但 Windows 原生构建和实机仍待补测。
 
 ## 阶段 A：协议与运行位置探针
@@ -369,6 +370,15 @@ ephemeral 选项。Zklab 单样本已完成新 thread 只读、steer、运行中
 最终 `0.3.26` 已在 `g1_1` 重载，并完成新 thread、后台任务取消及经 VS Code transport
 路由的 CodeGraph 状态调用；最低量化样本和 Windows 实机仍按统一人工清单补测。
 
+`0.3.33` 修复了该入口在普通本地共享网关上的实际协议形状：`permissions` 是命名权限
+档案 ID，不能填入显示模式 `full-access`；外部入口现在发送
+`approvalPolicy=never` 和协议支持的 `sandbox=danger-full-access`。普通本地网关保持
+原请求语义，Remote SSH 网关则按现有目标策略删除 sandbox 并映射到 Bridge 本地拒绝
+档案，远端项目能力继续由动态工具和 thread 权限自动放行。该行为只按字段能力和真实
+操作验收，不按官方扩展、Codex 或 Bridge 版本门禁。精确 Linux 候选已在普通本地窗口
+完成文件读取和 Git 命令，并在 `g1_1` 完成自动 `full-access` 远端只读命令；两条
+链路均使用当前 `0.3.33` Shim，Remote Executor 未修改并保持 `0.2.16`。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -413,7 +423,9 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 项目写入见
 `docs/acceptance/2026-07-24-release-0.3.23-external-cli-workspace-write.md`。
 完整能力新对话和 Zklab 单样本见
-`docs/acceptance/2026-07-26-release-0.3.26-fresh-conversation.md`。
+`docs/acceptance/2026-07-26-release-0.3.26-fresh-conversation.md`；普通本地外部
+`full-access` 协议修复及本地/Remote SSH 实机见
+`docs/acceptance/2026-07-26-release-0.3.33-local-full-access.md`。
 
 ## 本地 MCP 边界
 
