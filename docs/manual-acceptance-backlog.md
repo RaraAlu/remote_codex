@@ -28,7 +28,9 @@ transport 注入安全探针并提前积累证据，完整 UI 操作和最低样
 `docs/acceptance/2026-07-26-release-0.3.28-lifecycle-cleanup.md` 继续记录 Executor
 `0.2.15` 和 Controller/Shim `0.3.28` 的窗口重载生命周期修复；
 `docs/acceptance/2026-07-26-release-0.3.29-explicit-stop.md` 记录 Executor `0.2.16`
-和 Controller/Shim `0.3.29` 的显式停止、设置恢复及重新启用。
+和 Controller/Shim `0.3.29` 的显式停止、设置恢复及重新启用；
+`docs/acceptance/2026-07-26-release-0.3.30-external-disconnect.md` 记录
+Controller/Shim `0.3.30` 的外部 CLI 中途断连自动中断及运行中远端进程清理。
 下面只表示对应子链已有一次成功证据；因平台、方向、故障矩阵或最低样本数不足，
 M01-M14 的总体状态仍全部是 `待补测`。
 
@@ -64,7 +66,9 @@ M01-M14 的总体状态仍全部是 `待补测`。
 - M10：外部 MCP 方向完成新 thread、steer、3 次取消、历史观察、安全写入和
   `expectedTurnId` 冲突拒绝；官方 UI 反向操作、断开、重启、描述符过期和权限撤销
   中，重载后的旧端点已确认 `ECONNREFUSED`，旧 Token 访问当前网关返回 401，当前
-  Token 正常连接。官方 UI 反向操作、CLI 中途断开和权限撤销仍待补。
+  Token 正常连接。`0.3.29` 已复现 CLI 断开后 turn 永久 `inProgress`，`0.3.30`
+  两次实机样本均自动变为 `interrupted`，中断确认 1/1；其中 120 秒远端标记进程在
+  断开后立即为 0。官方 UI 反向操作和权限撤销仍待补。
 - M11：活动 Token 对审计、Code 日志、Git 跟踪文件和本地进程参数的精确泄漏扫描为
   0，私钥/Bearer/`sk-` 形式命中为 0；远端 Codex/app-server 和测试探针进程均为 0，
   成功本地项目操作为 0。`0.3.26 -> 0.3.28` 迁移中 Executor 按能力自动升级到
@@ -73,8 +77,9 @@ M01-M14 的总体状态仍全部是 `待补测`。
   重跑活动 Token 与密钥形式扫描，命中仍为 0；远端敏感环境键、Codex/app-server
   和标记进程也为 0。`0.3.29` 显式停止清理后台 1、操作 4、stdio 1；设置恢复驱动
   停止清理后台 1、操作 3、stdio 1，托管设置恢复到升级前快照且差异为 0，重新启用
-  后当前 Shim 任务和远端 `pwd` 通过。Remote SSH 窗口关闭仍待补。
-- Linux Controller `0.3.29` 与 Executor `0.2.16` 已安装并在 `g1_1` 重载；
+  后当前 Shim 任务和远端 `pwd` 通过。`0.3.30` 又确认外部 CLI 断连后 turn 自动
+  中断、运行中远端进程归零且无命令重放。Remote SSH 窗口关闭仍待补。
+- Linux Controller `0.3.30` 与 Executor `0.2.16` 已安装并在 `g1_1` 重载；
   M01 的三次冷/热启动沿用 `0.3.26` 样本，仍余官方面板直接新建和直接恢复的最低样本。
 
 ## A. Linux 本地与 Remote SSH

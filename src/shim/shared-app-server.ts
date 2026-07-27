@@ -47,6 +47,7 @@ const NOTIFICATION_DEDUP_MS = 1_000;
 const EXTERNAL_CLOSE_CODE = 1_012;
 const EXTERNAL_CLOSE_REASON = "Bridge app-server restarting";
 const EXTERNAL_CLOSE_GRACE_MS = 250;
+const EXTERNAL_DISCONNECT_INTERRUPT_TIMEOUT_MS = 2_000;
 
 interface RelayedNotification {
   expiresAtMs: number;
@@ -64,6 +65,12 @@ interface PendingExternalRequest {
   details: Record<string, unknown>;
   operationId: string;
   startedAtMs: number;
+}
+
+interface ExternalTurnInterruptSummary {
+  confirmed: number;
+  requested: number;
+  unconfirmed: number;
 }
 
 export interface ExternalCliSessionDescriptor {
@@ -216,6 +223,7 @@ export class SharedAppServer {
   #stdioWriter: RpcMessageWriter | null = null;
   readonly #externalWriters = new Map<string, RpcMessageWriter>();
   readonly #externalRelayCounts = new Map<string, number>();
+  readonly #externalCleanupTasks = new Set<Promise<void>>();
   readonly #relayedNotifications = new Map<string, RelayedNotification>();
 
   constructor(options: SharedAppServerOptions) {
@@ -478,36 +486,18 @@ export class SharedAppServer {
         handleClient(raw);
       }
       socket.once("close", () => {
-        const notificationsRelayedToVsCode = this.#externalRelayCounts.get(clientId) ?? 0;
-        for (const pending of pendingExternalRequests.values()) {
-          void this.#queueAudit({
-            ...clientIdentity,
-            operationId: pending.operationId,
-            operation: "external_cli.request",
-            outcome: "cancelled",
-            durationMs: Date.now() - pending.startedAtMs,
-            hostId: this.#options.config?.host ?? "local",
-            workspaceRoot: this.#activeWorkspaceRoot,
-            details: {
-              ...pending.details,
-              reason: "client-disconnected",
-            },
-          });
-        }
-        pendingExternalRequests.clear();
-        this.#externalWriters.delete(clientId);
-        this.#externalRelayCounts.delete(clientId);
-        upstream?.close();
-        session?.closeSession();
-        void this.#queueAudit({
-          ...clientIdentity,
-          operationId: clientId,
-          operation: "external_cli.disconnect",
-          outcome: "succeeded",
-          hostId: this.#options.config?.host ?? "local",
-          workspaceRoot: this.#activeWorkspaceRoot,
-          details: { notificationsRelayedToVsCode },
+        const cleanup = this.#handleExternalDisconnect(
+          clientIdentity,
+          pendingExternalRequests,
+          upstream,
+          session,
+        ).catch((error) => {
+          errorOutput.write(
+            `codex-bridge: external client cleanup failed: ${String(error)}\n`,
+          );
         });
+        this.#externalCleanupTasks.add(cleanup);
+        void cleanup.finally(() => this.#externalCleanupTasks.delete(cleanup));
       });
     } catch (error) {
       this.#externalWriters.delete(clientId);
@@ -517,6 +507,119 @@ export class SharedAppServer {
       socket.close(1011, "Bridge upstream unavailable");
       errorOutput.write(`codex-bridge: external CLI connection failed: ${String(error)}\n`);
     }
+  }
+
+  async #handleExternalDisconnect(
+    clientIdentity: BridgeClientIdentity,
+    pendingExternalRequests: Map<RpcId, PendingExternalRequest>,
+    upstream: WebSocket | null,
+    session: ShimProxy | null,
+  ): Promise<void> {
+    const notificationsRelayedToVsCode =
+      this.#externalRelayCounts.get(clientIdentity.clientId) ?? 0;
+    for (const pending of pendingExternalRequests.values()) {
+      void this.#queueAudit({
+        ...clientIdentity,
+        operationId: pending.operationId,
+        operation: "external_cli.request",
+        outcome: "cancelled",
+        durationMs: Date.now() - pending.startedAtMs,
+        hostId: this.#options.config?.host ?? "local",
+        workspaceRoot: this.#activeWorkspaceRoot,
+        details: {
+          ...pending.details,
+          reason: "client-disconnected",
+        },
+      });
+    }
+    pendingExternalRequests.clear();
+    this.#externalWriters.delete(clientIdentity.clientId);
+    this.#externalRelayCounts.delete(clientIdentity.clientId);
+    session?.closeSession();
+    const turnInterrupts = await this.#interruptExternalTurns(
+      clientIdentity.clientId,
+      upstream,
+    );
+    upstream?.close();
+    await this.#queueAudit({
+      ...clientIdentity,
+      operationId: clientIdentity.clientId,
+      operation: "external_cli.disconnect",
+      outcome: turnInterrupts.unconfirmed === 0 ? "succeeded" : "unknown",
+      hostId: this.#options.config?.host ?? "local",
+      workspaceRoot: this.#activeWorkspaceRoot,
+      details: { notificationsRelayedToVsCode, turnInterrupts },
+    });
+  }
+
+  async #interruptExternalTurns(
+    clientId: string,
+    upstream: WebSocket | null,
+  ): Promise<ExternalTurnInterruptSummary> {
+    const turns = this.#turnClients.takeForClient(clientId);
+    if (turns.length === 0) {
+      return { confirmed: 0, requested: 0, unconfirmed: 0 };
+    }
+    if (!upstream || upstream.readyState !== WebSocket.OPEN) {
+      return {
+        confirmed: 0,
+        requested: turns.length,
+        unconfirmed: turns.length,
+      };
+    }
+
+    const pendingIds = new Set<RpcId>();
+    let confirmed = 0;
+    let settle = (): void => undefined;
+    const settled = new Promise<void>((resolvePromise) => {
+      settle = resolvePromise;
+    });
+    const handleMessage = (data: RawData): void => {
+      let message: ReturnType<typeof parseRpcLine>;
+      try {
+        message = parseRpcLine(rawMessage(data));
+      } catch {
+        return;
+      }
+      if (!isRpcResponse(message) || !pendingIds.delete(message.id)) {
+        return;
+      }
+      if (!message.error) {
+        confirmed += 1;
+      }
+      if (pendingIds.size === 0) {
+        settle();
+      }
+    };
+    upstream.on("message", handleMessage);
+    for (const turn of turns) {
+      const id = `external_disconnect_${randomUUID()}`;
+      pendingIds.add(id);
+      try {
+        upstream.send(
+          JSON.stringify({
+            id,
+            method: "turn/interrupt",
+            params: turn,
+          }),
+        );
+      } catch {
+        pendingIds.delete(id);
+      }
+    }
+    if (pendingIds.size === 0) {
+      settle();
+    }
+    const timeout = setTimeout(settle, EXTERNAL_DISCONNECT_INTERRUPT_TIMEOUT_MS);
+    timeout.unref();
+    await settled;
+    clearTimeout(timeout);
+    upstream.off("message", handleMessage);
+    return {
+      confirmed,
+      requested: turns.length,
+      unconfirmed: turns.length - confirmed,
+    };
   }
 
   async #runStdioClient(
@@ -852,6 +955,7 @@ export class SharedAppServer {
 
   async #close(): Promise<void> {
     await this.#closeExternalClients();
+    await Promise.allSettled([...this.#externalCleanupTasks]);
     this.#externalWriters.clear();
     this.#externalRelayCounts.clear();
     this.#stdioWriter = null;

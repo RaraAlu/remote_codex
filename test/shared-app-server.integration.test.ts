@@ -818,6 +818,135 @@ describe("SharedAppServer", () => {
     );
   });
 
+  it("interrupts an active turn when its external CLI client disconnects", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-shared-disconnect-"));
+    process.env.CODEX_BRIDGE_STATE_DIR = directory;
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const errorOutput = new PassThrough();
+    const vscodeMessages = collectJsonLines(output);
+    let sshSpawns = 0;
+    const auditPath = join(directory, "audit.jsonl");
+    const server = new SharedAppServer({
+      appServerArgs: ["app-server", "--listen", "stdio://"],
+      auditPath,
+      codexExecutable: "fake-codex",
+      config: parseBridgeConfig({
+        host: "g1_1",
+        workspaceRoot: "/remote/workspace",
+      }),
+      controlDir: join(directory, "control"),
+      input,
+      output,
+      errorOutput,
+      spawnCodex: fakeWebSocketAppServer,
+      spawnSsh: () => {
+        sshSpawns += 1;
+        return spawn(process.execPath, ["-e", "process.exit(0)"], {
+          stdio: "pipe",
+        });
+      },
+    });
+    const running = server.run();
+
+    input.write(
+      `${JSON.stringify({ id: 1, method: "initialize", params: { clientInfo: {} } })}\n`,
+    );
+    input.write(
+      `${JSON.stringify({
+        id: 2,
+        method: "thread/start",
+        params: { cwd: "/local/decoy" },
+      })}\n`,
+    );
+    const descriptor = await waitFor(async () => {
+      const current = await readDescriptor(bridgeExternalCliSessionPath());
+      return current?.threadId === "thread-shared" ? current : undefined;
+    });
+    const token = await readFile(bridgeExternalCliTokenPath(), "utf8");
+    const external = new WebSocket(descriptor.endpoint, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const externalMessages: Array<Record<string, unknown>> = [];
+    const externalClosed = new Promise<void>((resolvePromise) => {
+      external.once("close", () => resolvePromise());
+    });
+    external.on("message", (data) => {
+      const message = JSON.parse(data.toString()) as Record<string, unknown>;
+      externalMessages.push(message);
+      if (message.method === "item/commandExecution/requestApproval") {
+        external.close(1_000, "acceptance-disconnect");
+      }
+    });
+    await new Promise<void>((resolvePromise, reject) => {
+      external.once("open", resolvePromise);
+      external.once("error", reject);
+    });
+    external.send(
+      JSON.stringify({ id: 10, method: "initialize", params: { clientInfo: {} } }),
+    );
+    external.send(
+      JSON.stringify({
+        id: 11,
+        method: "thread/start",
+        params: {
+          approvalPolicy: "on-request",
+          cwd: "/local/decoy",
+          permissions: "workspace-write",
+        },
+      }),
+    );
+    await waitFor(() =>
+      externalMessages.some((message) => message.id === 11) ? true : undefined,
+    );
+    external.send(
+      JSON.stringify({
+        id: 12,
+        method: "turn/start",
+        params: { threadId: "thread-shared", input: [] },
+      }),
+    );
+
+    await externalClosed;
+    await waitFor(() =>
+      vscodeMessages.some((message) => {
+        if (message.method !== "turn/completed") {
+          return false;
+        }
+        const params = message.params as Record<string, unknown> | undefined;
+        const turn = params?.turn;
+        return (
+          typeof turn === "object" &&
+          turn !== null &&
+          (turn as Record<string, unknown>).status === "interrupted"
+        );
+      })
+        ? true
+        : undefined,
+    );
+    expect(sshSpawns).toBe(0);
+
+    input.end();
+    await expect(running).resolves.toBe(0);
+    const auditEntries = (await readFile(auditPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(auditEntries).toContainEqual(
+      expect.objectContaining({
+        operation: "external_cli.disconnect",
+        outcome: "succeeded",
+        details: expect.objectContaining({
+          turnInterrupts: {
+            confirmed: 1,
+            requested: 1,
+            unconfirmed: 0,
+          },
+        }),
+      }),
+    );
+  });
+
   it("publishes a local VS Code thread without applying Remote SSH rewrites", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-shared-local-app-server-"));
     process.env.CODEX_BRIDGE_STATE_DIR = directory;

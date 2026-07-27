@@ -343,6 +343,24 @@ export class RemoteTurnClientTracker {
     this.#clients.delete(this.#key(threadId, turnId));
   }
 
+  takeForClient(clientId: string): Array<{ threadId: string; turnId: string }> {
+    const turns: Array<{ threadId: string; turnId: string }> = [];
+    for (const [key, identity] of this.#clients) {
+      if (identity.clientId !== clientId) {
+        continue;
+      }
+      this.#clients.delete(key);
+      const separator = key.indexOf("\0");
+      if (separator > 0 && separator < key.length - 1) {
+        turns.push({
+          threadId: key.slice(0, separator),
+          turnId: key.slice(separator + 1),
+        });
+      }
+    }
+    return turns;
+  }
+
   #key(threadId: string, turnId: string): string {
     return `${threadId}\0${turnId}`;
   }
