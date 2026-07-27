@@ -118,7 +118,7 @@ transport 的远程 `pwd` 仍通过。真实模型的本地诱饵读写执行、
 | 目录与路径变更 | `0.3.19` 已实现单级目录创建、不覆盖重命名、文件或空目录删除；递归删除不开放 |
 | 写入审批与审计 | 覆盖、补丁、重命名和删除在非完全访问模式进入绑定调用 ID 的官方审批；新建文件/目录为有界自动操作；`full-access` 自动放行，审计不含正文 |
 | 写入幂等与上限 | 默认远端复用 Executor 账本，本地 Controller 有独立有界账本；文件正文最多 1 MiB，经 stdin 传输，不进入 argv |
-| 断线结果确认和幂等 | `0.3.17` 已在 transport 中断后用原幂等键从新 socket 查询账本；completed 返回原结果，cancelled/failed 保留终态，running 有界轮询，unknown 或查询不可达返回 `RESULT_UNKNOWN` 且不重放；Extension Host 重启持久化未实现 |
+| 断线结果确认和幂等 | `0.3.17` 已在 transport 中断后用原幂等键从新 socket 查询账本；completed 返回原结果，cancelled/failed 保留终态，running 有界轮询，unknown 或查询不可达返回 `RESULT_UNKNOWN` 且不重放；账本有意限定在当前 Extension Host 代次，`0.3.28` 已实测重启后旧状态为 `unknown` 且不重放 |
 | 后台任务 | `0.3.20` 在活动 VS Code Remote transport 上提供 start/status/log/cancel；稳定任务 ID 避免重连重复启动，日志按字节游标有界保留，取消、超时和 Extension Host 关闭终止进程组；OpenSSH 回退失败关闭 |
 | 远程资源映射 | `0.3.21` 提供 `workspace_open_file` 与 `workspace_show_diff`；Controller 只映射已规范化路径，复用实际打开的 Remote SSH URI，并以会话登记、根授权复核、SHA-256 和内存上限保护内容提供器与 Diff 快照 |
 | Core 内置本地工具硬阻断 | 自动化边界已实施；专用权限配置、25 个已知客户端请求、五类本地审批及未来风险命名空间均失败关闭，真实模型专用工具诱饵待补测 |
@@ -326,8 +326,9 @@ unknown 终态。同一键若参数或执行策略不同会返回 `PROTOCOL_MISM
 调用 `resultStatus`。completed 状态返回原命令结果并标记 `replayed`；
 cancelled/failed 还原远端错误；running 在三秒有界窗口内轮询；unknown、查询持续
 不可达、账本响应缺失或恢复窗口结束都明确返回 `RESULT_UNKNOWN`。Remote Executor
-实现和协议形状没有变化，因此继续使用 `0.2.11` 和诊断协议号 6。真实 Remote SSH
-断线、窗口关闭、Executor 失联和 Extension Host 重启仍按生命周期门禁分别待补测。
+实现和协议形状没有变化，因此继续使用 `0.2.11` 和诊断协议号 6。`0.3.28` 已确认
+Extension Host 重启后旧前台和后台状态为 `unknown` 且没有重发；真实窗口关闭和
+Executor 独立失联仍按生命周期门禁分别待补测。
 
 `0.3.18` 将 Remote SSH 会话的本地 Core 客户端阻断从已知方法枚举提升为风险命名空间
 失败关闭。`fs/`、`process/`、`command/exec`、`fuzzyFileSearch`、后台终端和
