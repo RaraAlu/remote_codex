@@ -550,12 +550,24 @@ export class VsCodeRemoteExecutor
           return;
         }
         if (message.error) {
+          const responseError = message.error;
+          const code = errorCode(responseError.code);
+          const sideEffectUnknown =
+            observer.sideEffect &&
+            (code === "REMOTE_TRANSPORT_DISCONNECTED" || code === "SSH_DISCONNECTED");
           finish(() =>
             reject(
               new BridgeError(
-                errorCode(message.error?.code ?? ""),
-                message.error?.message ?? "VS Code remote execution failed",
-                message.error?.details,
+                sideEffectUnknown ? "RESULT_UNKNOWN" : code,
+                sideEffectUnknown
+                  ? `${responseError.message}; the remote side effect is unknown`
+                  : responseError.message,
+                sideEffectUnknown
+                  ? {
+                      ...responseError.details,
+                      transportErrorCode: code,
+                    }
+                  : responseError.details,
               ),
             ),
           );

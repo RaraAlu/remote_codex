@@ -42,6 +42,16 @@ describe("VS Code remote transport protocol", () => {
     expect(
       isRemoteExecutorPing({
         capabilities: REMOTE_EXECUTOR_CAPABILITIES.filter(
+          (capability) => capability !== "executeStdinExactLength",
+        ),
+        executorVersion: REMOTE_EXECUTOR_VERSION,
+        protocolVersion: 9,
+        remoteName: "ssh-remote",
+      }),
+    ).toBe(false);
+    expect(
+      isRemoteExecutorPing({
+        capabilities: REMOTE_EXECUTOR_CAPABILITIES.filter(
           (capability) => capability !== "stdioStart",
         ),
         executorVersion: REMOTE_EXECUTOR_VERSION,
@@ -66,6 +76,16 @@ describe("VS Code remote transport protocol", () => {
         ),
         executorVersion: REMOTE_EXECUTOR_VERSION,
         protocolVersion: 4,
+        remoteName: "ssh-remote",
+      }),
+    ).toBe(false);
+    expect(
+      isRemoteExecutorPing({
+        capabilities: REMOTE_EXECUTOR_CAPABILITIES.filter(
+          (capability) => capability !== "workspaceWriteOrphanCleanup",
+        ),
+        executorVersion: REMOTE_EXECUTOR_VERSION,
+        protocolVersion: 10,
         remoteName: "ssh-remote",
       }),
     ).toBe(false);

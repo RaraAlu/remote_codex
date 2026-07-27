@@ -381,6 +381,47 @@ describe("VsCodeRemoteExecutor", () => {
     executor.close();
   });
 
+  it("treats a remote transport error response as an unknown side effect", async () => {
+    const operations: string[] = [];
+    const pipe = await listen((request, write) => {
+      operations.push(request.operation);
+      write(
+        request.operation === "execute"
+          ? {
+              error: {
+                code: "REMOTE_TRANSPORT_DISCONNECTED",
+                message: "Remote Extension Host was canceled",
+                retryable: true,
+              },
+              id: request.id,
+              type: "response",
+            }
+          : {
+              id: request.id,
+              result: { status: "unknown" },
+              type: "response",
+            },
+      );
+    });
+    const executor = new VsCodeRemoteExecutor(config(pipe));
+
+    await expect(
+      executor.execute(["touch", "unsafe"], {
+        idempotencyKey: "remote-host-lost",
+        sideEffect: true,
+      }),
+    ).rejects.toMatchObject({
+      code: "RESULT_UNKNOWN",
+      details: {
+        idempotencyKey: "remote-host-lost",
+        recoveryAttempts: 1,
+        recoveryStatus: "unknown",
+      },
+    });
+    expect(operations).toEqual(["execute", "resultStatus"]);
+    executor.close();
+  });
+
   it("sends an explicit cancel request and waits for remote cancellation", async () => {
     let executeId = "";
     let writeExecute: ((message: unknown) => void) | undefined;

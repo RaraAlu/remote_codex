@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
@@ -161,6 +162,56 @@ describe("OpenSshExecutor execution", () => {
       code: "RESULT_UNKNOWN",
     });
   });
+
+  it.skipIf(!posixShell)(
+    "does not replace a target when the write stream is shorter than declared",
+    async () => {
+      const root = await mkdtemp(join(process.cwd(), ".tmp-write-stream-"));
+      const target = join(root, "target.txt");
+      const content = Buffer.from("complete");
+      const hash = "a".repeat(64);
+      let capturedCommand = "";
+      const localConfig = parseBridgeConfig({
+        host: "local-test",
+        workspaceRoot: root,
+        commandTimeoutMs: 1_000,
+        maxOutputBytes: 1_024,
+      });
+      const fakeSpawn: SpawnProcess = (_command, args) => {
+        capturedCommand = args.at(-1) ?? "";
+        const response = [
+          root,
+          target,
+          String(content.length),
+          "81a4",
+          "1",
+          hash,
+        ].join("\0");
+        return nodeChild(
+          `process.stdin.resume(); process.stdin.on("end", () => process.stdout.write(${JSON.stringify(response)}));`,
+        );
+      };
+      const executor = new OpenSshExecutor(localConfig, fakeSpawn);
+
+      try {
+        await executor.writeFile("target.txt", content.toString("base64"));
+        const interrupted = spawnSync(posixShell!, ["-c", capturedCommand], {
+          env: { ...process.env, TMPDIR: root },
+          input: content.subarray(0, content.length - 1),
+        });
+
+        expect(interrupted.status).toBe(45);
+        expect(interrupted.stderr.toString()).toContain(
+          "CODEX_BRIDGE:PROTOCOL_MISMATCH",
+        );
+        expect(existsSync(target)).toBe(false);
+        expect(await readdir(root)).toEqual([]);
+      } finally {
+        executor.close();
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+  );
 
   it("falls back to recursive grep when ripgrep is unavailable", async () => {
     let invocation = 0;

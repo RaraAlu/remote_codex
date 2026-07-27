@@ -27,11 +27,13 @@ import {
   BACKGROUND_TASK_MAX_LOG_READ_BYTES,
   RemoteBackgroundTasks,
 } from "./background-tasks.js";
+import { cleanupOrphanedWorkspaceWrites } from "./orphaned-writes.js";
 import { RemoteStdioSessions } from "./stdio-sessions.js";
 
 const executors = new Map<string, LocalProcessExecutor>();
 const operationLedger = new OperationLedger();
 const backgroundTasks = new RemoteBackgroundTasks();
+let activationCleanup = Promise.resolve();
 const stdioSessions = new RemoteStdioSessions(async (event) => {
   await vscode.commands.executeCommand(REMOTE_OUTPUT_COMMAND, event);
 });
@@ -354,6 +356,7 @@ async function executeRequest(
   request: RemoteExecutorCommandRequest,
 ): Promise<RemoteExecutorCommandResponse> {
   try {
+    await activationCleanup;
     if (
       !request ||
       typeof request !== "object" ||
@@ -448,14 +451,23 @@ async function executeRequest(
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  const workspaceRoots = (vscode.workspace.workspaceFolders ?? [])
+    .map((folder) => folder.uri.fsPath)
+    .filter((root): root is string => typeof root === "string" && root.length > 0);
+  activationCleanup = cleanupOrphanedWorkspaceWrites(
+    workspaceRoots,
+  ).then(() => undefined);
   context.subscriptions.push(
     vscode.commands.registerCommand(REMOTE_EXECUTOR_COMMAND, executeRequest),
-    vscode.commands.registerCommand(REMOTE_EXECUTOR_PING_COMMAND, () => ({
-      capabilities: [...REMOTE_EXECUTOR_CAPABILITIES],
-      executorVersion: REMOTE_EXECUTOR_VERSION,
-      protocolVersion: REMOTE_EXECUTOR_PROTOCOL_VERSION,
-      remoteName: vscode.env.remoteName,
-    })),
+    vscode.commands.registerCommand(REMOTE_EXECUTOR_PING_COMMAND, async () => {
+      await activationCleanup;
+      return {
+        capabilities: [...REMOTE_EXECUTOR_CAPABILITIES],
+        executorVersion: REMOTE_EXECUTOR_VERSION,
+        protocolVersion: REMOTE_EXECUTOR_PROTOCOL_VERSION,
+        remoteName: vscode.env.remoteName,
+      };
+    }),
   );
 }
 

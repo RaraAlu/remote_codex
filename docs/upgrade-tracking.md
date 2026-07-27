@@ -1,6 +1,6 @@
 # 升级多链路跟进指标
 
-更新日期：2026-07-18
+更新日期：2026-07-27
 
 本文定义官方 Codex 扩展及其内置 app-server、Bridge Controller、Remote Executor、
 VS Code/Remote SSH、OpenSSH 和 MCP 路由共同升级时的发布验收、量化指标和证据格式。
@@ -136,4 +136,6 @@ VS Code/Remote SSH、OpenSSH 和 MCP 路由共同升级时的发布验收、量�
 外部 `full-access` 协议修复及 Linux 本地/Remote SSH 实机见
 `docs/acceptance/2026-07-26-release-0.3.33-local-full-access.md`。当前活动 VS Code
 transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
-`docs/acceptance/2026-07-26-release-0.3.34-transport-close.md`。
+`docs/acceptance/2026-07-26-release-0.3.34-transport-close.md`。当前 Executor 独立
+失联响应、精确 stdin 长度和死亡拥有者写入清理实机见
+`docs/acceptance/2026-07-27-release-0.3.37-executor-loss-response.md`。

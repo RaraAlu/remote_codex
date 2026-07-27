@@ -1,6 +1,6 @@
 # 实施状态
 
-更新日期：2026-07-26
+更新日期：2026-07-27
 
 ## 能力边界复核
 
@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 59 个测试文件通过、1 个真实远端条件文件跳过，263 项通过、6 项
+`npm run test` 为 60 个测试文件通过、1 个真实远端条件文件跳过，267 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -37,7 +37,7 @@
 仍待补测。
 
 当前仍是候选状态：用户已重载普通本地与活动 Remote SSH 窗口，进程和运行时指针确认
-两个窗口均使用官方插件内置 Codex，活动 Remote SSH 窗口使用精确 `0.3.34` Shim，
+两个窗口均使用官方插件内置 Codex，活动 Remote SSH 窗口使用精确 `0.3.37` Shim，
 Bridge 对规范化远端根进入
 `ready`。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
@@ -121,6 +121,7 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
 | 写入审批与审计 | 覆盖、补丁、重命名和删除在非完全访问模式进入绑定调用 ID 的官方审批；新建文件/目录为有界自动操作；`full-access` 自动放行，审计不含正文 |
 | 写入幂等与上限 | 默认远端复用 Executor 账本，本地 Controller 有独立有界账本；文件正文最多 1 MiB，经 stdin 传输，不进入 argv |
 | 断线结果确认和幂等 | `0.3.17` 已在 transport 中断后用原幂等键从新 socket 查询账本；completed 返回原结果，cancelled/failed 保留终态，running 有界轮询，unknown 或查询不可达返回 `RESULT_UNKNOWN` 且不重放；账本有意限定在当前 Extension Host 代次，`0.3.28` 已实测重启后旧状态为 `unknown` 且不重放 |
+| Executor 失联写入完整性 | `0.3.37` 把已发送副作用的 transport 错误响应提升为不可重试 `RESULT_UNKNOWN`，写入脚本在替换前校验精确 stdin 字节数；临时文件先登记拥有 PID，新 Executor 激活时只清理当前工作区死亡拥有者的登记和临时文件。能力握手要求 `executeStdinExactLength` 与 `workspaceWriteOrphanCleanup`，不以版本号门禁；精确 Linux Remote SSH 故障注入确认原文件不变、无残留且不重放 |
 | 后台任务 | `0.3.20` 在活动 VS Code Remote transport 上提供 start/status/log/cancel；稳定任务 ID 避免重连重复启动，日志按字节游标有界保留，取消、超时和 Extension Host 关闭终止进程组；OpenSSH 回退失败关闭 |
 | 远程资源映射 | `0.3.21` 提供 `workspace_open_file` 与 `workspace_show_diff`；Controller 只映射已规范化路径，复用实际打开的 Remote SSH URI，并以会话登记、根授权复核、SHA-256 和内存上限保护内容提供器与 Diff 快照 |
 | Core 内置本地工具硬阻断 | 自动化边界已实施；专用权限配置、25 个已知客户端请求、五类本地审批及未来风险命名空间均失败关闭，真实模型专用工具诱饵待补测 |
