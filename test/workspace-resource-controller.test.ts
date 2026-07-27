@@ -5,6 +5,7 @@ import type { BridgeConfig, WorkspaceRootConfig } from "../src/core/types.js";
 import type { ControllerWorkspaceRequest } from "../src/core/vscode-transport.js";
 
 const mock = vi.hoisted(() => ({
+  activeTextEditor: null as vscodeTypes.TextEditor | null,
   executeCommand: vi.fn(async () => undefined),
   openTextDocument: vi.fn(async (uri: unknown) => ({ uri })),
   readFile: vi.fn(async () => new Uint8Array(Buffer.from("live\n"))),
@@ -41,6 +42,18 @@ vi.mock("vscode", () => {
       return new Uri(value);
     }
 
+    get authority(): string {
+      return new URL(this.value).host;
+    }
+
+    get path(): string {
+      return decodeURIComponent(new URL(this.value).pathname);
+    }
+
+    get scheme(): string {
+      return new URL(this.value).protocol.slice(0, -1);
+    }
+
     toString(): string {
       return this.value;
     }
@@ -65,7 +78,12 @@ vi.mock("vscode", () => {
     Range,
     Uri,
     commands: { executeCommand: mock.executeCommand },
-    window: { showTextDocument: mock.showTextDocument },
+    window: {
+      get activeTextEditor() {
+        return mock.activeTextEditor;
+      },
+      showTextDocument: mock.showTextDocument,
+    },
     workspace: {
       fs: {
         readFile: mock.readFile,
@@ -129,6 +147,7 @@ function config(roots: WorkspaceRootConfig[] = [remoteRoot]): BridgeConfig {
 
 function request(
   operation:
+    | "resolveEditorContext"
     | "openWorkspaceResource"
     | "registerWorkspaceResource"
     | "showWorkspaceDiff",
@@ -151,6 +170,7 @@ function request(
 describe("WorkspaceResourceController", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mock.activeTextEditor = null;
     mock.remoteContext = {
       host: "test_40",
       workspaceRoot: remoteRoot.path,
@@ -339,5 +359,155 @@ describe("WorkspaceResourceController", () => {
       code: "COMMAND_DENIED",
     });
     expect(mock.readFile).not.toHaveBeenCalled();
+  });
+
+  it("uses one explicit remote selection before returning to automatic IDE context", async () => {
+    const selection = {
+      end: { character: 30, line: 1 },
+      isEmpty: false,
+      start: { character: 0, line: 1 },
+    };
+    const document = {
+      getText: vi.fn((range?: unknown) =>
+        range ? "REMOTE_SELECTION_LINE_L03_0331" : "whole file",
+      ),
+      languageId: "plaintext",
+      uri: vscode.Uri.parse(
+        "vscode-remote://ssh-remote%2Btest_40/home/zkbot/work/train/zklab/Zklab/context.txt",
+      ),
+    };
+    mock.activeTextEditor = {
+      document,
+      selection,
+    } as unknown as vscodeTypes.TextEditor;
+    const controller = new WorkspaceResourceController(
+      () => config(),
+      () => undefined,
+    );
+
+    const queued = await controller.captureEditorContext("selection");
+
+    expect(queued).toMatchObject({
+      content: "REMOTE_SELECTION_LINE_L03_0331",
+      hostId: "test_40",
+      kind: "selection",
+      origin: "explicit",
+      relativePath: "context.txt",
+      rootId: "remote-primary",
+      selection: {
+        start: { column: 1, line: 2 },
+        end: { column: 31, line: 2 },
+      },
+      sizeBytes: 30,
+      target: "remote",
+      workspaceRoot: remoteRoot.path,
+      workspaceUri:
+        "vscode-remote://ssh-remote%2Btest_40/home/zkbot/work/train/zklab/Zklab/context.txt",
+    });
+    expect(queued.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    await expect(
+      controller.execute(request("resolveEditorContext", remoteRoot.id, {})),
+    ).resolves.toEqual(queued);
+    const automatic = await controller.execute(
+      request("resolveEditorContext", remoteRoot.id, {}),
+    );
+    expect(automatic).toMatchObject({
+      content: "REMOTE_SELECTION_LINE_L03_0331",
+      kind: "selection",
+      origin: "automatic",
+    });
+    expect((automatic as { contextId: string }).contextId).not.toBe(queued.contextId);
+  });
+
+  it("automatically captures the complete active remote file without a selection", async () => {
+    const document = {
+      getText: vi.fn(() => "REMOTE_ACTIVE_FILE\n"),
+      languageId: "plaintext",
+      uri: vscode.Uri.parse(
+        "vscode-remote://ssh-remote%2Btest_40/home/zkbot/work/train/zklab/Zklab/active.txt",
+      ),
+    };
+    mock.activeTextEditor = {
+      document,
+      selection: {
+        end: { character: 0, line: 0 },
+        isEmpty: true,
+        start: { character: 0, line: 0 },
+      },
+    } as unknown as vscodeTypes.TextEditor;
+    const controller = new WorkspaceResourceController(
+      () => config(),
+      () => undefined,
+    );
+
+    await expect(
+      controller.execute(request("resolveEditorContext", remoteRoot.id, {})),
+    ).resolves.toMatchObject({
+      content: "REMOTE_ACTIVE_FILE\n",
+      kind: "file",
+      origin: "automatic",
+      relativePath: "active.txt",
+      sizeBytes: 19,
+    });
+  });
+
+  it("rejects editor context outside the active Remote SSH workspace", async () => {
+    mock.activeTextEditor = {
+      document: {
+        getText: () => "LOCAL_BAIT",
+        languageId: "plaintext",
+        uri: vscode.Uri.parse("file:///tmp/local-bait.txt"),
+      },
+      selection: {
+        end: { character: 10, line: 0 },
+        isEmpty: false,
+        start: { character: 0, line: 0 },
+      },
+    } as unknown as vscodeTypes.TextEditor;
+    const controller = new WorkspaceResourceController(
+      () => config(),
+      () => undefined,
+    );
+
+    await expect(controller.captureEditorContext("selection")).rejects.toMatchObject({
+      code: "COMMAND_DENIED",
+    });
+    await expect(
+      controller.execute(request("resolveEditorContext", remoteRoot.id, {})),
+    ).resolves.toBeNull();
+  });
+
+  it("fails closed when the active Remote SSH identity no longer matches", async () => {
+    mock.activeTextEditor = {
+      document: {
+        getText: () => "REMOTE_BAIT",
+        languageId: "plaintext",
+        uri: vscode.Uri.parse(
+          "vscode-remote://ssh-remote%2Btest_40/home/zkbot/work/train/zklab/Zklab/context.txt",
+        ),
+      },
+      selection: {
+        end: { character: 0, line: 0 },
+        isEmpty: true,
+        start: { character: 0, line: 0 },
+      },
+    } as unknown as vscodeTypes.TextEditor;
+    mock.remoteContext = {
+      host: "other-host",
+      workspaceRoot: remoteRoot.path,
+      workspaceUri: vscode.Uri.parse(
+        "vscode-remote://ssh-remote%2Bother-host/home/zkbot/work/train/zklab/Zklab",
+      ),
+    };
+    const controller = new WorkspaceResourceController(
+      () => config(),
+      () => undefined,
+    );
+
+    await expect(
+      controller.execute(request("resolveEditorContext", remoteRoot.id, {})),
+    ).rejects.toMatchObject({
+      code: "REMOTE_TRANSPORT_DISCONNECTED",
+    });
   });
 });

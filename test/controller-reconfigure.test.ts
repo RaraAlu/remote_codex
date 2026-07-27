@@ -156,6 +156,10 @@ describe("BridgeController restored-state configuration", () => {
 
     expect(mock.registeredCommands.has("codexRemoteBridge.authorizeLocalRoot")).toBe(true);
     expect(mock.registeredCommands.has("codexRemoteBridge.revokeLocalRoot")).toBe(true);
+    expect(mock.registeredCommands.has("codexRemoteBridge.addRemoteFileContext")).toBe(true);
+    expect(
+      mock.registeredCommands.has("codexRemoteBridge.addRemoteSelectionContext"),
+    ).toBe(true);
   });
 
   it("opens local root authorization on the local filesystem in a remote window", async () => {

@@ -35,6 +35,10 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
   策略；读取、目录树、字面搜索和 `git status` 默认落到远程主根，显式指定
   `target="local"` 与授权根 ID 时由本地 Controller 执行。每次 turn 通过独立应用
   上下文刷新全部授权根与 `remote_exec` 提醒，不覆盖官方扩展已有上下文。
+- 每次 Remote SSH turn 自动从当前 VS Code 编辑器采集 IDE 背景：非空选区优先，否则
+  使用 128 KiB 以内的完整活动文件，并保留真实 `vscode-remote` URI、远端相对路径和
+  稳定资源 URI。显式文件/选区命令只作为可选的一轮覆盖；本地次级根、控制目录、二进制
+  和超限文件不会被误注入，正文不写入审计。
 - Bridge 自有工具在返回官方界面前投影为原生 `commandExecution` 项，使用本地 Codex
   相同的读取、列目录、搜索和命令外观，不修改官方扩展文件。
 - `workspace_open_file` 通过 Controller 复用当前窗口的原始 `vscode-remote` 工作区 URI

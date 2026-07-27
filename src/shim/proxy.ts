@@ -9,6 +9,7 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { AuditLog } from "../core/audit-log.js";
 import { normalizeRemotePath } from "../core/path-policy.js";
+import type { RemoteEditorContext } from "../core/vscode-transport.js";
 import type {
   BridgeClientIdentity,
   BridgeConfig,
@@ -84,6 +85,53 @@ function writeMessage(stream: Writable, message: unknown): void {
 }
 
 export type RpcMessageWriter = (message: unknown) => void;
+
+const MAX_REMOTE_EDITOR_CONTEXT_BYTES = 128 * 1024;
+
+function isRemoteEditorContext(value: unknown): value is RemoteEditorContext {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const selection = value.selection;
+  const validPosition = (position: unknown): boolean =>
+    isRecord(position) &&
+    typeof position.line === "number" &&
+    Number.isInteger(position.line) &&
+    position.line > 0 &&
+    typeof position.column === "number" &&
+    Number.isInteger(position.column) &&
+    position.column > 0;
+  const validSelection =
+    isRecord(selection) &&
+    validPosition(selection.start) &&
+    validPosition(selection.end);
+  return (
+    typeof value.capturedAtMs === "number" &&
+    Number.isFinite(value.capturedAtMs) &&
+    typeof value.content === "string" &&
+    typeof value.contentHash === "string" &&
+    /^[0-9a-f]{64}$/.test(value.contentHash) &&
+    createHash("sha256").update(value.content).digest("hex") === value.contentHash &&
+    typeof value.contextId === "string" &&
+    value.contextId.length > 0 &&
+    typeof value.hostId === "string" &&
+    (value.kind === "file" || value.kind === "selection") &&
+    typeof value.languageId === "string" &&
+    (value.origin === "automatic" || value.origin === "explicit") &&
+    typeof value.relativePath === "string" &&
+    typeof value.resourceUri === "string" &&
+    typeof value.rootId === "string" &&
+    (value.kind === "selection" ? validSelection : selection === undefined) &&
+    typeof value.sizeBytes === "number" &&
+    Number.isInteger(value.sizeBytes) &&
+    value.sizeBytes >= 0 &&
+    value.sizeBytes <= MAX_REMOTE_EDITOR_CONTEXT_BYTES &&
+    new TextEncoder().encode(value.content).byteLength === value.sizeBytes &&
+    value.target === "remote" &&
+    typeof value.workspaceRoot === "string" &&
+    typeof value.workspaceUri === "string"
+  );
+}
 
 function isRemoteToolCall(request: RpcRequest): boolean {
   return (
@@ -543,6 +591,88 @@ export class ShimProxy {
       }
       return;
     }
+    let editorContext: RemoteEditorContext | null = null;
+    if (
+      this.#options.config &&
+      this.#options.rewriteClientMessages !== false &&
+      this.#executor instanceof VsCodeRemoteExecutor &&
+      isRpcRequest(message) &&
+      message.method === "turn/start"
+    ) {
+      const root = this.#options.config.roots.find(
+        (candidate) => candidate.target === "remote" && candidate.role === "primary",
+      );
+      try {
+        if (!root) {
+          throw new TypeError("Bridge configuration has no remote primary root");
+        }
+        const result =
+          await this.#executor.requestControllerWorkspace<RemoteEditorContext | null>(
+            "resolveEditorContext",
+            root.id,
+          );
+        if (result !== null && !isRemoteEditorContext(result)) {
+          throw new TypeError("VS Code returned an invalid remote editor context");
+        }
+        if (
+          result &&
+          (result.hostId !== this.#options.config.host ||
+            result.rootId !== root.id ||
+            result.workspaceRoot !== this.#options.config.workspaceRoot)
+        ) {
+          throw new TypeError("Remote editor context identity does not match the Bridge session");
+        }
+        editorContext = result;
+        if (editorContext) {
+          await this.#audit.write({
+            ...this.#clientIdentity,
+            operationId: String(message.id),
+            hostId: this.#options.config.host,
+            workspaceRoot: this.#options.config.workspaceRoot,
+            rootId: root.id,
+            rootRole: root.role,
+            rootPath: root.path,
+            target: root.target,
+            operation: "editor_context.inject",
+            outcome: "succeeded",
+            details: {
+              contentHash: editorContext.contentHash,
+              contextId: editorContext.contextId,
+              kind: editorContext.kind,
+              origin: editorContext.origin,
+              relativePath: editorContext.relativePath,
+              selection: editorContext.selection ?? null,
+              sizeBytes: editorContext.sizeBytes,
+              workspaceUri: editorContext.workspaceUri,
+            },
+          });
+        }
+      } catch (error) {
+        await this.#audit.write({
+          ...this.#clientIdentity,
+          operationId: String(message.id),
+          hostId: this.#options.config.host,
+          workspaceRoot: this.#options.config.workspaceRoot,
+          rootId: root?.id,
+          rootRole: root?.role,
+          rootPath: root?.path,
+          target: root?.target,
+          operation: "editor_context.inject",
+          outcome: "failed",
+          details: {
+            error: error instanceof Error ? error.message : String(error),
+          },
+        });
+        writeClient({
+          id: message.id,
+          error: {
+            code: -32003,
+            message: "Codex Remote Bridge could not load remote editor context",
+          },
+        });
+        return;
+      }
+    }
     const rewritten =
       this.#options.rewriteClientMessages === false
         ? message
@@ -550,6 +680,7 @@ export class ShimProxy {
             message,
             this.#options.config,
             this.#options.controlDir,
+            editorContext,
           );
     writeServer(rewritten);
   }

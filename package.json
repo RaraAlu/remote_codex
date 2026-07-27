@@ -2,7 +2,7 @@
   "name": "codex-vscode-remote-bridge",
   "displayName": "Codex Remote Bridge",
   "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
-  "version": "0.3.31",
+  "version": "0.3.32",
   "private": true,
   "publisher": "zkbot",
   "license": "MIT",
@@ -35,6 +35,8 @@
     "onCommand:codexRemoteBridge.showAuditLog",
     "onCommand:codexRemoteBridge.authorizeLocalRoot",
     "onCommand:codexRemoteBridge.revokeLocalRoot",
+    "onCommand:codexRemoteBridge.addRemoteFileContext",
+    "onCommand:codexRemoteBridge.addRemoteSelectionContext",
     "onCommand:codexRemoteBridge.enableExternalCliMcp",
     "onCommand:codexRemoteBridge.disableExternalCliMcp",
     "onCommand:codexRemoteBridge.restoreSettings"
@@ -70,6 +72,14 @@
         "title": "Codex Bridge: Revoke Local Root"
       },
       {
+        "command": "codexRemoteBridge.addRemoteFileContext",
+        "title": "Codex Bridge: Add Remote File to Next Turn"
+      },
+      {
+        "command": "codexRemoteBridge.addRemoteSelectionContext",
+        "title": "Codex Bridge: Add Remote Selection to Next Turn"
+      },
+      {
         "command": "codexRemoteBridge.enableExternalCliMcp",
         "title": "Codex Bridge: Enable Automatic CLI Integration"
       },
@@ -82,6 +92,22 @@
         "title": "Codex Bridge: Restore Official Codex Settings"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "codexRemoteBridge.addRemoteSelectionContext",
+          "group": "codex@1",
+          "when": "resourceScheme == vscode-remote"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "codexRemoteBridge.addRemoteFileContext",
+          "group": "2_chat@1",
+          "when": "resourceScheme == vscode-remote"
+        }
+      ]
+    },
     "configuration": {
       "title": "Codex Remote Bridge",
       "properties": {

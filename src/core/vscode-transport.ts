@@ -10,6 +10,7 @@ export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
 export const CONTROLLER_WORKSPACE_OPERATIONS = [
+  "resolveEditorContext",
   "localApplyPatch",
   "localCanonicalPath",
   "localCreateDirectory",
@@ -28,6 +29,33 @@ export const CONTROLLER_WORKSPACE_OPERATIONS = [
 
 export type ControllerWorkspaceOperation =
   (typeof CONTROLLER_WORKSPACE_OPERATIONS)[number];
+
+export interface RemoteEditorContextPosition {
+  column: number;
+  line: number;
+}
+
+export interface RemoteEditorContext {
+  capturedAtMs: number;
+  content: string;
+  contentHash: string;
+  contextId: string;
+  hostId: string;
+  kind: "file" | "selection";
+  languageId: string;
+  origin: "automatic" | "explicit";
+  relativePath: string;
+  resourceUri: string;
+  rootId: string;
+  selection?: {
+    end: RemoteEditorContextPosition;
+    start: RemoteEditorContextPosition;
+  };
+  sizeBytes: number;
+  target: "remote";
+  workspaceRoot: string;
+  workspaceUri: string;
+}
 
 export const REMOTE_EXECUTOR_CAPABILITIES = [
   "backgroundCancel",

@@ -222,6 +222,14 @@ export class BridgeController implements vscode.Disposable {
       vscode.commands.registerCommand("codexRemoteBridge.revokeLocalRoot", () =>
         this.revokeLocalRoot(),
       ),
+      vscode.commands.registerCommand(
+        "codexRemoteBridge.addRemoteFileContext",
+        (resource?: vscode.Uri) => this.queueRemoteEditorContext("file", resource),
+      ),
+      vscode.commands.registerCommand(
+        "codexRemoteBridge.addRemoteSelectionContext",
+        () => this.queueRemoteEditorContext("selection"),
+      ),
       vscode.commands.registerCommand("codexRemoteBridge.enableExternalCliMcp", () =>
         this.enableExternalCliMcp(),
       ),
@@ -418,6 +426,42 @@ export class BridgeController implements vscode.Disposable {
     } catch (error) {
       const bridgeError = asBridgeError(error, "COMMAND_DENIED");
       this.#log(`local root revocation failed: ${bridgeError.message}`);
+      void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+    }
+  }
+
+  async queueRemoteEditorContext(
+    kind: "file" | "selection",
+    resource?: vscode.Uri,
+  ): Promise<void> {
+    try {
+      const context = await this.#workspaceResources.captureEditorContext(kind, resource);
+      await this.#audit.write({
+        operation: "editor_context.queue",
+        outcome: "succeeded",
+        hostId: context.hostId,
+        workspaceRoot: context.workspaceRoot,
+        rootId: context.rootId,
+        rootRole: "primary",
+        rootPath: context.workspaceRoot,
+        target: context.target,
+        details: {
+          contentHash: context.contentHash,
+          contextId: context.contextId,
+          kind: context.kind,
+          origin: context.origin,
+          relativePath: context.relativePath,
+          selection: context.selection ?? null,
+          sizeBytes: context.sizeBytes,
+          workspaceUri: context.workspaceUri,
+        },
+      });
+      void vscode.window.showInformationMessage(
+        `Codex Bridge queued remote ${kind} context for the next Codex turn: ${context.relativePath}`,
+      );
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "COMMAND_DENIED");
+      this.#log(`remote editor context queue failed: ${bridgeError.message}`);
       void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
     }
   }

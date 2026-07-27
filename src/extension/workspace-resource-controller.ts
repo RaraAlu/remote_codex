@@ -1,8 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { BridgeError } from "../core/errors.js";
 import type { BridgeConfig, WorkspaceRootConfig } from "../core/types.js";
-import type { ControllerWorkspaceRequest } from "../core/vscode-transport.js";
+import type {
+  ControllerWorkspaceRequest,
+  RemoteEditorContext,
+} from "../core/vscode-transport.js";
 import {
   buildWorkspaceResourceUri,
   parseWorkspaceResourceUri,
@@ -16,6 +19,7 @@ const MAX_LIVE_RESOURCE_BYTES = 5 * 1024 * 1024;
 const MAX_SNAPSHOT_BYTES = 1024 * 1024;
 const MAX_SNAPSHOT_COUNT = 16;
 const MAX_TOTAL_SNAPSHOT_BYTES = 16 * 1024 * 1024;
+const MAX_EDITOR_CONTEXT_BYTES = 128 * 1024;
 
 interface Snapshot {
   content: string;
@@ -90,10 +94,12 @@ function decodeSnapshot(value: string): Uint8Array {
 export function isWorkspaceResourceOperation(
   operation: string,
 ): operation is
+  | "resolveEditorContext"
   | "openWorkspaceResource"
   | "registerWorkspaceResource"
   | "showWorkspaceDiff" {
   return (
+    operation === "resolveEditorContext" ||
     operation === "openWorkspaceResource" ||
     operation === "registerWorkspaceResource" ||
     operation === "showWorkspaceDiff"
@@ -109,6 +115,7 @@ export class WorkspaceResourceController
   ) => WorkspaceRootConfig | undefined;
   readonly #resources = new Map<string, true>();
   readonly #snapshots = new Map<string, Snapshot>();
+  #pendingEditorContext: RemoteEditorContext | null = null;
   #snapshotBytes = 0;
 
   constructor(
@@ -127,6 +134,7 @@ export class WorkspaceResourceController
   }
 
   dispose(): void {
+    this.#pendingEditorContext = null;
     this.#resources.clear();
     this.#snapshots.clear();
     this.#snapshotBytes = 0;
@@ -167,6 +175,9 @@ export class WorkspaceResourceController
 
   async execute(request: ControllerWorkspaceRequest): Promise<unknown> {
     const rootId = requiredString(request.params, "rootId");
+    if (request.operation === "resolveEditorContext") {
+      return await this.#resolveEditorContext(rootId);
+    }
     const path = requiredString(request.params, "path");
     const resolved = this.#resolve(rootId, path);
     if (request.operation === "registerWorkspaceResource") {
@@ -183,6 +194,182 @@ export class WorkspaceResourceController
       "COMMAND_DENIED",
       `Unsupported workspace resource operation: ${request.operation}`,
     );
+  }
+
+  async captureEditorContext(
+    kind: RemoteEditorContext["kind"],
+    resource?: vscode.Uri,
+  ): Promise<RemoteEditorContext> {
+    const context = await this.#createEditorContext(kind, "explicit", resource);
+    this.#pendingEditorContext = context;
+    return context;
+  }
+
+  async #createEditorContext(
+    kind: RemoteEditorContext["kind"],
+    origin: RemoteEditorContext["origin"],
+    resource?: vscode.Uri,
+  ): Promise<RemoteEditorContext> {
+    const editor = vscode.window.activeTextEditor;
+    if (kind === "selection" && (!editor || editor.selection.isEmpty)) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Select remote editor text before queuing selection context",
+      );
+    }
+    const document =
+      kind === "file" && resource
+        ? await vscode.workspace.openTextDocument(resource)
+        : editor?.document;
+    if (!document) {
+      throw new BridgeError("COMMAND_DENIED", "No remote editor file is active");
+    }
+    const resolved = this.#resolveRemoteEditor(document.uri);
+    const selection = kind === "selection" ? editor?.selection : undefined;
+    const content = selection ? document.getText(selection) : document.getText();
+    if (content.includes("\0")) {
+      throw new BridgeError("COMMAND_DENIED", "Remote editor context is binary");
+    }
+    const sizeBytes = new TextEncoder().encode(content).byteLength;
+    if (sizeBytes > MAX_EDITOR_CONTEXT_BYTES) {
+      throw new BridgeError(
+        "OUTPUT_TRUNCATED",
+        "Remote editor context exceeds the 128 KiB limit",
+        { limitBytes: MAX_EDITOR_CONTEXT_BYTES, sizeBytes },
+      );
+    }
+    const config = this.#config();
+    if (!config) {
+      throw new BridgeError("BRIDGE_NOT_READY", "Bridge configuration is unavailable");
+    }
+    const context: RemoteEditorContext = {
+      capturedAtMs: Date.now(),
+      content,
+      contentHash: createHash("sha256").update(content).digest("hex"),
+      contextId: randomUUID(),
+      hostId: config.host,
+      kind,
+      languageId: document.languageId,
+      origin,
+      relativePath: resolved.identity.relativePath,
+      resourceUri: resolved.resourceUri.toString(),
+      rootId: resolved.root.id,
+      ...(selection
+        ? {
+            selection: {
+              end: {
+                column: selection.end.character + 1,
+                line: selection.end.line + 1,
+              },
+              start: {
+                column: selection.start.character + 1,
+                line: selection.start.line + 1,
+              },
+            },
+          }
+        : {}),
+      sizeBytes,
+      target: "remote",
+      workspaceRoot: config.workspaceRoot,
+      workspaceUri: document.uri.toString(),
+    };
+    return context;
+  }
+
+  async #resolveEditorContext(rootId: string): Promise<RemoteEditorContext | null> {
+    const context = this.#pendingEditorContext;
+    if (context) {
+      this.#pendingEditorContext = null;
+    }
+    const config = this.#config();
+    const root = config?.roots.find((candidate) => candidate.id === rootId);
+    if (
+      !config ||
+      config.connectionMode !== "vscode-remote" ||
+      !root ||
+      root.target !== "remote" ||
+      root.role !== "primary" ||
+      root.path !== config.workspaceRoot ||
+      (context &&
+        (context.hostId !== config.host ||
+          context.rootId !== root.id ||
+          context.workspaceRoot !== config.workspaceRoot))
+    ) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Remote editor context does not match the active workspace",
+      );
+    }
+    if (context) {
+      return context;
+    }
+
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      return null;
+    }
+    try {
+      return await this.#createEditorContext(
+        editor.selection.isEmpty ? "file" : "selection",
+        "automatic",
+      );
+    } catch (error) {
+      if (
+        error instanceof BridgeError &&
+        (error.code === "COMMAND_DENIED" || error.code === "OUTPUT_TRUNCATED")
+      ) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  #resolveRemoteEditor(uri: vscode.Uri): ResolvedResource {
+    const config = this.#config();
+    if (!config || config.connectionMode !== "vscode-remote") {
+      throw new BridgeError(
+        "REMOTE_TRANSPORT_DISCONNECTED",
+        "Remote editor context requires an active VS Code Remote session",
+      );
+    }
+    const root = config.roots.find(
+      (candidate) => candidate.target === "remote" && candidate.role === "primary",
+    );
+    if (!root || root.path !== config.workspaceRoot) {
+      throw new BridgeError("INVALID_CONFIG", "Remote primary root is unavailable");
+    }
+    const remote = detectRemoteWorkspace();
+    if (
+      remote.host !== config.host ||
+      remote.workspaceRoot !== config.workspaceRoot
+    ) {
+      throw new BridgeError(
+        "REMOTE_TRANSPORT_DISCONNECTED",
+        "The active Remote SSH workspace no longer matches the Bridge session",
+      );
+    }
+    if (
+      uri.scheme !== remote.workspaceUri.scheme ||
+      uri.authority !== remote.workspaceUri.authority
+    ) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Editor context does not belong to the active Remote SSH workspace",
+      );
+    }
+    const relativePath = workspaceRelativePath(root.path, uri.path, "remote");
+    const identity: WorkspaceResourceIdentity = {
+      host: config.host,
+      relativePath,
+      rootId: root.id,
+      target: "remote",
+    };
+    return {
+      actualUri: uri,
+      identity,
+      resourceUri: vscode.Uri.parse(buildWorkspaceResourceUri(identity)),
+      root,
+    };
   }
 
   async #open(

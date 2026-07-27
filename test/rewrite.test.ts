@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
 import { REMOTE_DYNAMIC_TOOLS } from "../src/shim/dynamic-tools.js";
@@ -149,6 +150,10 @@ describe("app-server request rewriting", () => {
               kind: "application",
               value: "stale",
             },
+            "codex-remote-bridge-editor-context": {
+              kind: "application",
+              value: "stale editor content",
+            },
           },
         },
       },
@@ -181,7 +186,70 @@ describe("app-server request rewriting", () => {
       "Use remote_exec for all project commands",
     );
     expect(bridgeContext.value).not.toContain("stale");
+    expect(additionalContext).not.toHaveProperty(
+      "codex-remote-bridge-editor-context",
+    );
     expect(rewritten.params).not.toHaveProperty("sandboxPolicy");
+  });
+
+  it("injects one explicit Remote SSH editor selection without replacing official context", () => {
+    const content = "REMOTE_SELECTION_LINE_L03_0331";
+    const rewritten = rewriteClientMessage(
+      {
+        id: 41,
+        method: "turn/start",
+        params: {
+          threadId: "thread_123",
+          input: [{ type: "text", text: "inspect selection" }],
+          additionalContext: {
+            official: {
+              kind: "application",
+              value: "keep me",
+            },
+          },
+        },
+      },
+      config,
+      "/local/control",
+      {
+        capturedAtMs: 1,
+        content,
+        contentHash: createHash("sha256").update(content).digest("hex"),
+        contextId: "context-1",
+        hostId: "training-gpu",
+        kind: "selection",
+        languageId: "plaintext",
+        origin: "explicit",
+        relativePath: "current-editor.txt",
+        resourceUri:
+          "codex-bridge://workspace/remote-primary/current-editor.txt?host=training-gpu&target=remote",
+        rootId: "remote-primary",
+        selection: {
+          start: { column: 1, line: 2 },
+          end: { column: 31, line: 2 },
+        },
+        sizeBytes: Buffer.byteLength(content),
+        target: "remote",
+        workspaceRoot: "/home/zkbot/work/train/MimicLite",
+        workspaceUri:
+          "vscode-remote://ssh-remote%2Btraining-gpu/home/zkbot/work/train/MimicLite/current-editor.txt",
+      },
+    ) as { params: Record<string, unknown> };
+
+    const additionalContext = rewritten.params.additionalContext as Record<
+      string,
+      { kind: string; value: string }
+    >;
+    expect(additionalContext.official?.value).toBe("keep me");
+    const editorContext =
+      additionalContext["codex-remote-bridge-editor-context"]!;
+    expect(editorContext.kind).toBe("application");
+    expect(editorContext.value).toContain("Relative path: current-editor.txt");
+    expect(editorContext.value).toContain(
+      "Workspace URI: vscode-remote://ssh-remote%2Btraining-gpu/",
+    );
+    expect(editorContext.value).toContain("Selection start: line 2, column 1");
+    expect(editorContext.value).toContain(JSON.stringify(content));
   });
 
   it("prevents settings updates and forks from relaxing the local-deny policy", () => {
