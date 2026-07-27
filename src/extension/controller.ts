@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
-import { hostname } from "node:os";
+import { homedir, hostname } from "node:os";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
 import { AuditLog } from "../core/audit-log.js";
@@ -328,6 +328,7 @@ export class BridgeController implements vscode.Disposable {
     try {
       detectRemoteWorkspace();
       const selected = await vscode.window.showOpenDialog({
+        defaultUri: vscode.Uri.file(homedir()),
         canSelectFiles: false,
         canSelectFolders: true,
         canSelectMany: false,

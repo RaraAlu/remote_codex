@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import type * as vscode from "vscode";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +11,7 @@ const mock = vi.hoisted(() => ({
   }),
   registeredCommands: new Map<string, (...args: unknown[]) => unknown>(),
   saveConfig: vi.fn(async () => undefined),
+  showOpenDialog: vi.fn(async () => undefined),
   settingsConfigure: vi.fn(async () => true),
   settingsUpdate: vi.fn(async () => undefined),
   transportStart: vi.fn(async () => {
@@ -20,6 +22,9 @@ const mock = vi.hoisted(() => ({
 vi.mock("vscode", () => ({
   ConfigurationTarget: { Global: 1 },
   StatusBarAlignment: { Left: 1 },
+  Uri: {
+    file: (path: string) => ({ fsPath: path, scheme: "file" }),
+  },
   commands: {
     executeCommand: mock.executeCommand,
     registerCommand: (command: string, callback: (...args: unknown[]) => unknown) => {
@@ -46,6 +51,7 @@ vi.mock("vscode", () => ({
     }),
     showErrorMessage: vi.fn(),
     showInformationMessage: vi.fn(),
+    showOpenDialog: mock.showOpenDialog,
     showWarningMessage: vi.fn(async () => "Configure"),
   },
   workspace: {
@@ -150,5 +156,20 @@ describe("BridgeController restored-state configuration", () => {
 
     expect(mock.registeredCommands.has("codexRemoteBridge.authorizeLocalRoot")).toBe(true);
     expect(mock.registeredCommands.has("codexRemoteBridge.revokeLocalRoot")).toBe(true);
+  });
+
+  it("opens local root authorization on the local filesystem in a remote window", async () => {
+    const controller = new BridgeController(context());
+
+    await controller.authorizeLocalRoot();
+
+    expect(mock.showOpenDialog).toHaveBeenCalledWith({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      defaultUri: { fsPath: homedir(), scheme: "file" },
+      openLabel: "Authorize Folder",
+      title: "Authorize a local secondary root for Codex Bridge",
+    });
   });
 });
