@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 59 个测试文件通过、1 个真实远端条件文件跳过，262 项通过、6 项
+`npm run test` 为 59 个测试文件通过、1 个真实远端条件文件跳过，263 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -37,7 +37,8 @@
 仍待补测。
 
 当前仍是候选状态：用户已重载普通本地与活动 Remote SSH 窗口，进程和运行时指针确认
-两个窗口均使用官方插件内置 Codex 和精确 `0.3.33` Shim，Bridge 对规范化远端根进入
+两个窗口均使用官方插件内置 Codex，活动 Remote SSH 窗口使用精确 `0.3.34` Shim，
+Bridge 对规范化远端根进入
 `ready`。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
@@ -379,6 +380,15 @@ ephemeral 选项。Zklab 单样本已完成新 thread 只读、steer、运行中
 完成文件读取和 Git 命令，并在 `g1_1` 完成自动 `full-access` 远端只读命令；两条
 链路均使用当前 `0.3.33` Shim，Remote Executor 未修改并保持 `0.2.16`。
 
+`0.3.34` 修复了 VS Code transport 在 Controller 主动关闭 socket 时活动请求不终结的
+问题。请求此前只监听 `error` 和 `end`，而本地 `destroy()` 只触发 `close`，导致写入
+Promise 永久悬空；执行器现在把意外 `close` 映射为断线错误，并继续按副作用语义返回
+`RESULT_UNKNOWN`，不盲目重放写入。单元回归覆盖活动副作用关闭。精确 Linux 候选通过
+真实 `g1_1` VS Code Remote transport 发起 1 MiB 替换写入后关闭本地 socket，请求在
+29 ms 内终结；原文件 SHA-256 不变、临时写入文件为 0，独立后置 thread 再次确认工作
+区无残留。原始 1,048,577 字节写入也在 17 ms 内以 `OUTPUT_TRUNCATED` 拒绝。Remote
+Executor 实现和协议未修改，继续保持 `0.2.16` / 9。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -425,7 +435,9 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 完整能力新对话和 Zklab 单样本见
 `docs/acceptance/2026-07-26-release-0.3.26-fresh-conversation.md`；普通本地外部
 `full-access` 协议修复及本地/Remote SSH 实机见
-`docs/acceptance/2026-07-26-release-0.3.33-local-full-access.md`。
+`docs/acceptance/2026-07-26-release-0.3.33-local-full-access.md`；VS Code transport
+活动关闭终结修复及真实写入中断见
+`docs/acceptance/2026-07-26-release-0.3.34-transport-close.md`。
 
 ## 本地 MCP 边界
 

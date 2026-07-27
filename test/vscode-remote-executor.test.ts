@@ -226,6 +226,29 @@ describe("VsCodeRemoteExecutor", () => {
     executor.close();
   });
 
+  it("settles an active side effect when the executor closes its local socket", async () => {
+    let requestSeen = false;
+    const pipe = await listen(() => {
+      requestSeen = true;
+    });
+    const executor = new VsCodeRemoteExecutor(config(pipe));
+    const running = executor.execute(["touch", "unsafe"], {
+      idempotencyKey: "close-active-side-effect",
+      sideEffect: true,
+    });
+
+    await vi.waitFor(() => expect(requestSeen).toBe(true));
+    executor.close();
+
+    await expect(running).rejects.toMatchObject({
+      code: "RESULT_UNKNOWN",
+      details: {
+        idempotencyKey: "close-active-side-effect",
+        recoveryAttempts: 0,
+      },
+    });
+  });
+
   it("recovers a completed side effect from the result ledger after disconnect", async () => {
     const operations: TransportRequest[] = [];
     let statusRequests = 0;

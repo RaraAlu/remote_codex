@@ -6,7 +6,7 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 执行器保留为回退模式。系统安装的 Codex CLI 不是运行依赖，其版本不会参与 Bridge
 发现、选择或回退。
 
-> 当前 `0.3.33` 是 Linux x64 / `g1_1` Remote SSH 候选，不是最终发布版。运行中取消、
+> 当前 `0.3.34` 是 Linux x64 / `g1_1` Remote SSH 候选，不是最终发布版。运行中取消、
 > 远端有界幂等账本、断线查询恢复、受控后台任务、远程资源映射和自动 IDE 背景已经
 > 实现；完成下方当前 Linux 代办和发布门禁后形成 `0.4.0` 台阶版本。Windows x64 与
 > 未显式选择的 OpenSSH 回退继续保持未验证，不从 Linux 结果推断。
@@ -98,8 +98,9 @@ Remote SSH 链路。能由注入、协议探针和静态检查完成的步骤由
 窗口关闭、视觉确认、权限切换和独立失联操作需要用户参与。
 
 版本按实现范围推进：`0.3.32` 保留自动 IDE 背景证据；普通本地会话
-`full-access` 的独立行为修复形成 `0.3.33` 候选；只有本节活动项全部完成后才更新
-根包为 `0.4.0`。Remote Executor 未发生实现或协议变化，保持 `0.2.16`。
+`full-access` 的独立行为修复形成 `0.3.33`，活动 VS Code transport 关闭时挂起请求的
+修复形成 `0.3.34` 候选；只有本节活动项全部完成后才更新根包为 `0.4.0`。Remote
+Executor 未发生实现或协议变化，保持 `0.2.16`。
 
 ### 实现与证据
 
@@ -108,6 +109,9 @@ Remote SSH 链路。能由注入、协议探针和静态检查完成的步骤由
 - [x] 修复普通本地会话从外部入口选择 `full-access` 时发送无效权限档案的问题；
   改发协议支持的 `danger-full-access` sandbox，Remote SSH 再映射为 Bridge 权限档案。
   精确 `0.3.33` 本地读取/Git 和远端自动审批回归均通过，不使用组件版本门禁。
+- [x] 修复 `VsCodeRemoteExecutor.close()` 只销毁 socket、活动请求 Promise 不终结的
+  问题；监听 socket `close` 并按副作用语义返回明确错误。精确 `0.3.34` 写入中断
+  29 ms 内返回 `RESULT_UNKNOWN`，原哈希不变、临时文件为 0。
 - [ ] 最终同步 README、实施状态、兼容矩阵、统一补测清单和升级跟进记录，清除已经
   由后续提交实现的历史 TODO。
 - [ ] 全部测试结束后清理本地授权根、控制目录和远端工作区中的 L03 验收夹具，恢复
@@ -115,12 +119,12 @@ Remote SSH 链路。能由注入、协议探针和静态检查完成的步骤由
 
 ### L01 当前候选与官方任务
 
-- [x] 最终精确 `0.3.33` Linux VSIX 已安装；本地和 Remote SSH Shim 均从同一候选
-  启动，`g1_1` 恢复 `ready`。
+- [x] 最终精确 `0.3.34` Linux VSIX 已安装；Remote SSH Shim 从当前候选启动，
+  `g1_1` 恢复 `ready`。
 - [x] `0.3.32` 官方直接新建回归证据 1 次：创建 84 ms，turn 5,984 ms，自动选区正确。
-- [ ] 当前最终候选热启动达到 3/3；`0.3.33` 当前为 1/3，首个样本 4,055 ms。
-- [ ] 当前最终候选冷启动达到 3/3；`0.3.33` 当前为 0/3。
-- [ ] 当前最终候选官方直接新建达到 3/3、恢复达到 3/3；`0.3.33` 当前均为 0/3。
+- [ ] 当前最终候选热启动达到 3/3；`0.3.34` 当前为 1/3，首个样本 3,812 ms。
+- [ ] 当前最终候选冷启动达到 3/3；`0.3.34` 当前为 0/3。
+- [ ] 当前最终候选官方直接新建达到 3/3、恢复达到 3/3；`0.3.34` 当前均为 0/3。
   检查当前 Shim、规范远端根和 `Unknown local project=0`。
 
 ### L02-L03 根、上下文与 Core 诱饵
@@ -133,14 +137,16 @@ Remote SSH 链路。能由注入、协议探针和静态检查完成的步骤由
 - [x] 精确 `0.3.33` 普通本地 Shim 以 `approvalPolicy=never` /
   `sandbox=danger-full-access` 完成真实本地文件读取和 Git 命令；没有继承 Remote SSH
   的本地拒绝档案。
-- [x] 当前候选固定远端读取 6/6、目录树 5/5、有效查询搜索 5/5、Git 5/5 和
-  `pwd` 5/5 成功；审计均为 `remote/remote-primary/primary`，规范路径和
-  `remoteCwd` 一致。隔离 Git 元数据已清理，主根恢复非 Git 状态。
+- [x] 当前 `0.3.34` 固定远端读取、目录树、有效查询搜索、Git 和 `pwd` 各 5/5
+  成功；P50 分别为 130、118、98、91、77 ms，审计均为
+  `remote/remote-primary/primary`。隔离 Git 元数据已清理，主根恢复非 Git 状态。
 
 ### L04 审批、取消、写入与双向 thread
 
-- [ ] 补原始大载荷写入、窗口 transport 断开写入和 Executor 独立失联写入；核对
-  原文件哈希、原子性、临时文件为 0，且不回退到本地或 OpenSSH。
+- [x] 精确 `0.3.34` 原始 1,048,577 字节写入在 17 ms 内以 `OUTPUT_TRUNCATED`
+  拒绝；写入中关闭活动 transport socket 在 29 ms 内返回 `RESULT_UNKNOWN`。两者
+  后置检查均确认原哈希不变、临时文件为 0，且没有本地或 OpenSSH 回退。
+- [ ] 补 Executor 独立失联写入；核对原文件哈希、原子性、临时文件为 0，不自动重放。
 - [ ] 由用户在官方 UI 接受 1 次需审批远端命令，确认 host、规范 cwd、完整命令和
   环境变更；Codex 核对审批与执行审计。
 - [ ] 由用户在审批等待中取消 1 次，命令不得启动；再从官方 UI 取消运行中长命令
@@ -495,7 +501,7 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前 Linux 功能候选为
-`docs/acceptance/2026-07-26-release-0.3.33-local-full-access.md`；在上述
+`docs/acceptance/2026-07-26-release-0.3.34-transport-close.md`；在上述
 `0.4.0` Linux 台阶门禁完成前，它只代表已记录的限定能力，不构成最终发布声明。
 
 Windows x64 和 Linux x64 必须分别填写运行结果。`npm run package:all` 只会收集并

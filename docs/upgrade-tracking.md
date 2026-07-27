@@ -134,4 +134,6 @@ VS Code/Remote SSH、OpenSSH 和 MCP 路由共同升级时的发布验收、量�
 最新 Linux Remote SSH 外部 CLI 限定链路见
 `docs/acceptance/2026-07-23-release-0.3.3-remote-cli-acceptance.md`。当前普通本地
 外部 `full-access` 协议修复及 Linux 本地/Remote SSH 实机见
-`docs/acceptance/2026-07-26-release-0.3.33-local-full-access.md`。
+`docs/acceptance/2026-07-26-release-0.3.33-local-full-access.md`。当前活动 VS Code
+transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
+`docs/acceptance/2026-07-26-release-0.3.34-transport-close.md`。

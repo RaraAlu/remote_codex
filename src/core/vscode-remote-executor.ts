@@ -497,6 +497,11 @@ export class VsCodeRemoteExecutor
       socket.once("end", () => {
         finish(() => reject(disconnectError("VS Code remote transport closed unexpectedly")));
       });
+      socket.once("close", () => {
+        finish(() =>
+          reject(disconnectError("VS Code remote transport socket closed unexpectedly")),
+        );
+      });
       lines.on("line", (line) => {
         let message: TransportMessage;
         try {
