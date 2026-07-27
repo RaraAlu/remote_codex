@@ -46,9 +46,11 @@ M01-M14 的总体状态仍全部是 `待补测`。
   幂等/改参冲突和运行中取消；`0.3.28` 重载样本确认 Extension Host 退出后前台和
   后台标记进程均为 0。显式 Bridge 停止和 Remote SSH 窗口关闭仍待补。
 - M09：`g1_1` 启动审计为 `remoteMcpServers=["codegraph"]`；真实 VS Code transport
-  relay 的 `initialize`/`tools/list` 各 3 次、固定 `codegraph_status` 5 次均通过。
-  Executor `0.2.15` 主动停止和 `0.3.28` Extension Host 重载均确认两层 CodeGraph
-  进程与本地测试 relay 为 0。访问模式、显式停止和窗口关闭矩阵仍待补。
+  relay 的 `initialize`/`tools/list` 各 3 次、固定 `codegraph_status` 6 次均通过。
+  `enabled` 模式只暴露默认的 `codegraph_explore`，`all` 模式通过
+  `codegraph-all-tools-v1` 暴露 8 个工具，启动参数和当前进程级审批覆盖均与设置一致。
+  Executor `0.2.15` 主动停止、relay 断开和 `0.3.28` Extension Host 重载均确认
+  两层 CodeGraph 进程与本地测试 relay 为 0。显式停止和窗口关闭矩阵仍待补。
 - M10：外部 MCP 方向完成新 thread、steer、3 次取消、历史观察、安全写入和
   `expectedTurnId` 冲突拒绝；官方 UI 反向操作、断开、重启、描述符过期和权限撤销
   中，重载后的旧端点已确认 `ECONNREFUSED`，旧 Token 访问当前网关返回 401，当前
