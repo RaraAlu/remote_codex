@@ -6,7 +6,7 @@ Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64
 执行器保留为回退模式。系统安装的 Codex CLI 不是运行依赖，其版本不会参与 Bridge
 发现、选择或回退。
 
-> 当前 `0.3.37` 是 Linux x64 / `g1_1` Remote SSH 候选，不是最终发布版。运行中取消、
+> 当前 `0.3.38` 是 Linux x64 / `g1_1` Remote SSH 候选，不是最终发布版。运行中取消、
 > 远端有界幂等账本、断线查询恢复、受控后台任务、远程资源映射和自动 IDE 背景已经
 > 实现；完成下方当前 Linux 代办和发布门禁后形成 `0.4.0` 台阶版本。Windows x64 与
 > 未显式选择的 OpenSSH 回退继续保持未验证，不从 Linux 结果推断。
@@ -101,9 +101,9 @@ Remote SSH 链路。能由注入、协议探针和静态检查完成的步骤由
 `full-access` 的独立行为修复形成 `0.3.33`，活动 VS Code transport 关闭时挂起请求的
 修复形成 `0.3.34`，远端 Executor 失联响应的副作用语义修复形成 `0.3.35` 候选；
 新增实际能力门槛并确保修复版 Executor 自动部署后形成 `0.3.36` 候选。
-失联临时文件登记与死亡拥有者清理形成 `0.3.37` 候选。只有本节活动项全部完成后才
-更新根包为 `0.4.0`。本次远端写入完整性修复更新 Remote Executor 为 `0.2.19`，
-诊断协议为 11。
+失联临时文件登记与死亡拥有者清理形成 `0.3.37` 候选；中断 turn 的持久化工具项
+终态投影修复形成 `0.3.38` 候选。只有本节活动项全部完成后才更新根包为 `0.4.0`。
+本次远端写入完整性修复更新 Remote Executor 为 `0.2.19`，诊断协议为 11。
 
 ### 实现与证据
 
@@ -124,6 +124,11 @@ Remote SSH 链路。能由注入、协议探针和静态检查完成的步骤由
   已完成实机复核：Extension Host 从 PID `52431` 切换为 `56533`，调用方返回不可重试
   `RESULT_UNKNOWN`，原文件哈希与 28 字节大小不变，临时文件、远端登记和残留观察
   进程均为 0；审计只有一次 started/unknown，不存在重放。
+- [x] 修复刚中断 turn 的 `dynamicToolCall` 仍投影为
+  `commandExecution.status=inProgress` 的问题；仅在包含该工具项的 turn 明确为
+  `interrupted` 时投影为失败终态和中断说明，实时 `item/started` 仍保持运行中。
+  `0.3.38` 自动化 60 个文件、268 项测试通过，实机复核列入 L04。下一 turn 开始后
+  官方 `thread/turns/list` 会省略该中断工具项，跨 turn 完整历史单独保持待处理。
 - [x] 最终同步 README、实施状态、兼容矩阵、统一补测清单和升级跟进记录，清除已经
   由后续提交实现的历史 TODO。
 - [ ] 全部测试结束后清理本地授权根、控制目录和远端工作区中的 L03 验收夹具，恢复
@@ -131,8 +136,11 @@ Remote SSH 链路。能由注入、协议探针和静态检查完成的步骤由
 
 ### L01 当前候选与官方任务
 
-- [x] 最终精确 `0.3.37` Linux VSIX 已安装、重载并恢复 `ready`；活动 Shim 来自
+- [x] 精确 `0.3.37` Linux VSIX 已安装、重载并恢复 `ready`；活动 Shim 来自
   `0.3.37-efb8ea7d5b649882`，远端 Executor 为 `0.2.19` 且与内嵌实现摘要一致。
+- [x] 精确 `0.3.38` Linux VSIX 已安装、重载并在 4,055 ms 内恢复 `ready`；
+  活动 Shim 来自 `0.3.38-d27416d3a5f42b3e` 且与构建摘要一致，Executor 仍为
+  `0.2.19` 且实现摘要不变。
 - [x] `0.3.32` 官方直接新建回归证据 1 次：创建 84 ms，turn 5,984 ms，自动选区正确。
 - [x] 当前最终候选热启动达到 3/3；样本为 4,354 ms、3,999 ms、3,871 ms，
   P50 为 3,999 ms、最大值为 4,354 ms、失败数为 0。
@@ -170,6 +178,16 @@ Remote SSH 链路。能由注入、协议探针和静态检查完成的步骤由
   返回 `RESULT_UNKNOWN`，但发现 1 个 SIGKILL 后临时文件。复核最终修复后原哈希
   不变、临时文件和远端登记均为 0，且不自动重放；独立后置探针再次确认目标、登记、
   临时文件和观察进程均无残留。
+- [x] 精确 `0.3.37` 外部 MCP 注入式 steer 保持同一 turn 并完成；运行中取消
+  3/3 返回 `CANCELLED`，从 `turn/interrupt` 到取消审计分别为 55、50、47 ms，
+  三轮远端父子进程后置检查均为 0。固定 `codegraph_status` 调用 5/5 成功，工具
+  耗时 P50 为 9 ms、最大值为 66 ms、`isError=false`。
+- [x] 精确 `0.3.38` 重载后再次取消运行中远端命令；`turn/interrupt` 到远端
+  `CANCELLED` 为 48 ms，随后的完整 turn 读取把 `commandExecution` 投影为
+  `failed` 并给出中断说明，父子进程后置检查为 0。
+- [ ] 修复开始下一 turn 后官方 `thread/turns/list` 省略上一中断 turn 工具项的
+  完整历史缺口；当前会话日志仍保留原 function call 和 aborted output，不得把
+  即时终态投影通过写成跨 turn 历史闭环。
 - [ ] 由用户在官方 UI 接受 1 次需审批远端命令，确认 host、规范 cwd、完整命令和
   环境变更；Codex 核对审批与执行审计。
 - [ ] 由用户在审批等待中取消 1 次，命令不得启动；再从官方 UI 取消运行中长命令
@@ -523,8 +541,9 @@ npm run protocol:generate
 兼容集合中任一组件升级时，按 `docs/upgrade-tracking.md` 的触发矩阵、硬门禁和量化
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
-当前 Linux 功能候选为
-`docs/acceptance/2026-07-27-release-0.3.37-executor-loss-response.md`；在上述
+当前已验证 Linux 功能候选为
+`docs/acceptance/2026-07-27-release-0.3.37-executor-loss-response.md`；`0.3.38`
+中断历史投影目标完成实机复核后另存不可覆盖记录。在上述
 `0.4.0` Linux 台阶门禁完成前，它只代表已记录的限定能力，不构成最终发布声明。
 
 Windows x64 和 Linux x64 必须分别填写运行结果。`npm run package:all` 只会收集并

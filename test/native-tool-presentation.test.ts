@@ -258,6 +258,50 @@ describe("native Codex tool presentation", () => {
     });
   });
 
+  it("fails a lingering remote tool item when its persisted turn was interrupted", () => {
+    const projected = projectServerMessage(
+      {
+        result: {
+          thread: {
+            turns: [
+              {
+                id: "turn-interrupted",
+                status: "interrupted",
+                items: [
+                  {
+                    id: "item-interrupted",
+                    type: "dynamicToolCall",
+                    tool: "remote_exec",
+                    arguments: { argv: ["sleep", "120"] },
+                    status: "inProgress",
+                    success: null,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      config,
+    ) as unknown as {
+      result: {
+        thread: {
+          turns: Array<{
+            items: Array<Record<string, unknown>>;
+          }>;
+        };
+      };
+    };
+
+    expect(projected.result.thread.turns[0]?.items[0]).toMatchObject({
+      type: "commandExecution",
+      command: "sleep 120",
+      status: "failed",
+      exitCode: null,
+      aggregatedOutput: "Command stopped when the turn was interrupted.",
+    });
+  });
+
   it("uses the approved remote command cwd in native command items", () => {
     const projected = projectServerMessage(
       {

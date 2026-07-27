@@ -515,9 +515,11 @@ function completedCommandState(
 function projectDynamicToolItem(
   item: Record<string, unknown>,
   config: BridgeConfig,
+  interruptedTurn: boolean,
 ): Record<string, unknown> {
   const tool = item.tool as string;
   const presentation = commandPresentation(tool, item.arguments, config);
+  const interrupted = interruptedTurn && item.status === "inProgress";
   const completed = item.status !== "inProgress";
   const commandState = completed ? completedCommandState(tool, item) : null;
 
@@ -527,8 +529,16 @@ function projectDynamicToolItem(
     command: presentation.command,
     commandActions: presentation.commandActions,
     cwd: presentation.cwd ?? config.workspaceRoot,
-    status: completed ? (commandState?.failed ? "failed" : "completed") : "inProgress",
-    aggregatedOutput: completed ? formatToolOutput(tool, item) : null,
+    status: interrupted
+      ? "failed"
+      : completed
+        ? (commandState?.failed ? "failed" : "completed")
+        : "inProgress",
+    aggregatedOutput: interrupted
+      ? "Command stopped when the turn was interrupted."
+      : completed
+        ? formatToolOutput(tool, item)
+        : null,
     durationMs: typeof item.durationMs === "number" ? item.durationMs : null,
     exitCode: commandState?.exitCode ?? null,
     processId: null,
@@ -536,11 +546,15 @@ function projectDynamicToolItem(
   };
 }
 
-function projectValue(value: unknown, config: BridgeConfig): unknown {
+function projectValue(
+  value: unknown,
+  config: BridgeConfig,
+  interruptedTurn = false,
+): unknown {
   if (Array.isArray(value)) {
     let changed = false;
     const projected = value.map((entry) => {
-      const next = projectValue(entry, config);
+      const next = projectValue(entry, config, interruptedTurn);
       changed ||= next !== entry;
       return next;
     });
@@ -555,13 +569,15 @@ function projectValue(value: unknown, config: BridgeConfig): unknown {
     typeof value.tool === "string" &&
     REMOTE_TOOL_NAMES.has(value.tool)
   ) {
-    return projectDynamicToolItem(value, config);
+    return projectDynamicToolItem(value, config, interruptedTurn);
   }
 
+  const nestedInterruptedTurn =
+    interruptedTurn || (value.status === "interrupted" && Array.isArray(value.items));
   let changed = false;
   const projected: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    const next = projectValue(entry, config);
+    const next = projectValue(entry, config, nestedInterruptedTurn);
     projected[key] = next;
     changed ||= next !== entry;
   }
