@@ -27,6 +27,7 @@ import {
   type ControllerWorkspaceOperation,
   type RemoteExecutorOperation,
   type RemoteOperationSnapshot,
+  type RemoteWorkspaceStopResult,
   type TransportMessage,
   type TransportRequest,
 } from "./vscode-transport.js";
@@ -187,6 +188,14 @@ export class VsCodeRemoteExecutor
     return await this.#request<RemoteOperationSnapshot<RemoteCommandResult>>(
       "resultStatus",
       { idempotencyKey },
+    );
+  }
+
+  async stopWorkspace(): Promise<RemoteWorkspaceStopResult> {
+    return await this.#request<RemoteWorkspaceStopResult>(
+      "workspaceStop",
+      {},
+      { sideEffect: true },
     );
   }
 

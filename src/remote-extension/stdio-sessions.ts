@@ -27,6 +27,9 @@ interface StdioSession {
   descendantPids: number[];
   forceTimer?: NodeJS.Timeout;
   outputQueue: Promise<void>;
+  settled: Promise<void>;
+  settle: () => void;
+  workspaceRoot: string;
 }
 
 export interface StartStdioRequest {
@@ -82,10 +85,17 @@ export class RemoteStdioSessions {
       env: remoteProcessEnvironment(launch.environment),
       stdio: "pipe",
     });
+    let settle = (): void => undefined;
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
     const session: StdioSession = {
       child,
       descendantPids: [],
       outputQueue: Promise.resolve(),
+      settled,
+      settle,
+      workspaceRoot: request.workspaceRoot,
     };
     this.#sessions.set(request.id, session);
 
@@ -110,6 +120,7 @@ export class RemoteStdioSessions {
         session.forceTimer = undefined;
       }
       this.#sessions.delete(request.id);
+      session.settle();
       queueEvent({
         event: "exit",
         exitCode,
@@ -122,6 +133,7 @@ export class RemoteStdioSessions {
       child.once("spawn", resolve);
       child.once("error", (error) => {
         this.#sessions.delete(request.id);
+        session.settle();
         reject(
           new BridgeError(
             "REMOTE_TRANSPORT_DISCONNECTED",
@@ -187,6 +199,17 @@ export class RemoteStdioSessions {
       1_000,
     );
     session.forceTimer.unref();
+  }
+
+  async stopWorkspace(workspaceRoot: string): Promise<number> {
+    const sessions = [...this.#sessions.entries()].filter(
+      ([, session]) => session.workspaceRoot === workspaceRoot,
+    );
+    for (const [id] of sessions) {
+      this.stop(id);
+    }
+    await Promise.all(sessions.map(([, session]) => session.settled));
+    return sessions.length;
   }
 
   close(): void {

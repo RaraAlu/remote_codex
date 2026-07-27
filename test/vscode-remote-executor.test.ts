@@ -198,6 +198,34 @@ describe("VsCodeRemoteExecutor", () => {
     executor.close();
   });
 
+  it("requests deterministic cleanup for the current remote workspace", async () => {
+    let observed: TransportRequest | undefined;
+    const pipe = await listen((request, write) => {
+      observed = request;
+      write({
+        id: request.id,
+        result: {
+          backgroundTasks: 2,
+          operations: 1,
+          stdioSessions: 1,
+        },
+        type: "response",
+      });
+    });
+    const executor = new VsCodeRemoteExecutor(config(pipe));
+
+    await expect(executor.stopWorkspace()).resolves.toEqual({
+      backgroundTasks: 2,
+      operations: 1,
+      stdioSessions: 1,
+    });
+    expect(observed).toMatchObject({
+      operation: "workspaceStop",
+      params: {},
+    });
+    executor.close();
+  });
+
   it("recovers a completed side effect from the result ledger after disconnect", async () => {
     const operations: TransportRequest[] = [];
     let statusRequests = 0;

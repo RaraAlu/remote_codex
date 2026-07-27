@@ -107,6 +107,40 @@ describe.skipIf(process.platform === "win32")("remote background tasks", () => {
     }
   });
 
+  it("stops and forgets every task for one workspace only", async () => {
+    const firstWorkspace = await mkdtemp(join(tmpdir(), "codex-background-stop-a-"));
+    const secondWorkspace = await mkdtemp(join(tmpdir(), "codex-background-stop-b-"));
+    const tasks = new RemoteBackgroundTasks();
+    try {
+      for (const workspaceRoot of [firstWorkspace, secondWorkspace]) {
+        await tasks.start({
+          argv: [
+            process.execPath,
+            "-e",
+            "process.stdout.write(String(process.pid)); setInterval(() => {}, 1000)",
+          ],
+          taskId: "shared-stop",
+          workspaceRoot,
+        });
+      }
+      await expect
+        .poll(() => decodedLog(tasks, firstWorkspace, "shared-stop").stdout)
+        .toMatch(/^\d+$/);
+      const firstPid = Number(
+        decodedLog(tasks, firstWorkspace, "shared-stop").stdout,
+      );
+
+      await expect(tasks.stopWorkspace(firstWorkspace)).resolves.toBe(1);
+      expect(tasks.status(firstWorkspace, "shared-stop").status).toBe("unknown");
+      expect(tasks.status(secondWorkspace, "shared-stop").status).toBe("running");
+      expect(() => process.kill(firstPid, 0)).toThrow();
+    } finally {
+      tasks.close();
+      await rm(firstWorkspace, { force: true, recursive: true });
+      await rm(secondWorkspace, { force: true, recursive: true });
+    }
+  });
+
   it("bounds retained logs and reports cursor truncation", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "codex-background-log-"));
     const tasks = new RemoteBackgroundTasks(undefined, { maxLogBytes: 5 });

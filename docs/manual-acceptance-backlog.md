@@ -21,7 +21,9 @@ transport 注入安全探针并提前积累证据，完整 UI 操作和最低样
 `docs/acceptance/2026-07-26-release-0.3.26-fresh-conversation.md` 已记录 Zklab 的前期
 样本，以及最终 `0.3.26` 在 `g1_1` 的新 thread、后台任务和远端 CodeGraph 样本；
 `docs/acceptance/2026-07-26-release-0.3.28-lifecycle-cleanup.md` 继续记录 Executor
-`0.2.15` 和 Controller/Shim `0.3.28` 的窗口重载生命周期修复。
+`0.2.15` 和 Controller/Shim `0.3.28` 的窗口重载生命周期修复；
+`docs/acceptance/2026-07-26-release-0.3.29-explicit-stop.md` 记录 Executor `0.2.16`
+和 Controller/Shim `0.3.29` 的显式停止、设置恢复及重新启用。
 下面只表示对应子链已有一次成功证据；因平台、方向、故障矩阵或最低样本数不足，
 M01-M14 的总体状态仍全部是 `待补测`。
 
@@ -45,13 +47,15 @@ M01-M14 的总体状态仍全部是 `待补测`。
   Executor 独立失联仍待补。
 - M08：`g1_1` 已覆盖后台成功、失败、超时、4 MiB 日志截断、客户端断开后继续、
   幂等/改参冲突和运行中取消；`0.3.28` 重载样本确认 Extension Host 退出后前台和
-  后台标记进程均为 0。显式 Bridge 停止和 Remote SSH 窗口关闭仍待补。
+  后台标记进程均为 0。`0.3.29` 显式停止和设置恢复各清理 1 个后台任务，停止后状态
+  为 `unknown` 且没有重发。Remote SSH 窗口关闭仍待补。
 - M09：`g1_1` 启动审计为 `remoteMcpServers=["codegraph"]`；真实 VS Code transport
   relay 的 `initialize`/`tools/list` 各 3 次、固定 `codegraph_status` 6 次均通过。
   `enabled` 模式只暴露默认的 `codegraph_explore`，`all` 模式通过
   `codegraph-all-tools-v1` 暴露 8 个工具，启动参数和当前进程级审批覆盖均与设置一致。
   Executor `0.2.15` 主动停止、relay 断开和 `0.3.28` Extension Host 重载均确认
-  两层 CodeGraph 进程与本地测试 relay 为 0。显式停止和窗口关闭矩阵仍待补。
+  两层 CodeGraph 进程与本地测试 relay 为 0。`0.3.29` 显式停止和设置恢复又分别清理
+  1 个远端 stdio 会话及本地 relay，遗留均为 0。窗口关闭矩阵仍待补。
 - M10：外部 MCP 方向完成新 thread、steer、3 次取消、历史观察、安全写入和
   `expectedTurnId` 冲突拒绝；官方 UI 反向操作、断开、重启、描述符过期和权限撤销
   中，重载后的旧端点已确认 `ECONNREFUSED`，旧 Token 访问当前网关返回 401，当前
@@ -62,8 +66,10 @@ M01-M14 的总体状态仍全部是 `待补测`。
   `0.2.15`；重载后旧 Extension Host、relay、MCP、前后台任务、会话文件和 socket
   均清理。`0.3.28` 又对 467 个 Code 日志、212 个 Git 跟踪文件和 670 个进程参数
   重跑活动 Token 与密钥形式扫描，命中仍为 0；远端敏感环境键、Codex/app-server
-  和标记进程也为 0。设置恢复差异、显式 Bridge 停止和 Remote SSH 窗口关闭仍待补。
-- Linux Controller `0.3.28` 与 Executor `0.2.15` 已安装并在 `g1_1` 重载；
+  和标记进程也为 0。`0.3.29` 显式停止清理后台 1、操作 4、stdio 1；设置恢复驱动
+  停止清理后台 1、操作 3、stdio 1，托管设置恢复到升级前快照且差异为 0，重新启用
+  后当前 Shim 任务和远端 `pwd` 通过。Remote SSH 窗口关闭仍待补。
+- Linux Controller `0.3.29` 与 Executor `0.2.16` 已安装并在 `g1_1` 重载；
   M01 的三次冷/热启动沿用 `0.3.26` 样本，仍余官方面板直接新建和直接恢复的最低样本。
 
 ## A. Linux 本地与 Remote SSH

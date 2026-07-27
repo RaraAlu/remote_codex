@@ -120,6 +120,81 @@ describe.skipIf(process.platform === "win32")("Remote Executor operation ledger"
     });
   });
 
+  it("stops and forgets every process owned by the remote workspace", async () => {
+    workspace = await realpath(await mkdtemp(join(tmpdir(), "codex-remote-stop-")));
+    mock.workspaceRoot = workspace;
+    activate({ subscriptions: [] } as never);
+    const execute = mock.commands.get(REMOTE_EXECUTOR_COMMAND);
+    expect(execute).toBeTypeOf("function");
+
+    const running = execute?.(
+      request("foreground-stop", "execute", {
+        argv: ["sleep", "30"],
+        idempotencyKey: "foreground-stop-key",
+        options: { sideEffect: false },
+      }),
+    ) as Promise<RemoteExecutorCommandResponse>;
+    await expect(
+      execute?.(
+        request("background-stop", "backgroundStart", {
+          argv: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+          taskId: "background-stop-task",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: { status: "running" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    await expect(
+      execute?.(request("workspace-stop", "workspaceStop", {})),
+    ).resolves.toEqual({
+      ok: true,
+      result: {
+        backgroundTasks: 1,
+        operations: 1,
+        stdioSessions: 0,
+      },
+    });
+    await expect(running).resolves.toMatchObject({
+      error: { code: "CANCELLED" },
+      ok: false,
+    });
+    await expect(
+      execute?.(
+        request("background-status", "backgroundStatus", {
+          taskId: "background-stop-task",
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: { status: "unknown" },
+    });
+    await expect(
+      execute?.(
+        request("result-status", "resultStatus", {
+          idempotencyKey: "foreground-stop-key",
+        }),
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      result: { status: "unknown" },
+    });
+    await expect(
+      execute?.(
+        request("after-stop", "execute", {
+          argv: ["printf", "ready"],
+          idempotencyKey: "after-stop-key",
+          options: { sideEffect: false },
+        }),
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      result: { exitCode: 0, stdout: "ready" },
+    });
+  });
+
   it("replays a completed idempotency key without repeating its side effect", async () => {
     workspace = await realpath(await mkdtemp(join(tmpdir(), "codex-remote-ledger-")));
     mock.workspaceRoot = workspace;

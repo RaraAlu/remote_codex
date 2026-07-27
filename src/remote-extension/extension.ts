@@ -163,7 +163,7 @@ function validateWorkspace(request: RemoteExecutorCommandRequest): void {
 
 function executorFor(request: RemoteExecutorCommandRequest): LocalProcessExecutor {
   validateWorkspace(request);
-  const key = `${request.hostId}\0${request.workspaceRoot}`;
+  const key = workspaceKey(request);
   const existing = executors.get(key);
   if (existing) {
     return existing;
@@ -188,6 +188,10 @@ function executorFor(request: RemoteExecutorCommandRequest): LocalProcessExecuto
   const executor = new LocalProcessExecutor(config);
   executors.set(key, executor);
   return executor;
+}
+
+function workspaceKey(request: RemoteExecutorCommandRequest): string {
+  return `${request.hostId}\0${request.workspaceRoot}`;
 }
 
 async function dispatch(
@@ -385,6 +389,27 @@ async function executeRequest(
       return {
         ok: true,
         result: operationLedger.status(operationKey(request, idempotencyKey)),
+      };
+    }
+    if (request.operation === "workspaceStop") {
+      validateWorkspace(request);
+      const key = workspaceKey(request);
+      const executor = executors.get(key);
+      executors.delete(key);
+      executor?.close();
+      const [operations, backgroundTasksStopped, stdioSessionsStopped] =
+        await Promise.all([
+          operationLedger.clearPrefix(`${key}\0`),
+          backgroundTasks.stopWorkspace(request.workspaceRoot),
+          stdioSessions.stopWorkspace(request.workspaceRoot),
+        ]);
+      return {
+        ok: true,
+        result: {
+          backgroundTasks: backgroundTasksStopped,
+          operations,
+          stdioSessions: stdioSessionsStopped,
+        },
       };
     }
     const executor = executorFor(request);

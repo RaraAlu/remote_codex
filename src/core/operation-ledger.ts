@@ -162,6 +162,28 @@ export class OperationLedger<T = unknown> {
     return true;
   }
 
+  async clearPrefix(prefix: string): Promise<number> {
+    const matches = [...this.#entries.entries()].filter(([entryId]) =>
+      entryId.startsWith(prefix),
+    );
+    for (const [, entry] of matches) {
+      if (entry.snapshot.status === "running") {
+        entry.controller.abort();
+      }
+    }
+    await Promise.allSettled(matches.map(([, entry]) => entry.result));
+    for (const [entryId, entry] of matches) {
+      for (const operationId of entry.operationIds) {
+        if (this.#operations.get(operationId) === entry) {
+          this.#operations.delete(operationId);
+        }
+      }
+      entry.operationIds.clear();
+      this.#deleteEntry(entryId, entry);
+    }
+    return matches.length;
+  }
+
   close(): void {
     for (const entry of this.#entries.values()) {
       if (entry.snapshot.status === "running") {

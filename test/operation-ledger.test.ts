@@ -115,4 +115,50 @@ describe("OperationLedger", () => {
     await expect(replayed.result).rejects.toMatchObject({ code: "RESULT_UNKNOWN" });
     expect(operation).toHaveBeenCalledTimes(1);
   });
+
+  it("cancels and forgets only entries matching a workspace prefix", async () => {
+    const ledger = new OperationLedger<string>();
+    const running = ledger.start(
+      "host\0workspace-a\0running",
+      "host\0workspace-a\0operation",
+      "running",
+      async (signal) =>
+        await new Promise<string>((_resolve, reject) => {
+          const cancel = (): void =>
+            reject(new BridgeError("CANCELLED", "workspace stopped"));
+          if (signal.aborted) {
+            cancel();
+          } else {
+            signal.addEventListener("abort", cancel, { once: true });
+          }
+        }),
+    );
+    const completed = ledger.start(
+      "host\0workspace-a\0completed",
+      "host\0workspace-a\0completed-operation",
+      "completed",
+      async () => "done",
+    );
+    const unrelated = ledger.start(
+      "host\0workspace-b\0completed",
+      "host\0workspace-b\0completed-operation",
+      "unrelated",
+      async () => "kept",
+    );
+    await completed.result;
+    await unrelated.result;
+
+    await expect(ledger.clearPrefix("host\0workspace-a\0")).resolves.toBe(2);
+    await expect(running.result).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(ledger.status("host\0workspace-a\0running")).toEqual({
+      status: "unknown",
+    });
+    expect(ledger.status("host\0workspace-a\0completed")).toEqual({
+      status: "unknown",
+    });
+    expect(ledger.status("host\0workspace-b\0completed")).toEqual({
+      result: "kept",
+      status: "completed",
+    });
+  });
 });

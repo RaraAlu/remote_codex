@@ -519,7 +519,20 @@ export class BridgeController implements vscode.Disposable {
   async stop(): Promise<void> {
     this.#autoSuppressed = true;
     await this.#clearWindowSession();
-    this.#executor?.close();
+    const executor = this.#executor;
+    let remoteStop:
+      | Awaited<ReturnType<VsCodeRemoteExecutor["stopWorkspace"]>>
+      | undefined;
+    let remoteStopError: BridgeError | undefined;
+    if (executor instanceof VsCodeRemoteExecutor) {
+      try {
+        remoteStop = await executor.stopWorkspace();
+      } catch (error) {
+        remoteStopError = asBridgeError(error, "RESULT_UNKNOWN");
+        this.#log(`remote workspace stop could not be confirmed: ${remoteStopError.message}`);
+      }
+    }
+    executor?.close();
     this.#executor = null;
     await this.#transport.close();
     this.#remoteIdentity = null;
@@ -528,10 +541,16 @@ export class BridgeController implements vscode.Disposable {
     }
     await this.#audit.write({
       operation: "bridge.stop",
-      outcome: "succeeded",
+      outcome: remoteStopError ? "unknown" : "succeeded",
       hostId: this.#config?.host,
       workspaceRoot: this.#config?.workspaceRoot,
+      details: remoteStopError
+        ? { error: remoteStopError.toPayload() }
+        : { remoteStop: remoteStop ?? null },
     });
+    if (remoteStopError) {
+      throw remoteStopError;
+    }
   }
 
   async showDiagnostics(): Promise<void> {

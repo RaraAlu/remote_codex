@@ -434,6 +434,25 @@ export class RemoteBackgroundTasks {
     return this.#summary(task);
   }
 
+  async stopWorkspace(workspaceRoot: string): Promise<number> {
+    const tasks = [...this.#tasks.entries()].filter(
+      ([, task]) => task.workspaceRoot === workspaceRoot,
+    );
+    for (const [, task] of tasks) {
+      if (task.status === "running") {
+        task.cancellationRequested = true;
+        this.#terminate(task, true);
+      }
+    }
+    await Promise.all(tasks.map(([, task]) => task.settled));
+    for (const [taskKey, task] of tasks) {
+      if (this.#tasks.get(taskKey) === task) {
+        this.#tasks.delete(taskKey);
+      }
+    }
+    return tasks.length;
+  }
+
   close(): void {
     for (const task of this.#tasks.values()) {
       if (task.status === "running") {

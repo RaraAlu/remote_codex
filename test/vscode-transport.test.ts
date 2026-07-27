@@ -69,6 +69,16 @@ describe("VS Code remote transport protocol", () => {
         remoteName: "ssh-remote",
       }),
     ).toBe(false);
+    expect(
+      isRemoteExecutorPing({
+        capabilities: REMOTE_EXECUTOR_CAPABILITIES.filter(
+          (capability) => capability !== "workspaceStop",
+        ),
+        executorVersion: REMOTE_EXECUTOR_VERSION,
+        protocolVersion: 4,
+        remoteName: "ssh-remote",
+      }),
+    ).toBe(false);
     expect(isRemoteExecutorPing(null)).toBe(false);
   });
 
@@ -87,6 +97,24 @@ describe("VS Code remote transport protocol", () => {
         operation: "resultStatus",
         outputCommand: "codexRemoteBridge.transport.output",
         params: { idempotencyKey: "stable-key" },
+        policy: {
+          commandTimeoutMs: 30_000,
+          maxOutputBytes: 64 * 1024,
+        },
+        token: "token",
+        workspaceRoot: "/workspace",
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts authenticated workspace-stop transport requests", () => {
+    expect(
+      isTransportRequest({
+        hostId: "remote-host",
+        id: "stop-1",
+        operation: "workspaceStop",
+        outputCommand: "codexRemoteBridge.transport.output",
+        params: {},
         policy: {
           commandTimeoutMs: 30_000,
           maxOutputBytes: 64 * 1024,

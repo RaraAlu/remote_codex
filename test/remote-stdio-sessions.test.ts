@@ -153,4 +153,60 @@ describe("RemoteStdioSessions", () => {
     }
     child.emit("close", null, "SIGTERM");
   });
+
+  it("stops stdio sessions for one workspace without touching another", async () => {
+    const firstWorkspace = await mkdtemp(join(tmpdir(), "codex-stdio-root-a-"));
+    const secondWorkspace = await mkdtemp(join(tmpdir(), "codex-stdio-root-b-"));
+    temporaryDirectories.push(firstWorkspace, secondWorkspace);
+    const children = [654_321, 654_322].map((pid) =>
+      Object.assign(new EventEmitter(), {
+        pid,
+        stdin: new PassThrough(),
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        kill: vi.fn(() => true),
+      }),
+    );
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let index = 0;
+    const sessions = new RemoteStdioSessions(
+      async () => undefined,
+      () => {
+        const child = children[index++];
+        queueMicrotask(() => child?.emit("spawn"));
+        return child as never;
+      },
+      async () => "/remote/bin/codegraph",
+    );
+
+    await sessions.start({
+      args: ["serve", "--mcp", "--path", firstWorkspace],
+      executable: "codegraph",
+      id: "first-session",
+      maxFrameBytes: 1024,
+      workspaceRoot: firstWorkspace,
+    });
+    await sessions.start({
+      args: ["serve", "--mcp", "--path", secondWorkspace],
+      executable: "codegraph",
+      id: "second-session",
+      maxFrameBytes: 1024,
+      workspaceRoot: secondWorkspace,
+    });
+
+    const stopped = sessions.stopWorkspace(firstWorkspace);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (process.platform === "win32") {
+      expect(children[0]?.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(children[1]?.kill).not.toHaveBeenCalled();
+    } else {
+      expect(processKill).toHaveBeenCalledWith(-654_321, "SIGTERM");
+      expect(processKill).not.toHaveBeenCalledWith(-654_322, "SIGTERM");
+    }
+    children[0]?.emit("close", null, "SIGTERM");
+    await expect(stopped).resolves.toBe(1);
+
+    sessions.stop("second-session");
+    children[1]?.emit("close", null, "SIGTERM");
+  });
 });

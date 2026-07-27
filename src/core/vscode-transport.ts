@@ -4,8 +4,8 @@ import type { OperationSnapshot } from "./operation-ledger.js";
 export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
 export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
-export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 8;
-export const REMOTE_EXECUTOR_VERSION = "0.2.15";
+export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 9;
+export const REMOTE_EXECUTOR_VERSION = "0.2.16";
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
@@ -50,6 +50,7 @@ export const REMOTE_EXECUTOR_CAPABILITIES = [
   "stdioStart",
   "stdioStop",
   "stdioWrite",
+  "workspaceStop",
 ] as const;
 
 export type RemoteExecutorCapability = (typeof REMOTE_EXECUTOR_CAPABILITIES)[number];
@@ -59,6 +60,12 @@ export interface RemoteExecutorPing {
   executorVersion?: string;
   protocolVersion?: number;
   remoteName: "ssh-remote";
+}
+
+export interface RemoteWorkspaceStopResult {
+  backgroundTasks: number;
+  operations: number;
+  stdioSessions: number;
 }
 
 export type RemoteExecutorOperation =
@@ -78,7 +85,8 @@ export type RemoteExecutorOperation =
   | "stdioEnd"
   | "stdioStart"
   | "stdioStop"
-  | "stdioWrite";
+  | "stdioWrite"
+  | "workspaceStop";
 
 export interface RemoteExecutorCommandRequest {
   hostId: string;
@@ -273,6 +281,7 @@ export function isTransportRequest(value: unknown): value is TransportRequest {
       "resultStatus",
       "search",
       "stdioStart",
+      "workspaceStop",
       ...CONTROLLER_WORKSPACE_OPERATIONS,
     ].includes(request.operation) &&
     Boolean(request.params) &&
