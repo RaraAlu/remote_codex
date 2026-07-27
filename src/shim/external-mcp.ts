@@ -7,6 +7,7 @@ import {
   interveneVsCodeConversation,
   listVsCodeConversations,
   readVsCodeConversation,
+  startVsCodeConversation,
 } from "./vscode-conversation-client.js";
 
 function textResult(value: unknown) {
@@ -18,7 +19,7 @@ function textResult(value: unknown) {
 export async function runExternalMcpServer(): Promise<number> {
   const server = new McpServer({
     name: "codex-vscode-remote-bridge",
-    version: "0.3.1",
+    version: "0.3.26",
   });
 
   server.registerTool(
@@ -50,6 +51,34 @@ export async function runExternalMcpServer(): Promise<number> {
     },
     async ({ threadId, limit, sessionPid }) =>
       textResult(await readVsCodeConversation(threadId, limit, sessionPid)),
+  );
+
+  server.registerTool(
+    "vscode_codex_start_conversation",
+    {
+      title: "新建 VS Code Codex 对话",
+      description:
+        "在指定的活动 Bridge 会话中新建 VS Code Codex thread，并以当前 Bridge 完整能力启动首个 turn。用于旧 thread 缺少后续新增工具时。",
+      inputSchema: {
+        permissionMode: z.enum(["on-request", "full-access"]).default("on-request"),
+        sessionPid: z.number().int().positive(),
+        text: z.string().min(1),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    async ({ permissionMode, sessionPid, text }) =>
+      textResult(
+        await startVsCodeConversation({
+          permissionMode,
+          sessionPid,
+          text,
+        }),
+      ),
   );
 
   server.registerTool(

@@ -190,6 +190,16 @@ function sessionSummary(descriptor: ExternalCliSessionDescriptor): Record<string
   };
 }
 
+async function sessionByPid(sessionPid: number): Promise<ExternalCliSessionDescriptor> {
+  const descriptor = (await discoverExternalCliSessions()).find(
+    (candidate) => candidate.pid === sessionPid,
+  );
+  if (!descriptor) {
+    throw new Error(`VS Code Codex Bridge session ${sessionPid} is not active`);
+  }
+  return descriptor;
+}
+
 export async function listVsCodeConversations(limit = 20): Promise<unknown> {
   const sessions = await discoverExternalCliSessions();
   const results = await Promise.all(
@@ -213,6 +223,45 @@ export async function listVsCodeConversations(limit = 20): Promise<unknown> {
     }),
   );
   return { sessions: results };
+}
+
+export async function startVsCodeConversation(options: {
+  permissionMode: "on-request" | "full-access";
+  sessionPid: number;
+  text: string;
+}): Promise<unknown> {
+  const descriptor = await sessionByPid(options.sessionPid);
+  const client = await persistentClient(descriptor);
+  const started = await client.request("thread/start", {
+    ...(options.permissionMode === "full-access"
+      ? {
+          approvalPolicy: "never",
+          permissions: "full-access",
+        }
+      : {}),
+  });
+  if (
+    !isRecord(started) ||
+    !isRecord(started.thread) ||
+    typeof started.thread.id !== "string"
+  ) {
+    throw new Error("VS Code Codex app-server did not return a new thread");
+  }
+  const threadId = started.thread.id;
+  const turn = await client.request("turn/start", {
+    threadId,
+    input: [{ type: "text", text: options.text, text_elements: [] }],
+    clientUserMessageId: randomUUID(),
+    responsesapiClientMetadata: {
+      codex_bridge_origin: "external-cli-mcp",
+    },
+  });
+  return {
+    ...sessionSummary(descriptor),
+    threadId,
+    thread: started.thread,
+    turn,
+  };
 }
 
 async function findConversation(

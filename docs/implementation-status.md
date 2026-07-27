@@ -358,6 +358,16 @@ Executor 升到 `0.2.13`、诊断协议号 8，并新增四项 background 能力
 文件正文。真实 `test_40` / Zklab 双客户端写入、冲突、权限撤销和 Windows 实机仍按
 统一人工清单补测。
 
+`0.3.26` 为历史 thread 缺少后续动态工具的问题提供显式完整能力新对话入口。外部 MCP
+按活动 Bridge `sessionPid` 调用官方 `thread/start`，再在新 thread 启动首 turn，使
+当前工具集合在创建时注入；不修改历史 thread，也不合成 Remote SSH 工作区 URI。
+入口显式区分 `on-request` 与 `full-access`，后者按官方协议设置完整访问和
+`approvalPolicy=never`，项目操作仍经过 Bridge 目标端、路径、哈希、幂等和审计边界。
+官方 app-server 不支持临时 thread 的完整历史读取，因此没有公开无法观察和清理的
+ephemeral 选项。Zklab 单样本已完成新 thread 只读、steer、运行中取消和临时写入清理；
+最终 `0.3.26` 已在 `g1_1` 重载，并完成新 thread、后台任务取消及经 VS Code transport
+路由的 CodeGraph 状态调用；最低量化样本和 Windows 实机仍按统一人工清单补测。
+
 该 TODO 不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；外部 Codex
 CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
@@ -401,6 +411,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-24-release-0.3.22-native-artifact-collection.md`；外部 CLI
 项目写入见
 `docs/acceptance/2026-07-24-release-0.3.23-external-cli-workspace-write.md`。
+完整能力新对话和 Zklab 单样本见
+`docs/acceptance/2026-07-26-release-0.3.26-fresh-conversation.md`。
 
 ## 本地 MCP 边界
 

@@ -8,6 +8,7 @@ import { WebSocketServer } from "ws";
 import {
   closeVsCodeConversationClients,
   interveneVsCodeConversation,
+  startVsCodeConversation,
 } from "../src/shim/vscode-conversation-client.js";
 
 let stateDirectory: string | null = null;
@@ -35,6 +36,85 @@ afterEach(async () => {
 });
 
 describe("VS Code conversation client", () => {
+  it("starts a fresh thread before the first turn so current tools can be injected", async () => {
+    stateDirectory = await mkdtemp(join(tmpdir(), "codex-bridge-conversation-"));
+    process.env.CODEX_BRIDGE_STATE_DIR = stateDirectory;
+    const externalCliDirectory = join(stateDirectory, "external-cli");
+    await mkdir(externalCliDirectory, { recursive: true });
+
+    const threadId = randomUUID();
+    const requestMethods: string[] = [];
+    const requestParams = new Map<string, unknown>();
+    server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    server.on("connection", (socket) => {
+      socket.on("message", (data) => {
+        const message = JSON.parse(data.toString()) as {
+          id?: number;
+          method?: string;
+          params?: unknown;
+        };
+        if (message.id === undefined || !message.method) {
+          return;
+        }
+        requestMethods.push(message.method);
+        requestParams.set(message.method, message.params);
+        const result =
+          message.method === "thread/start"
+            ? { thread: { id: threadId, status: { type: "idle" } } }
+            : message.method === "turn/start"
+              ? { turn: { id: "turn-fresh", status: "inProgress" } }
+              : {};
+        socket.send(JSON.stringify({ id: message.id, result }));
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server?.once("listening", resolve);
+      server?.once("error", reject);
+    });
+
+    const address = server.address() as AddressInfo;
+    const tokenPath = join(externalCliDirectory, `${process.pid}.token`);
+    await writeFile(tokenPath, "test-token", { mode: 0o600 });
+    await writeFile(
+      join(externalCliDirectory, `${process.pid}.json`),
+      JSON.stringify({
+        version: 1,
+        endpoint: `ws://127.0.0.1:${address.port}`,
+        host: "remote-host",
+        pid: process.pid,
+        startedAtMs: Date.now(),
+        tokenEnv: "CODEX_BRIDGE_EXTERNAL_SESSION_TOKEN",
+        tokenPath,
+        workspaceRoot: "/remote/workspace",
+      }),
+    );
+
+    await expect(
+      startVsCodeConversation({
+        permissionMode: "full-access",
+        sessionPid: process.pid,
+        text: "inspect the remote project",
+      }),
+    ).resolves.toMatchObject({
+      sessionPid: process.pid,
+      threadId,
+      thread: { id: threadId },
+      turn: { turn: { id: "turn-fresh" } },
+    });
+    expect(requestMethods).toEqual(["initialize", "thread/start", "turn/start"]);
+    expect(requestParams.get("thread/start")).toEqual({
+      approvalPolicy: "never",
+      permissions: "full-access",
+    });
+    expect(requestParams.get("turn/start")).toMatchObject({
+      threadId,
+      input: [{ type: "text", text: "inspect the remote project" }],
+      responsesapiClientMetadata: {
+        codex_bridge_origin: "external-cli-mcp",
+      },
+    });
+  });
+
   it("resumes a historical thread before starting a new turn", async () => {
     stateDirectory = await mkdtemp(join(tmpdir(), "codex-bridge-conversation-"));
     process.env.CODEX_BRIDGE_STATE_DIR = stateDirectory;

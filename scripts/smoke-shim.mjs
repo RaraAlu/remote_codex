@@ -336,6 +336,7 @@ async function assertExternalMcpTools(shim, environment) {
     "vscode_codex_intervene",
     "vscode_codex_list_conversations",
     "vscode_codex_read_conversation",
+    "vscode_codex_start_conversation",
   ];
   if (JSON.stringify(names) !== JSON.stringify(expected)) {
     throw new Error(`External MCP tool list is incomplete: ${JSON.stringify(names)}`);
