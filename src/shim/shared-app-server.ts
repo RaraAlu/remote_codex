@@ -12,6 +12,7 @@ import type { Readable, Writable } from "node:stream";
 import WebSocket, { WebSocketServer, type RawData } from "ws";
 import { AuditLog } from "../core/audit-log.js";
 import { chmodIfSupported } from "../core/file-permissions.js";
+import { loadLocalWorkspaceContext } from "../core/local-workspace-context.js";
 import {
   bridgeExternalCliDir,
   bridgeExternalCliSessionPath,
@@ -92,6 +93,8 @@ export interface SharedAppServerOptions {
   codexExecutable: string;
   config: BridgeConfig | null;
   controlDir: string;
+  localWorkspaceContextPath?: string;
+  localWorkspaceRoot?: string;
   input?: Readable;
   output?: Writable;
   errorOutput?: Writable;
@@ -230,7 +233,10 @@ export class SharedAppServer {
     this.#options = options;
     this.#audit = new AuditLog(options.auditPath);
     this.#activeWorkspaceRoot =
-      options.config?.workspaceRoot ?? options.appServerCwd ?? process.cwd();
+      options.config?.workspaceRoot ??
+      options.localWorkspaceRoot ??
+      options.appServerCwd ??
+      process.cwd();
   }
 
   async run(): Promise<number> {
@@ -721,6 +727,23 @@ export class SharedAppServer {
       turnClients: this.#turnClients,
       observeApprovalPolicy,
       rewriteClientMessages: this.#options.config !== null,
+      threadListCwd:
+        clientIdentity.clientSource === "vscode"
+          ? this.#options.localWorkspaceRoot
+          : undefined,
+      threadListCwdProvider:
+        clientIdentity.clientSource === "vscode" &&
+        this.#options.localWorkspaceContextPath
+          ? async () => {
+              const workspaceRoot = await loadLocalWorkspaceContext(
+                this.#options.localWorkspaceContextPath!,
+              );
+              if (workspaceRoot) {
+                this.#setActiveWorkspaceRoot(workspaceRoot);
+              }
+              return workspaceRoot;
+            }
+          : undefined,
       spawnSsh: this.#options.spawnSsh,
     });
   }

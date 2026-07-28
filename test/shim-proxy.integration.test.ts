@@ -202,6 +202,50 @@ async function exerciseRemoteExecApproval(
 }
 
 describe("ShimProxy JSONL integration", () => {
+  it("scopes only the VS Code local task list to the open workspace", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-bridge-local-thread-list-"));
+    const vscodeMessages: Array<Record<string, unknown>> = [];
+    const externalMessages: Array<Record<string, unknown>> = [];
+    const common = {
+      appServerArgs: ["app-server", "--stdio"],
+      auditPath: join(directory, "audit.jsonl"),
+      codexExecutable: "fake-codex",
+      config: null,
+      controlDir: join(directory, "control"),
+      rewriteClientMessages: false,
+    };
+    const vscodeProxy = new ShimProxy({
+      ...common,
+      clientIdentity: { clientId: "stdio", clientSource: "vscode" },
+      threadListCwdProvider: async () => "/home/zkbot/work/train/MimicLite",
+    });
+    const externalProxy = new ShimProxy({
+      ...common,
+      clientIdentity: { clientId: "external", clientSource: "external-cli" },
+    });
+
+    const request = {
+      id: 1,
+      method: "thread/list",
+      params: { cwd: null, limit: 50 },
+    } as const;
+    await vscodeProxy.handleClientMessage(
+      request,
+      (message) => vscodeMessages.push(message as Record<string, unknown>),
+      () => undefined,
+    );
+    await externalProxy.handleClientMessage(
+      request,
+      (message) => externalMessages.push(message as Record<string, unknown>),
+      () => undefined,
+    );
+
+    expect(vscodeMessages[0]).toMatchObject({
+      params: { cwd: "/home/zkbot/work/train/MimicLite", limit: 50 },
+    });
+    expect(externalMessages[0]).toEqual(request);
+  });
+
   it("rejects local Core approval requests without showing them to the client", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-local-approval-"));
     const auditPath = join(directory, "audit.jsonl");

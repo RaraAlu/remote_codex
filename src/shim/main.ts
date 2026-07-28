@@ -7,6 +7,10 @@ import { loadOfficialCodexRuntime } from "../core/codex-runtime-store.js";
 import { BridgeError } from "../core/errors.js";
 import { chmodIfSupported } from "../core/file-permissions.js";
 import {
+  localWorkspaceContextPath,
+  takeLocalWorkspaceRoot,
+} from "../core/local-workspace-context.js";
+import {
   activeBridgeConfigPath,
   bridgeAuditPath,
   bridgeControlDir,
@@ -213,6 +217,11 @@ async function main(): Promise<number> {
     await waitForSessionConfig(configPath);
   }
   const config = configPath ? await loadOptionalConfig(configPath, audit) : null;
+  const inheritedLocalWorkspaceRoot = takeLocalWorkspaceRoot();
+  const localWorkspaceRoot = config ? undefined : (inheritedLocalWorkspaceRoot ?? undefined);
+  const localWorkspaceContextFile = config
+    ? undefined
+    : localWorkspaceContextPath(process.ppid);
   const codexExecutable = fallbackExecutable;
   assertExecutableIsNotShim(codexExecutable);
 
@@ -296,6 +305,8 @@ async function main(): Promise<number> {
     codexExecutable,
     config,
     controlDir,
+    localWorkspaceContextPath: localWorkspaceContextFile,
+    localWorkspaceRoot,
   });
   return await proxy.run();
 }

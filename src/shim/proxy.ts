@@ -39,7 +39,10 @@ import {
   type RpcRequest,
   type RpcResponse,
 } from "./rpc.js";
-import { rewriteClientMessage } from "./rewrite.js";
+import {
+  rewriteClientMessage,
+  scopeThreadListToWorkspace,
+} from "./rewrite.js";
 import { projectServerMessage } from "./native-tool-presentation.js";
 
 export const KNOWN_SERVER_REQUESTS = new Set([
@@ -72,6 +75,8 @@ export interface ShimProxyOptions {
   turnClients?: RemoteTurnClientTracker;
   observeApprovalPolicy?: boolean;
   rewriteClientMessages?: boolean;
+  threadListCwd?: string;
+  threadListCwdProvider?: () => Promise<string | null | undefined>;
   spawnCodex?: (
     command: string,
     args: readonly string[],
@@ -673,11 +678,19 @@ export class ShimProxy {
         return;
       }
     }
+    const threadListCwd =
+      isRpcRequest(message) &&
+      message.method === "thread/list" &&
+      this.#options.threadListCwdProvider
+        ? ((await this.#options.threadListCwdProvider()) ??
+          this.#options.threadListCwd)
+        : this.#options.threadListCwd;
+    const scoped = scopeThreadListToWorkspace(message, threadListCwd);
     const rewritten =
       this.#options.rewriteClientMessages === false
-        ? message
+        ? scoped
         : rewriteClientMessage(
-            message,
+            scoped,
             this.#options.config,
             this.#options.controlDir,
             editorContext,

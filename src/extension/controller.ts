@@ -10,6 +10,12 @@ import { defaultRemotePrimaryRoot, parseBridgeConfig } from "../core/config.js";
 import { loadBridgeConfig, saveBridgeConfig } from "../core/config-store.js";
 import { asBridgeError, BridgeError } from "../core/errors.js";
 import {
+  clearLocalWorkspaceContext,
+  localWorkspaceContextPath,
+  publishLocalWorkspaceRoot,
+  saveLocalWorkspaceContext,
+} from "../core/local-workspace-context.js";
+import {
   bridgeAuditPath,
   bridgeConfigPath,
   bridgeControlDir,
@@ -151,6 +157,7 @@ export class BridgeController implements vscode.Disposable {
   readonly #state = new BridgeStateMachine();
   readonly #status: vscode.StatusBarItem;
   readonly #sessionConfigPath: string | null;
+  readonly #localWorkspaceContextPath = localWorkspaceContextPath(process.pid);
   readonly #transport: VsCodeTransportServer;
   readonly #workspaceResources: WorkspaceResourceController;
   #config: BridgeConfig | null = null;
@@ -163,6 +170,11 @@ export class BridgeController implements vscode.Disposable {
 
   constructor(context: vscode.ExtensionContext) {
     this.#context = context;
+    publishLocalWorkspaceRoot(
+      process.env,
+      vscode.env.remoteName,
+      vscode.workspace.workspaceFolders,
+    );
     this.#sessionConfigPath =
       vscode.env.remoteName === "ssh-remote" ? bridgeSessionConfigPath(process.pid) : null;
     if (this.#sessionConfigPath) {
@@ -247,6 +259,12 @@ export class BridgeController implements vscode.Disposable {
   }
 
   async initialize(): Promise<void> {
+    const localWorkspaceRoot = publishLocalWorkspaceRoot(
+      process.env,
+      vscode.env.remoteName,
+      vscode.workspace.workspaceFolders,
+    );
+    await saveLocalWorkspaceContext(this.#localWorkspaceContextPath, localWorkspaceRoot);
     if (this.#initialization) {
       return await this.#initialization;
     }
@@ -726,6 +744,7 @@ export class BridgeController implements vscode.Disposable {
     try {
       await Promise.allSettled([
         this.#clearWindowSession(),
+        clearLocalWorkspaceContext(this.#localWorkspaceContextPath),
         this.#transport.close(),
       ]);
     } finally {

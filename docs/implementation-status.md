@@ -44,6 +44,13 @@ Bridge 对规范化远端根进入
 一致的活动 thread；没有目录匹配时透传官方 CLI，不再因其他 VS Code 工作区存在多个
 活动 thread 而误报歧义；只有同一目录存在多个匹配 thread 时才要求
 `codex-vscode --session-pid`。Executor 与远端协议未变。
+`0.3.44` 继续修正普通本地窗口的任务历史隔离：Controller 从 VS Code API 获取当前
+唯一 `file:` 工作区根，并以 Extension Host PID 为窗口身份保存最小上下文；Shim 在
+每次官方 VS Code 客户端发起本地 `thread/list` 时动态读取，再写入协议原生精确 `cwd`
+过滤。子进程环境仍作为无竞态时的快速路径并由 Shim 消费后清除。外部 CLI/MCP 保持
+全局查询能力，Remote SSH 继续使用 Bridge thread/远端根语义，不把本地控制目录伪装成
+远端工作区 URI。首次仅依赖环境继承的候选已在真实本地窗口复现激活顺序竞态，最终
+PID 上下文方案重载后由用户确认任务列表不再混入其他工作区。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

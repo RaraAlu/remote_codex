@@ -266,3 +266,24 @@ export function rewriteClientMessage(
 
   return message;
 }
+
+export function scopeThreadListToWorkspace(
+  message: RpcMessage,
+  workspaceRoot: string | undefined,
+): RpcMessage {
+  if (
+    !workspaceRoot ||
+    !("method" in message) ||
+    message.method !== "thread/list" ||
+    !isRecord(message.params)
+  ) {
+    return message;
+  }
+  return {
+    ...message,
+    params: {
+      ...message.params,
+      cwd: workspaceRoot,
+    },
+  };
+}

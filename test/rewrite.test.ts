@@ -4,7 +4,10 @@ import { parseBridgeConfig } from "../src/core/config.js";
 import { REMOTE_DYNAMIC_TOOLS } from "../src/shim/dynamic-tools.js";
 import { REMOTE_PERMISSION_PROFILE_ID } from "../src/shim/local-core-policy.js";
 import { isUnknownServerRequest } from "../src/shim/proxy.js";
-import { rewriteClientMessage } from "../src/shim/rewrite.js";
+import {
+  rewriteClientMessage,
+  scopeThreadListToWorkspace,
+} from "../src/shim/rewrite.js";
 
 const config = parseBridgeConfig({
   version: 2,
@@ -28,6 +31,33 @@ const config = parseBridgeConfig({
 });
 
 describe("app-server request rewriting", () => {
+  it("scopes the official local task list to the open workspace", () => {
+    const message = {
+      id: 0,
+      method: "thread/list",
+      params: {
+        archived: false,
+        cwd: null,
+        limit: 50,
+        sortKey: "updated_at",
+      },
+    };
+
+    expect(
+      scopeThreadListToWorkspace(
+        message,
+        "/home/zkbot/work/train/MimicLite",
+      ),
+    ).toEqual({
+      ...message,
+      params: {
+        ...message.params,
+        cwd: "/home/zkbot/work/train/MimicLite",
+      },
+    });
+    expect(scopeThreadListToWorkspace(message, undefined)).toBe(message);
+  });
+
   it("opts into the generated experimental protocol without dropping capabilities", () => {
     const rewritten = rewriteClientMessage(
       {
