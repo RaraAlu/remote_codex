@@ -140,4 +140,6 @@ transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
 失联响应、精确 stdin 长度和死亡拥有者写入清理实机见
 `docs/acceptance/2026-07-27-release-0.3.37-executor-loss-response.md`。中断工具即时
 终态和外部会话跨轮有界保留实机见
-`docs/acceptance/2026-07-27-release-0.3.39-interrupted-history.md`。
+`docs/acceptance/2026-07-27-release-0.3.39-interrupted-history.md`。当前官方面板
+直接新建和恢复任务各 3/3 的 Linux Remote SSH 证据见
+`docs/acceptance/2026-07-27-release-0.3.39-official-task-samples.md`。

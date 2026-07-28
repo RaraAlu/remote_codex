@@ -45,9 +45,11 @@ Remote SSH URI 的能力缺口、自动远端 IDE 选区/完整文件、本地�
 `docs/acceptance/2026-07-26-release-0.3.34-transport-close.md` 记录活动 transport
 socket 关闭挂起修复、写入失败完整性和固定探针；
 `docs/acceptance/2026-07-27-release-0.3.37-executor-loss-response.md` 记录
-Executor 独立失联响应修复和精确候选复测。
-下面只表示对应子链已有一次成功证据；因平台、方向、故障矩阵或最低样本数不足，
-M01-M14 的总体状态仍全部是 `待补测`。
+Executor 独立失联响应修复和精确候选复测；
+`docs/acceptance/2026-07-27-release-0.3.39-official-task-samples.md` 记录精确
+`0.3.39` 官方面板直接新建和恢复各 3/3 的任务、路由和日志证据。
+下面按当前 Linux 子链分别记录已完成证据和剩余门禁；Windows x64、未选择的 OpenSSH
+回退及未执行的故障矩阵继续保持 `待补测`，不得由已完成的 Linux 子链推断。
 
 - M01：精确 `0.3.37` Linux VSIX 已安装、重载并恢复 `ready`，活动 Shim 来自
   `0.3.37-efb8ea7d5b649882`，Executor 已按实际能力升级为 `0.2.19`；
@@ -68,8 +70,8 @@ M01-M14 的总体状态仍全部是 `待补测`。
   重载并以 4,354 ms、3,999 ms、3,871 ms 恢复 `ready`，当前热启动 3/3，
   P50 为 3,999 ms。`0.3.32`
   最终精确产物的官方 UI
-  直接新建 1 次为 84 ms 创建、5,984 ms 完成，自动选区正确。当前候选冷/热启动和
-  注入新建/恢复最低样本已经完成；官方面板直接新建和恢复仍在 L03-L07 采集。
+  直接新建 1 次为 84 ms 创建、5,984 ms 完成，自动选区正确。当前候选冷/热启动、
+  注入新建/恢复和精确 `0.3.39` 官方面板直接新建/恢复最低样本均已完成。
 - M02：`0.3.30` 实机注入的 `fs/readFile`、`command/exec`、`thread/shellCommand`
   和未知 `fs/` 风险方法均返回 `-32003` 并进入失败审计；成功本地项目操作为 0。
   `0.3.32` 已绕过官方附件只接受 `file:` URI 的限制，每轮自动采集真实远端选区或
@@ -148,9 +150,9 @@ M01-M14 的总体状态仍全部是 `待补测`。
 - Linux Controller 已安装并重载为 `0.3.39` 候选，Executor 保持 `0.2.19`；
   中断工具即时终态和跨 turn 有界历史恢复均已完成实机复核，
   `0.3.37` 的精确安装、重载、能力升级和独立失联写入已经闭环。L02、自动 IDE
-  背景、外部 `full-access` 和 transport socket 关闭挂起修复均已闭环。`0.3.30`
-  至 `0.3.37` 的启动、注入和官方任务保留为历史证据；剩余官方 UI 样本将在后续
-  人工批次中采集。
+  背景、外部 `full-access` 和 transport socket 关闭挂起修复均已闭环。精确
+  `0.3.39` 官方 UI 直接新建和恢复也已各完成 3/3，失败数和
+  `Unknown local project` 均为 0。
 
 ## 当前 Linux 剩余人工批次
 
@@ -173,6 +175,13 @@ M01-M14 的总体状态仍全部是 `待补测`。
   6 次审计均为 `clientSource=external-mcp`、`target=remote`、
   `rootId=remote-primary`，远端根和 `remoteCwd` 都是
   `/home/unitree/mimiclite-sim2real`。
+- 当前证据：精确 `0.3.39` 官方面板直接新建和恢复各完成 3/3。新建 conversation
+  创建耗时为 1,581 ms、1,678 ms、83 ms，P50 为 1,581 ms、最大值为
+  1,678 ms；新建 turn 为 18,782 ms、10,747 ms、13,312 ms，P50 为
+  13,312 ms、最大值为 18,782 ms；恢复 turn 为 8,611 ms、8,681 ms、
+  15,053 ms，P50 为 8,681 ms、最大值为 15,053 ms。6 次任务均进入当前 Shim，
+  `clientSource=vscode`、`target=remote`、`rootId=remote-primary` 和规范远端根
+  正确，失败数和 `Unknown local project` 均为 0。
 - 历史证据：`0.3.31` 候选热启动 3/3，P50 为 3,619 ms、最大值为 3,927 ms、
   失败数为 0；三次分别来自安装、首次授权和重新授权后的窗口重载。
 - 历史证据：`0.3.34` 精确产物热启动 1 次为 3,812 ms，Remote SSH Shim 来自该安装
@@ -180,9 +189,9 @@ M01-M14 的总体状态仍全部是 `待补测`。
   conversation、5,984 ms 完成，自动选区正确且没有 `Unknown local project`。
 - 历史证据：`0.3.30` 完成冷启动 2 次、官方 Codex 面板直接新建任务 3/3 和恢复原
   thread 3/3，且没有 `Unknown local project`；不复制为 `0.3.31` 当前值。
-- 待补测：在 L03/L04 的官方 UI 矩阵中补齐最终精确产物的直接新建和恢复样本，并
-  确认 `Unknown local project=0`。注入样本不能替代该 UI 门禁；完成前 L01 总体保持
-  `待补测`。
+- 已完成：最终精确实现的官方 UI 直接新建和恢复最低样本、远端路由及
+  `Unknown local project=0` 均已闭环。证据见
+  `docs/acceptance/2026-07-27-release-0.3.39-official-task-samples.md`。
 
 ### L02 本地次级根授权
 
@@ -202,7 +211,7 @@ M01-M14 的总体状态仍全部是 `待补测`。
   直接新建任务在无附件、无 Bridge 命令时准确得到 `g1_1` 相对路径、真实 URI、选区
   范围和正文，审计正文命中为 0。
 - 已完成：远端窗口显示授权本地次级根虚拟资源时，下一轮不注入该本地文件；编辑器
-  正文不进入审计。当前候选官方恢复及最低样本仍待补。
+  正文不进入审计。当前候选官方恢复最低样本也已在 L01 闭环。
 - 已完成：同名 Bridge 工具诱饵默认读取、搜索、补丁恢复和 `pwd` 全部落到
   `remote-primary`；9 个远端项目操作成功、本地项目操作为 0，远端文件恢复初始哈希。
   精确 `0.3.33` 随后在真实模型 task 中实际发起 5 次 Core 本地读取、Git 和写入

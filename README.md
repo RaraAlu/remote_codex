@@ -158,8 +158,11 @@ Remote Executor 为 `0.2.19`，诊断协议为 11。
   19,934 ms、7,571 ms、8,734 ms，P50 为 8,734 ms；恢复样本为 9,415 ms、
   7,793 ms、6,147 ms，P50 为 7,793 ms。6 次操作均进入当前 Shim，并由审计确认
   `target=remote`、`rootId=remote-primary`、规范远端根正确且失败数为 0。
-- [ ] 当前最终候选官方面板直接新建达到 3/3、恢复达到 3/3；`0.3.37` 当前均为
-  0/3。该 UI 门禁需单独确认 `Unknown local project=0`，不得由注入结果替代。
+- [x] 精确 `0.3.39` 官方面板直接新建和恢复各达到 3/3，均进入当前 Shim；新建
+  conversation 创建耗时 P50 为 1,581 ms、最大值为 1,678 ms，新建 turn 耗时
+  P50 为 13,312 ms、最大值为 18,782 ms；恢复 turn 耗时 P50 为 8,681 ms、
+  最大值为 15,053 ms。6 次远端调用均为 `clientSource=vscode`，规范远端根正确，
+  失败数和 `Unknown local project` 均为 0。
 
 ### L02-L03 根、上下文与 Core 诱饵
 
@@ -551,8 +554,10 @@ npm run protocol:generate
 指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
 当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
 当前已验证 Linux 功能候选为
-`docs/acceptance/2026-07-27-release-0.3.39-interrupted-history.md`。在上述 `0.4.0`
-Linux 台阶门禁完成前，它只代表已记录的限定能力，不构成最终发布声明。
+`docs/acceptance/2026-07-27-release-0.3.39-interrupted-history.md`，官方 UI 直接新建和
+恢复任务的最低样本见
+`docs/acceptance/2026-07-27-release-0.3.39-official-task-samples.md`。在上述 `0.4.0`
+Linux 台阶门禁完成前，这些记录只代表已验证的限定能力，不构成最终发布声明。
 
 Windows x64 和 Linux x64 必须分别填写运行结果。`npm run package:all` 只会收集并
 验证两个原生 stage，不会生成异平台启动器；该结果能证明两个目标 VSIX 已完成版本、
