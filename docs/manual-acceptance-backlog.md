@@ -49,7 +49,9 @@ Executor 独立失联响应修复和精确候选复测；
 `docs/acceptance/2026-07-27-release-0.3.39-official-task-samples.md` 记录精确
 `0.3.39` 官方面板直接新建和恢复各 3/3 的任务、路由和日志证据；
 `docs/acceptance/2026-07-27-release-0.3.42-permission-mode-presentation.md` 记录
-官方权限选择器与内部本地拒绝档案的隔离修复及连续切换实机结果。
+官方权限选择器与内部本地拒绝档案的隔离修复及连续切换实机结果；
+`docs/acceptance/2026-07-27-release-0.3.43-plain-cli-workspace-selection.md` 记录普通
+`codex` 跨工作区误判修复、已安装 Shim 故障条件注入和本地真实 TUI 结果。
 下面按 Linux 子链保留已完成证据和关闭决定；Windows x64 继续保持未验证，未选择的
 OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过。
 
@@ -135,8 +137,10 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
   Token 正常连接。`0.3.29` 已复现 CLI 断开后 turn 永久 `inProgress`，`0.3.30`
   两次实机样本均自动变为 `interrupted`，中断确认 1/1；其中 120 秒远端标记进程在
   断开后立即为 0。当前版本的 CLI steer 保持同一 turn ID，35 条通知转发到 VS Code，
-  精确重复帧为 0；`codex-vscode` 真实 TUI 恢复和退出通过。普通 `codex` 在两个活动
-  会话下按预期拒绝猜测目标。官方 UI 反向操作、单会话自动附着和权限撤销仍待补。
+  精确重复帧为 0；`codex-vscode` 真实 TUI 恢复和退出通过。原先普通 `codex` 会把
+  其他工作区的多个活动会话误判为当前目录歧义；`0.3.43` 已改为无目录匹配时透传官方
+  CLI，并用已安装 Shim 注入两个存活的其他工作区 thread 复核。官方 UI 反向操作、
+  单会话同目录自动附着和权限撤销仍维持此前关闭决定。
 - M11：活动 Token 对审计、Code 日志、Git 跟踪文件和本地进程参数的精确泄漏扫描为
   0，私钥/Bearer/`sk-` 形式命中为 0；远端 Codex/app-server 和测试探针进程均为 0，
   成功本地项目操作为 0。`0.3.26 -> 0.3.28` 迁移中 Executor 按能力自动升级到
@@ -149,7 +153,8 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
   中断、运行中远端进程归零且无命令重放；3 个活动令牌样本对审计、588 个 Code
   日志、212 个 Git 文件、701 个进程参数和 MCP 配置的命中均为 0，远端测试路径、
   Codex/app-server、标记进程和敏感环境键也均为 0。Remote SSH 窗口关闭仍待补。
-- Linux Controller 已安装并重载为 `0.3.42` 候选，Executor 保持 `0.2.19`；
+- Linux 本地 Controller 已安装并重载为 `0.3.43` 候选，最新 Remote SSH 实机仍为
+  `0.3.42`，Executor 保持 `0.2.19`；
   中断工具即时终态和跨 turn 有界历史恢复均已完成实机复核，
   `0.3.37` 的精确安装、重载、能力升级和独立失联写入已经闭环。L02、自动 IDE
   背景、外部 `full-access` 和 transport socket 关闭挂起修复均已闭环。精确

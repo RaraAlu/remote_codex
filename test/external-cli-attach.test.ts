@@ -65,7 +65,7 @@ async function prepareState(): Promise<{
 }
 
 describe("bidirectional external CLI attach", () => {
-  it("prefers the active thread for the current workspace and avoids ambiguity", () => {
+  it("automatically selects only an active thread for the current workspace", () => {
     const first = {
       version: 1 as const,
       endpoint: "ws://127.0.0.1:4567",
@@ -89,12 +89,37 @@ describe("bidirectional external CLI attach", () => {
     expect(
       selectAutomaticExternalCliSession([first, second], "/workspace/second"),
     ).toBe(second);
-    expect(() =>
-      selectAutomaticExternalCliSession([first, second], "/workspace/unknown"),
-    ).toThrow(/codex-vscode --session-pid/);
     expect(
       selectAutomaticExternalCliSession([first], "/workspace/unknown"),
-    ).toBe(first);
+    ).toBeNull();
+    expect(
+      selectAutomaticExternalCliSession([first, second], "/workspace/unknown"),
+    ).toBeNull();
+  });
+
+  it("requires an explicit session when the current workspace has multiple active threads", () => {
+    const first = {
+      version: 1 as const,
+      endpoint: "ws://127.0.0.1:4567",
+      host: "local",
+      pid: 100,
+      startedAtMs: 2,
+      tokenEnv: "CODEX_BRIDGE_EXTERNAL_SESSION_TOKEN",
+      tokenPath: "/state/100.token",
+      workspaceRoot: "/workspace/shared",
+      threadId: "thread-first",
+    };
+    const second = {
+      ...first,
+      pid: 101,
+      startedAtMs: 1,
+      tokenPath: "/state/101.token",
+      threadId: "thread-second",
+    };
+
+    expect(() =>
+      selectAutomaticExternalCliSession([first, second], "/workspace/shared"),
+    ).toThrow(/codex-vscode --session-pid/);
   });
 
   it("passes the capability token only through the remote Codex child environment", async () => {

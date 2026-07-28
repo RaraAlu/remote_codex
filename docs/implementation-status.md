@@ -40,6 +40,10 @@
 两个窗口均使用官方插件内置 Codex，活动 Remote SSH 窗口使用精确 `0.3.37` Shim，
 Bridge 对规范化远端根进入
 `ready`。
+`0.3.43` 修正普通无参数 `codex` 的自动会话选择：自动入口只考虑与当前工作目录完全
+一致的活动 thread；没有目录匹配时透传官方 CLI，不再因其他 VS Code 工作区存在多个
+活动 thread 而误报歧义；只有同一目录存在多个匹配 thread 时才要求
+`codex-vscode --session-pid`。Executor 与远端协议未变。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

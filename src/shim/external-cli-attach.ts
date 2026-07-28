@@ -105,13 +105,13 @@ export function selectAutomaticExternalCliSession(
   if (matchingWorkspace.length === 1) {
     return matchingWorkspace[0]!;
   }
-  if (matchingWorkspace.length > 1 || eligible.length > 1) {
+  if (matchingWorkspace.length > 1) {
     throw new BridgeError(
       "INVALID_CONFIG",
       "More than one active VS Code Codex thread matches the plain Codex launcher; use codex-vscode --session-pid <pid>",
     );
   }
-  return eligible[0] ?? null;
+  return null;
 }
 
 export async function automaticExternalCliAttachOptions(
