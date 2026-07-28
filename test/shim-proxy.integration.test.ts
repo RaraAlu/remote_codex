@@ -6,7 +6,10 @@ import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
 import type { SpawnProcess } from "../src/core/ssh-executor.js";
-import { BLOCKED_LOCAL_CLIENT_METHODS } from "../src/shim/local-core-policy.js";
+import {
+  BLOCKED_LOCAL_CLIENT_METHODS,
+  REMOTE_PERMISSION_PROFILE_ID,
+} from "../src/shim/local-core-policy.js";
 import { ShimProxy } from "../src/shim/proxy.js";
 import { isRecord } from "../src/shim/rpc.js";
 
@@ -427,6 +430,148 @@ describe("ShimProxy JSONL integration", () => {
       runtimeWorkspaceRoots: [join(directory, "control")],
       sandbox: "read-only",
     });
+  });
+
+  it("keeps the local Core policy hidden behind official permission modes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-bridge-permissions-"));
+    const proxy = new ShimProxy({
+      appServerArgs: ["app-server", "--stdio"],
+      auditPath: join(directory, "audit.jsonl"),
+      codexExecutable: "fake-codex",
+      config: parseBridgeConfig({
+        host: "training-gpu",
+        workspaceRoot: "/remote/workspace",
+      }),
+      controlDir: join(directory, "control"),
+    });
+    const serverMessages: Array<Record<string, unknown>> = [];
+    const clientMessages: Array<Record<string, unknown>> = [];
+    try {
+      await proxy.handleClientMessage(
+        {
+          id: 10,
+          method: "thread/start",
+          params: {
+            approvalPolicy: "on-request",
+            sandbox: "workspace-write",
+          },
+        },
+        (message) => serverMessages.push(message as Record<string, unknown>),
+        () => undefined,
+      );
+      expect(serverMessages[0]).toMatchObject({
+        params: {
+          approvalPolicy: "never",
+          permissions: REMOTE_PERMISSION_PROFILE_ID,
+        },
+      });
+
+      await proxy.handleServerMessage(
+        {
+          id: 10,
+          result: {
+            thread: { id: "thread-permissions" },
+            approvalPolicy: "never",
+            sandbox: { type: "readOnly", networkAccess: false },
+            activePermissionProfile: {
+              id: REMOTE_PERMISSION_PROFILE_ID,
+              extends: null,
+            },
+          },
+        },
+        () => undefined,
+        (message) => clientMessages.push(message as Record<string, unknown>),
+      );
+      expect(clientMessages[0]).toMatchObject({
+        result: {
+          approvalPolicy: "on-request",
+          sandbox: {
+            type: "workspaceWrite",
+            writableRoots: [],
+            networkAccess: false,
+          },
+          activePermissionProfile: {
+            id: ":workspace",
+            extends: null,
+          },
+        },
+      });
+
+      await proxy.handleServerMessage(
+        {
+          id: 11,
+          result: {
+            config: {
+              default_permissions: REMOTE_PERMISSION_PROFILE_ID,
+              permissions: {
+                [REMOTE_PERMISSION_PROFILE_ID]: {
+                  filesystem: { ":root": "deny" },
+                },
+              },
+            },
+            origins: {
+              default_permissions: { name: { type: "sessionFlags" } },
+              permissions: {
+                [REMOTE_PERMISSION_PROFILE_ID]: {
+                  filesystem: {
+                    ":root": { name: { type: "sessionFlags" } },
+                  },
+                },
+              },
+            },
+          },
+        },
+        () => undefined,
+        (message) => clientMessages.push(message as Record<string, unknown>),
+      );
+      expect(clientMessages[1]).toEqual({
+        id: 11,
+        result: {
+          config: {
+            default_permissions: null,
+            permissions: null,
+          },
+          origins: {},
+        },
+      });
+
+      await proxy.handleClientMessage(
+        {
+          id: 12,
+          method: "permissionProfile/list",
+          params: { cwd: null },
+        },
+        (message) => serverMessages.push(message as Record<string, unknown>),
+        () => undefined,
+      );
+      await proxy.handleServerMessage(
+        {
+          id: 12,
+          result: {
+            data: [
+              { id: ":workspace", description: null, allowed: true },
+              {
+                id: REMOTE_PERMISSION_PROFILE_ID,
+                description: "Codex Remote Bridge local-deny policy",
+                allowed: true,
+              },
+            ],
+            nextCursor: null,
+          },
+        },
+        () => undefined,
+        (message) => clientMessages.push(message as Record<string, unknown>),
+      );
+      expect(clientMessages[2]).toEqual({
+        id: 12,
+        result: {
+          data: [{ id: ":workspace", description: null, allowed: true }],
+          nextCursor: null,
+        },
+      });
+    } finally {
+      proxy.closeSession();
+    }
   });
 
   it("requires native approval, streams output, and projects remote execution", async () => {

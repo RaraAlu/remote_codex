@@ -47,7 +47,9 @@ socket 关闭挂起修复、写入失败完整性和固定探针；
 `docs/acceptance/2026-07-27-release-0.3.37-executor-loss-response.md` 记录
 Executor 独立失联响应修复和精确候选复测；
 `docs/acceptance/2026-07-27-release-0.3.39-official-task-samples.md` 记录精确
-`0.3.39` 官方面板直接新建和恢复各 3/3 的任务、路由和日志证据。
+`0.3.39` 官方面板直接新建和恢复各 3/3 的任务、路由和日志证据；
+`docs/acceptance/2026-07-27-release-0.3.42-permission-mode-presentation.md` 记录
+官方权限选择器与内部本地拒绝档案的隔离修复及连续切换实机结果。
 下面按当前 Linux 子链分别记录已完成证据和剩余门禁；Windows x64、未选择的 OpenSSH
 回退及未执行的故障矩阵继续保持 `待补测`，不得由已完成的 Linux 子链推断。
 
@@ -147,16 +149,17 @@ Executor 独立失联响应修复和精确候选复测；
   中断、运行中远端进程归零且无命令重放；3 个活动令牌样本对审计、588 个 Code
   日志、212 个 Git 文件、701 个进程参数和 MCP 配置的命中均为 0，远端测试路径、
   Codex/app-server、标记进程和敏感环境键也均为 0。Remote SSH 窗口关闭仍待补。
-- Linux Controller 已安装并重载为 `0.3.39` 候选，Executor 保持 `0.2.19`；
+- Linux Controller 已安装并重载为 `0.3.42` 候选，Executor 保持 `0.2.19`；
   中断工具即时终态和跨 turn 有界历史恢复均已完成实机复核，
   `0.3.37` 的精确安装、重载、能力升级和独立失联写入已经闭环。L02、自动 IDE
   背景、外部 `full-access` 和 transport socket 关闭挂起修复均已闭环。精确
   `0.3.39` 官方 UI 直接新建和恢复也已各完成 3/3，失败数和
-  `Unknown local project` 均为 0。
+  `Unknown local project` 均为 0。`0.3.42` 已确认权限列表只包含三个官方内置
+  档案，连续切换不再显示内部 `codex-remote-bridge`。
 
 ## 当前 Linux 剩余人工批次
 
-以下只列当前 `0.3.39` Linux 候选无法由注入、协议探针或静态检查替代的人工动作。
+以下只列当前 `0.3.42` Linux 候选无法由注入、协议探针或静态检查替代的人工动作。
 每次用户完成动作后，Codex 负责读取日志、审计、会话和远端进程，执行其余工具矩阵并
 更新证据。Windows x64 和未选择的 OpenSSH 回退不在本轮。
 
@@ -230,6 +233,11 @@ Executor 独立失联响应修复和精确候选复测；
 
 ### L04 官方界面审批、取消与双向 thread
 
+- 已完成：`0.3.40` 只投影线程响应，官方 UI 仍从配置默认值看到内部档案；
+  `0.3.41` 隐藏配置默认值后初始切换恢复，但多次切换会从
+  `permissionProfile/list` 再次选中内部档案。`0.3.42` 同时过滤该列表和扁平化
+  权限来源键，用户重载后连续切换确认正常；协议探针只见三个官方内置档案，
+  `default_permissions`、可见自定义档案和内部权限来源均为空。
 - 已完成：`0.3.34` 原始 1,048,577 字节写入在 17 ms 内以 `OUTPUT_TRUNCATED`
   失败；写入请求发送后关闭活动 transport socket，29 ms 内返回 `RESULT_UNKNOWN`。
   两次后置检查均为原哈希、原前缀、临时文件 0，测试文件已清理。修复前相同关闭会使

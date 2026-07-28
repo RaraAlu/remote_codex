@@ -455,12 +455,13 @@ function assertThreadStarted({ messages, stdout }) {
     throw new Error(`Missing app-server thread/start response: ${stdout}`);
   }
   if (
-    threadStart.result.activePermissionProfile?.id !== "codex-remote-bridge" ||
+    threadStart.result.activePermissionProfile?.id !== ":danger-full-access" ||
     threadStart.result.approvalPolicy !== "never" ||
-    threadStart.result.sandbox?.type !== "readOnly" ||
-    threadStart.result.sandbox?.networkAccess !== false
+    threadStart.result.sandbox?.type !== "dangerFullAccess"
   ) {
-    throw new Error(`Remote local-deny permission profile was not activated: ${stdout}`);
+    throw new Error(
+      `Remote local-deny policy was not projected as official full access: ${stdout}`,
+    );
   }
 }
 

@@ -693,7 +693,11 @@ export class ShimProxy {
     this.#remoteApprovalPolicies.observeServerMessage(message);
 
     if (!isRpcRequest(message)) {
-      writeClient(projectServerMessage(message, this.#options.config));
+      writeClient(
+        this.#remoteApprovalPolicies.projectServerMessage(
+          projectServerMessage(message, this.#options.config),
+        ),
+      );
       return;
     }
 

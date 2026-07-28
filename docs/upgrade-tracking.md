@@ -142,4 +142,6 @@ transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
 终态和外部会话跨轮有界保留实机见
 `docs/acceptance/2026-07-27-release-0.3.39-interrupted-history.md`。当前官方面板
 直接新建和恢复任务各 3/3 的 Linux Remote SSH 证据见
-`docs/acceptance/2026-07-27-release-0.3.39-official-task-samples.md`。
+`docs/acceptance/2026-07-27-release-0.3.39-official-task-samples.md`。官方权限选择器
+与内部本地拒绝档案隔离、连续切换和可见权限列表证据见
+`docs/acceptance/2026-07-27-release-0.3.42-permission-mode-presentation.md`。
