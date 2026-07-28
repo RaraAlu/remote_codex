@@ -270,8 +270,17 @@ Executor 独立失联响应修复和精确候选复测；
   `automatic=false`、`decision=accept`。同一调用仅在 `g1_1` 的
   `remote-primary`、规范 cwd `/home/unitree/mimiclite-sim2real` 启动 1 次，
   421 ms 成功结束，幂等结果为 `executed`。
-- 在审批等待中从官方 UI 取消 1 次，确认命令未启动；再从官方 UI 取消运行中长命令
-  3 次。Codex 记录每次 `turn/interrupt -> CANCELLED` 耗时和远端进程树归零。
+- 已完成：官方审批卡片实测只显示“拒绝/允许一次”，审批未决时不显示输入区或停止
+  turn 入口。用户点击“拒绝”后，审批审计为 `decision=decline`，执行审计只有
+  `cancelled` 而没有 `started`；后置目录和活动 VS Code transport 探针均确认标记
+  不存在、相关进程为 0。
+- 已完成：审批等待中由附着 MCP 对同一 turn 发起 `turn/interrupt`，46 ms 返回；
+  审批为 `decision=cancelled`。路由层先写入 `started` 审计再发现已中断信号并在
+  0 ms 内取消，但没有进入远端执行器；后置标记不存在、相关进程为 0。
+- 运行中取消当前 1/3：首轮误点“允许一次”后，用户从官方 UI 停止 turn；
+  `remote_tool.cancel` 的来源为 `vscode`、`cancelledCalls=1`，远端命令执行
+  8,906 ms 后以 `CANCELLED` 终结，取消请求到终态为 97 ms。标记按预期已产生，
+  当前相关进程为 0；再补 2 次，并在每次终态后立即复核完整进程树。
 - 从官方 UI 各发起一次新 turn、steer 和 cancel；CLI/MCP 侧由 Codex 同时观察流式
   文本、工具、输出、终态和完整历史，检查通知不重复。
 
