@@ -1,4 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmod,
   mkdtemp,
@@ -10,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import WebSocket from "ws";
 import { findOfficialCodexRuntime } from "./official-codex.mjs";
 
@@ -599,18 +600,36 @@ try {
   ) {
     throw new Error("Remote primary workspace identity is missing from the shim audit");
   }
+  const remoteControlId = createHash("sha256")
+    .update("example.invalid")
+    .update("\0")
+    .update("/tmp/remote-workspace")
+    .digest("hex")
+    .slice(0, 32);
+  const remoteControlPath = join(remoteStateDir, "remote-control", remoteControlId);
+  const auditedControlPath = shimStart?.details?.controlDirectory?.path;
   if (
-    typeof shimStart?.details?.controlDirectory?.path !== "string" ||
-    !shimStart.details.controlDirectory.path.endsWith("/remote-state/control") ||
+    typeof auditedControlPath !== "string" ||
+    !auditedControlPath.endsWith(`/remote-state/remote-control/${remoteControlId}`) ||
     shimStart?.details?.controlDirectory?.target !== "local" ||
     shimStart?.details?.controlDirectory?.role !== "control"
   ) {
-    throw new Error("Local control directory identity is missing from the shim audit");
+    throw new Error(
+      `Local control directory identity is missing from the shim audit: ${JSON.stringify(
+        shimStart?.details?.controlDirectory,
+      )}`,
+    );
   }
   if (process.platform !== "win32") {
-    const controlMode = (await stat(join(remoteStateDir, "control"))).mode & 0o777;
+    const controlMode = (await stat(remoteControlPath)).mode & 0o777;
     if (controlMode !== 0o500) {
       throw new Error(`Control directory mode is ${controlMode.toString(8)}, expected 500`);
+    }
+    const controlParentMode = (await stat(dirname(remoteControlPath))).mode & 0o777;
+    if (controlParentMode !== 0o700) {
+      throw new Error(
+        `Control parent directory mode is ${controlParentMode.toString(8)}, expected 700`,
+      );
     }
   }
   process.stdout.write(

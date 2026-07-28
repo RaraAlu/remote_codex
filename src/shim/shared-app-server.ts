@@ -729,7 +729,9 @@ export class SharedAppServer {
       rewriteClientMessages: this.#options.config !== null,
       threadListCwd:
         clientIdentity.clientSource === "vscode"
-          ? this.#options.localWorkspaceRoot
+          ? (this.#options.config
+              ? this.#options.controlDir
+              : this.#options.localWorkspaceRoot)
           : undefined,
       threadListCwdProvider:
         clientIdentity.clientSource === "vscode" &&

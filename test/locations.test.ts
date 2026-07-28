@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   activeBridgeConfigPath,
   bridgeConfigPath,
+  bridgeRemoteControlDir,
   bridgeSessionConfigPath,
   bridgeStateDir,
 } from "../src/core/locations.js";
@@ -28,6 +29,37 @@ describe("bridge window session locations", () => {
     ).toBe("/tmp/bridge-state/sessions/4242.json");
   });
 
+  it("assigns a stable isolated control directory to each remote workspace", () => {
+    const environment = {
+      CODEX_BRIDGE_STATE_DIR: "/tmp/bridge-state",
+    };
+    const first = bridgeRemoteControlDir(
+      "g1_1",
+      "/home/unitree/mimiclite-sim2real",
+      environment,
+      "linux",
+    );
+    expect(first).toMatch(
+      /^\/tmp\/bridge-state\/remote-control\/[0-9a-f]{32}$/,
+    );
+    expect(
+      bridgeRemoteControlDir(
+        "g1_1",
+        "/home/unitree/mimiclite-sim2real",
+        environment,
+        "linux",
+      ),
+    ).toBe(first);
+    expect(
+      bridgeRemoteControlDir(
+        "g1_1",
+        "/home/unitree/another-project",
+        environment,
+        "linux",
+      ),
+    ).not.toBe(first);
+  });
+
   it("uses Windows application data directories for persistent state", () => {
     const environment = {
       APPDATA: "C:\\Users\\tester\\AppData\\Roaming",
@@ -41,6 +73,17 @@ describe("bridge window session locations", () => {
     );
     expect(bridgeSessionConfigPath(4242, environment, "win32", "C:\\Users\\tester")).toBe(
       "C:\\Users\\tester\\AppData\\Local\\codex-remote-bridge\\sessions\\4242.json",
+    );
+    expect(
+      bridgeRemoteControlDir(
+        "g1_1",
+        "/home/unitree/project",
+        environment,
+        "win32",
+        "C:\\Users\\tester",
+      ),
+    ).toMatch(
+      /^C:\\Users\\tester\\AppData\\Local\\codex-remote-bridge\\remote-control\\[0-9a-f]{32}$/,
     );
   });
 

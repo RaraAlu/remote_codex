@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
-import { basename, isAbsolute, normalize, resolve } from "node:path";
+import { basename, dirname, isAbsolute, normalize, resolve } from "node:path";
 import { AuditLog } from "../core/audit-log.js";
 import { loadBridgeConfig } from "../core/config-store.js";
 import { loadOfficialCodexRuntime } from "../core/codex-runtime-store.js";
@@ -13,7 +13,7 @@ import {
 import {
   activeBridgeConfigPath,
   bridgeAuditPath,
-  bridgeControlDir,
+  bridgeRemoteControlDir,
   officialCodexRuntimePath,
 } from "../core/locations.js";
 import type { BridgeConfig } from "../core/types.js";
@@ -245,8 +245,13 @@ async function main(): Promise<number> {
     return await passthrough(codexExecutable, args);
   }
 
-  const controlDir = config ? bridgeControlDir() : process.cwd();
+  const controlDir = config
+    ? bridgeRemoteControlDir(config.host, config.workspaceRoot)
+    : process.cwd();
   if (config) {
+    const controlParent = dirname(controlDir);
+    await mkdir(controlParent, { mode: 0o700, recursive: true });
+    await chmodIfSupported(controlParent, 0o700);
     await mkdir(controlDir, { mode: 0o500, recursive: true });
     await chmodIfSupported(controlDir, 0o500);
   }

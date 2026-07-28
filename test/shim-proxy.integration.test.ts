@@ -246,6 +246,39 @@ describe("ShimProxy JSONL integration", () => {
     expect(externalMessages[0]).toEqual(request);
   });
 
+  it("scopes a Remote SSH task list to its workspace-specific control directory", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-bridge-remote-thread-list-"));
+    const messages: Array<Record<string, unknown>> = [];
+    const controlDir = join(directory, "remote-control", "workspace-id");
+    const proxy = new ShimProxy({
+      appServerArgs: ["app-server", "--stdio"],
+      auditPath: join(directory, "audit.jsonl"),
+      clientIdentity: { clientId: "stdio", clientSource: "vscode" },
+      codexExecutable: "fake-codex",
+      config: parseBridgeConfig({
+        host: "g1_1",
+        workspaceRoot: "/home/unitree/mimiclite-sim2real",
+      }),
+      controlDir,
+      rewriteClientMessages: true,
+      threadListCwd: controlDir,
+    });
+
+    await proxy.handleClientMessage(
+      {
+        id: 1,
+        method: "thread/list",
+        params: { cwd: null, limit: 50 },
+      },
+      (message) => messages.push(message as Record<string, unknown>),
+      () => undefined,
+    );
+
+    expect(messages[0]).toMatchObject({
+      params: { cwd: controlDir, limit: 50 },
+    });
+  });
+
   it("rejects local Core approval requests without showing them to the client", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-local-approval-"));
     const auditPath = join(directory, "audit.jsonl");

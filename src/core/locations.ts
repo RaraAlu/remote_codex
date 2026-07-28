@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, posix, win32 } from "node:path";
 
@@ -67,8 +68,37 @@ export function officialCodexRuntimePath(environment: NodeJS.ProcessEnv = proces
   return join(bridgeStateDir(environment), "official-codex-runtime.json");
 }
 
-export function bridgeControlDir(environment: NodeJS.ProcessEnv = process.env): string {
-  return join(bridgeStateDir(environment), "control");
+export function bridgeControlDir(
+  environment: NodeJS.ProcessEnv = process.env,
+  hostPlatform: NodeJS.Platform = process.platform,
+  homeDirectory = homedir(),
+): string {
+  const pathApi = hostPlatform === "win32" ? win32 : posix;
+  return pathApi.join(
+    bridgeStateDir(environment, hostPlatform, homeDirectory),
+    "control",
+  );
+}
+
+export function bridgeRemoteControlDir(
+  host: string,
+  workspaceRoot: string,
+  environment: NodeJS.ProcessEnv = process.env,
+  hostPlatform: NodeJS.Platform = process.platform,
+  homeDirectory = homedir(),
+): string {
+  const pathApi = hostPlatform === "win32" ? win32 : posix;
+  const workspaceId = createHash("sha256")
+    .update(host)
+    .update("\0")
+    .update(workspaceRoot)
+    .digest("hex")
+    .slice(0, 32);
+  return pathApi.join(
+    bridgeStateDir(environment, hostPlatform, homeDirectory),
+    "remote-control",
+    workspaceId,
+  );
 }
 
 export function bridgeExternalCliDir(environment: NodeJS.ProcessEnv = process.env): string {

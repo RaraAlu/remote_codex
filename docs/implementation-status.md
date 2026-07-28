@@ -51,6 +51,12 @@ Bridge 对规范化远端根进入
 全局查询能力，Remote SSH 继续使用 Bridge thread/远端根语义，不把本地控制目录伪装成
 远端工作区 URI。首次仅依赖环境继承的候选已在真实本地窗口复现激活顺序竞态，最终
 PID 上下文方案重载后由用户确认任务列表不再混入其他工作区。
+`0.3.45` 为 Remote SSH 任务列表建立相同的身份边界，但不把远端路径作为本地 URI 或
+Core `cwd`：Bridge 根据规范化的 `host + workspaceRoot` 生成稳定摘要，为每个远端根
+分配独立的本机控制目录。远程 thread 的 start/resume/turn 继续在该受限控制目录中
+运行，逻辑主根仍由 `runtimeWorkspaceRoots` 和 Bridge 工具承载；官方 VS Code 客户端
+的 `thread/list` 只查询当前控制目录。外部 CLI 的显式 thread 恢复能力保持不变。
+旧版共享控制目录中的远程历史无法可靠区分所属远端根，因此不会合并进新列表。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知
@@ -449,7 +455,10 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `full-access` 协议修复及本地/Remote SSH 实机见
 `docs/acceptance/2026-07-26-release-0.3.33-local-full-access.md`；VS Code transport
 活动关闭终结修复及真实写入中断见
-`docs/acceptance/2026-07-26-release-0.3.34-transport-close.md`。
+`docs/acceptance/2026-07-26-release-0.3.34-transport-close.md`；本地任务列表隔离见
+`docs/acceptance/2026-07-28-release-0.3.44-local-task-list-scope.md`；Remote SSH
+任务列表隔离和 g1_1 只读远程操作见
+`docs/acceptance/2026-07-28-release-0.3.45-remote-task-list-scope.md`。
 
 ## 本地 MCP 边界
 

@@ -6,7 +6,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.44` 候选。Linux x64 / Remote SSH 已有实机证据，Windows x64
+> 当前源码版本为 `0.3.45` 候选。Linux x64 / Remote SSH 已有实机证据，Windows x64
 > 原生验证尚未完成；在双平台门禁完成前不发布 `0.4.0`，也不扩大支持声明。
 
 ## 工作原理
@@ -42,7 +42,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 - 每轮自动采集当前 Remote SSH 编辑器文件或非空选区作为 IDE 背景。
 - 符合安全条件的 stdio MCP 可通过当前 VS Code Remote 通道在远端运行。
 - 本地 Codex CLI 可附着和介入活动 VS Code Codex thread。
-- 普通本地窗口的任务列表按当前唯一文件工作区精确过滤。
+- 普通本地窗口按当前唯一文件工作区过滤任务列表；Remote SSH 窗口按主机和远程根隔离。
 - 本地次级根必须由用户显式授权，并可随时撤销。
 - 本地结构化审计不记录文件正文、密码、私钥、Token 或完整环境变量。
 

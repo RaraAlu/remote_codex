@@ -88,6 +88,7 @@ function fakeWebSocketAppServer(
             result: {
               data: [{ id: "thread-shared", name: "VS Code active task" }],
               nextCursor: null,
+              observedParams: message.params,
             },
           }));
           return;
@@ -581,6 +582,15 @@ describe("SharedAppServer", () => {
     await waitFor(() =>
       vscodeMessages.some((message) => message.id === 17) ? true : undefined,
     );
+    expect(vscodeMessages.find((message) => message.id === 17)).toMatchObject({
+      result: {
+        observedParams: {
+          cwd: join(directory, "control"),
+          limit: 1,
+          sourceKinds: ["vscode"],
+        },
+      },
+    });
     const externalClosed = new Promise<{ code: number; reason: string }>(
       (resolvePromise) => {
         external.once("close", (code, reason) => {

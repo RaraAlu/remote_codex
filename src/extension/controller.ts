@@ -19,6 +19,7 @@ import {
   bridgeAuditPath,
   bridgeConfigPath,
   bridgeControlDir,
+  bridgeRemoteControlDir,
   bridgeSessionConfigPath,
   officialCodexRuntimePath,
 } from "../core/locations.js";
@@ -1054,16 +1055,19 @@ export class BridgeController implements vscode.Disposable {
     const codexExtension = vscode.extensions.getExtension("openai.chatgpt");
     const ownExtension = vscode.extensions.getExtension("zkbot.codex-vscode-remote-bridge");
     const shimPath = await installShimExecutable(this.#context);
+    const controlDir = config
+      ? bridgeRemoteControlDir(config.host, config.workspaceRoot)
+      : bridgeControlDir();
     return {
       generatedAt: new Date().toISOString(),
       bridge: {
         version: this.#context.extension.packageJSON.version as string,
         state: this.#state.state,
         configPath: bridgeConfigPath(),
-        controlDir: bridgeControlDir(),
+        controlDir,
         workspaceSemantics: {
           controlDirectory: {
-            path: bridgeControlDir(),
+            path: controlDir,
             role: "control",
             target: "local",
           },
