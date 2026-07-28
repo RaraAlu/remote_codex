@@ -213,8 +213,9 @@ Remote Executor 为 `0.2.19`，诊断协议为 11。
 - [x] 精确 `0.3.42` 重载后连续切换官方权限模式，选择器不再回落或显示
   `codex-remote-bridge`；协议复核确认可见权限档案只有三个官方内置 ID，
   `default_permissions=null`、可见自定义档案和内部权限来源计数均为 0。
-- [ ] 由用户在官方 UI 接受 1 次需审批远端命令，确认 host、规范 cwd、完整命令和
-  环境变更；Codex 核对审批与执行审计。
+- [x] 精确 `0.3.42` 由用户在官方 UI 接受 1 次需审批远端命令；官方日志记录人工
+  `accept`，Bridge 审计确认命令仅在 `g1_1` 的 `remote-primary`、规范 cwd
+  `/home/unitree/mimiclite-sim2real` 执行 1 次，421 ms 成功结束且不是自动放行。
 - [ ] 由用户在审批等待中取消 1 次，命令不得启动；再从官方 UI 取消运行中长命令
   3 次，记录 `turn/interrupt -> CANCELLED` 耗时并确认远端进程树归零。
 - [ ] 官方 UI 各发起一次 new turn、steer 和 cancel；CLI/MCP 同时核对流式文本、

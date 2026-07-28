@@ -265,8 +265,11 @@ Executor 独立失联响应修复和精确候选复测；
   确认远端父子进程存活；`turn/interrupt` 46 ms 返回，远端命令在 566 ms 以
   `CANCELLED` 终结。即时读取和后置新 turn 完成后的再次读取均只有同一失败
   `commandExecution` 及中断说明，父子进程为 0，跨 turn 外部历史已闭环。
-- 在需审批模式下，从官方 UI 接受 1 次远端命令；检查审批显示远端主机、规范 cwd、
-  完整命令和环境变更。
+- 已完成：精确 `0.3.42` 在需审批模式下从官方 UI 接受远端命令。官方日志记录
+  `item/commandExecution/requestApproval` 的人工 `accept`；Bridge 审批审计为
+  `automatic=false`、`decision=accept`。同一调用仅在 `g1_1` 的
+  `remote-primary`、规范 cwd `/home/unitree/mimiclite-sim2real` 启动 1 次，
+  421 ms 成功结束，幂等结果为 `executed`。
 - 在审批等待中从官方 UI 取消 1 次，确认命令未启动；再从官方 UI 取消运行中长命令
   3 次。Codex 记录每次 `turn/interrupt -> CANCELLED` 耗时和远端进程树归零。
 - 从官方 UI 各发起一次新 turn、steer 和 cancel；CLI/MCP 侧由 Codex 同时观察流式
