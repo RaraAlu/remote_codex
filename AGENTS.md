@@ -22,6 +22,15 @@
   behavior, installation, operation, configuration, development, and current support boundary.
   Do not accumulate historical implementation plans, acceptance transcripts, completed TODOs,
   or per-patch release evidence in the root README.
+- Keep a `## TODO` section as the literal final section of the root `README.md`. It is the single
+  authoritative index of every active implementation, compatibility, verification, and release
+  TODO. Add each newly accepted or discovered TODO there before ending the work turn; detailed
+  analysis may live elsewhere, but the README entry must remain complete enough to identify the
+  scope and exit condition.
+- When a TODO is completed or cancelled, remove it from the active README list in the same change
+  and record the outcome in `docs/implementation-status.md`, active manual results in
+  `docs/manual-acceptance-backlog.md`, or immutable evidence in `docs/acceptance/`. Never place
+  content after the README TODO section.
 - Before replacing a milestone README, preserve it verbatim under `docs/archive/`. Name a
   development-series archive by its series entry version, for example
   `docs/archive/README-0.3.0.md` for the complete `0.3.x` development history.
