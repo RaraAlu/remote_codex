@@ -6,10 +6,15 @@ import { isRecord, isRpcRequest, isRpcResponse, type RpcId } from "./rpc.js";
 import type { ExternalCliSessionDescriptor } from "./shared-app-server.js";
 
 interface PendingRequest {
+  method: string;
   reject: (error: Error) => void;
   resolve: (result: unknown) => void;
+  threadId?: string;
   timeout: NodeJS.Timeout;
 }
+
+const INTERRUPTED_TURN_CACHE_LIMIT = 64;
+const INTERRUPTED_TURN_ITEM_LIMIT = 32;
 
 function rawMessage(data: RawData): string {
   return typeof data === "string" ? data : data.toString("utf8");
@@ -27,6 +32,10 @@ function rpcError(value: unknown): Error {
 export class VsCodeConversationClient {
   readonly descriptor: ExternalCliSessionDescriptor;
   readonly #socket: WebSocket;
+  readonly #interruptedTurnItems = new Map<
+    string,
+    Map<string, Record<string, unknown>>
+  >();
   readonly #pending = new Map<RpcId, PendingRequest>();
   #nextId = 1;
 
@@ -84,7 +93,15 @@ export class VsCodeConversationClient {
         reject(new Error(`VS Code Codex request timed out: ${method}`));
       }, timeoutMs);
       timeout.unref();
-      this.#pending.set(id, { reject, resolve: resolvePromise, timeout });
+      this.#pending.set(id, {
+        method,
+        reject,
+        resolve: resolvePromise,
+        ...(isRecord(params) && typeof params.threadId === "string"
+          ? { threadId: params.threadId }
+          : {}),
+        timeout,
+      });
     });
     this.#socket.send(JSON.stringify({ id, method, params }));
     return await result;
@@ -122,7 +139,11 @@ export class VsCodeConversationClient {
       if (message.error) {
         pending.reject(rpcError(message.error));
       } else {
-        pending.resolve(message.result);
+        pending.resolve(
+          pending.method === "thread/turns/list" && pending.threadId
+            ? this.#restoreInterruptedTurnItems(message.result, pending.threadId)
+            : message.result,
+        );
       }
       return;
     }
@@ -152,6 +173,70 @@ export class VsCodeConversationClient {
       pending.reject(error);
     }
     this.#pending.clear();
+  }
+
+  #restoreInterruptedTurnItems(value: unknown, threadId: string): unknown {
+    if (!isRecord(value) || !Array.isArray(value.data)) {
+      return value;
+    }
+
+    let changed = false;
+    const data = value.data.map((entry) => {
+      if (
+        !isRecord(entry) ||
+        typeof entry.id !== "string" ||
+        entry.status !== "interrupted" ||
+        !Array.isArray(entry.items)
+      ) {
+        return entry;
+      }
+
+      const key = `${threadId}\0${entry.id}`;
+      const finalItems = entry.items
+        .filter(
+          (item): item is Record<string, unknown> =>
+            isRecord(item) &&
+            typeof item.id === "string" &&
+            item.type === "commandExecution" &&
+            item.status === "failed",
+        )
+        .slice(0, INTERRUPTED_TURN_ITEM_LIMIT);
+      if (finalItems.length > 0) {
+        this.#interruptedTurnItems.delete(key);
+        this.#interruptedTurnItems.set(
+          key,
+          new Map(finalItems.map((item) => [item.id as string, { ...item }])),
+        );
+        while (this.#interruptedTurnItems.size > INTERRUPTED_TURN_CACHE_LIMIT) {
+          const oldest = this.#interruptedTurnItems.keys().next().value;
+          if (typeof oldest !== "string") {
+            break;
+          }
+          this.#interruptedTurnItems.delete(oldest);
+        }
+      }
+
+      const cached = this.#interruptedTurnItems.get(key);
+      if (!cached) {
+        return entry;
+      }
+      const presentIds = new Set(
+        entry.items
+          .filter(isRecord)
+          .map((item) => item.id)
+          .filter((id): id is string => typeof id === "string"),
+      );
+      const missing = [...cached.entries()]
+        .filter(([id]) => !presentIds.has(id))
+        .map(([, item]) => ({ ...item }));
+      if (missing.length === 0) {
+        return entry;
+      }
+      changed = true;
+      return { ...entry, items: [...entry.items, ...missing] };
+    });
+
+    return changed ? { ...value, data } : value;
   }
 }
 

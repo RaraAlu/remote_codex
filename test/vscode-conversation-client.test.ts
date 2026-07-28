@@ -8,6 +8,7 @@ import { WebSocketServer } from "ws";
 import {
   closeVsCodeConversationClients,
   interveneVsCodeConversation,
+  readVsCodeConversation,
   startVsCodeConversation,
 } from "../src/shim/vscode-conversation-client.js";
 
@@ -191,6 +192,101 @@ describe("VS Code conversation client", () => {
     expect(requestParams.get("thread/resume")).toEqual({
       threadId,
       excludeTurns: true,
+    });
+  });
+
+  it("retains a failed command item when later interrupted-turn pages omit it", async () => {
+    stateDirectory = await mkdtemp(join(tmpdir(), "codex-bridge-conversation-"));
+    process.env.CODEX_BRIDGE_STATE_DIR = stateDirectory;
+    const externalCliDirectory = join(stateDirectory, "external-cli");
+    await mkdir(externalCliDirectory, { recursive: true });
+
+    const threadId = randomUUID();
+    let turnsListCalls = 0;
+    server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    server.on("connection", (socket) => {
+      socket.on("message", (data) => {
+        const message = JSON.parse(data.toString()) as {
+          id?: number;
+          method?: string;
+        };
+        if (message.id === undefined || !message.method) {
+          return;
+        }
+        let result: unknown = {};
+        if (message.method === "thread/read") {
+          result = { thread: { id: threadId, status: { type: "idle" } } };
+        } else if (message.method === "thread/turns/list") {
+          turnsListCalls += 1;
+          result = {
+            data: [
+              {
+                id: "turn-interrupted",
+                status: "interrupted",
+                items: [
+                  { id: "item-user", type: "userMessage", text: "run" },
+                  ...(turnsListCalls === 1
+                    ? [
+                        {
+                          id: "item-command",
+                          type: "commandExecution",
+                          command: "sleep 120",
+                          status: "failed",
+                          aggregatedOutput:
+                            "Command stopped when the turn was interrupted.",
+                        },
+                      ]
+                    : []),
+                ],
+              },
+            ],
+          };
+        }
+        socket.send(JSON.stringify({ id: message.id, result }));
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server?.once("listening", resolve);
+      server?.once("error", reject);
+    });
+
+    const address = server.address() as AddressInfo;
+    const tokenPath = join(externalCliDirectory, `${process.pid}.token`);
+    await writeFile(tokenPath, "test-token", { mode: 0o600 });
+    await writeFile(
+      join(externalCliDirectory, `${process.pid}.json`),
+      JSON.stringify({
+        version: 1,
+        endpoint: `ws://127.0.0.1:${address.port}`,
+        host: "remote-host",
+        pid: process.pid,
+        startedAtMs: Date.now(),
+        tokenEnv: "CODEX_BRIDGE_EXTERNAL_SESSION_TOKEN",
+        tokenPath,
+        workspaceRoot: "/remote/workspace",
+      }),
+    );
+
+    await readVsCodeConversation(threadId, 5, process.pid);
+    await expect(
+      readVsCodeConversation(threadId, 5, process.pid),
+    ).resolves.toMatchObject({
+      turns: {
+        data: [
+          {
+            id: "turn-interrupted",
+            status: "interrupted",
+            items: [
+              { id: "item-user", type: "userMessage" },
+              {
+                id: "item-command",
+                type: "commandExecution",
+                status: "failed",
+              },
+            ],
+          },
+        ],
+      },
     });
   });
 });

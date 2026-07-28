@@ -138,4 +138,6 @@ VS Code/Remote SSH、OpenSSH 和 MCP 路由共同升级时的发布验收、量�
 transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
 `docs/acceptance/2026-07-26-release-0.3.34-transport-close.md`。当前 Executor 独立
 失联响应、精确 stdin 长度和死亡拥有者写入清理实机见
-`docs/acceptance/2026-07-27-release-0.3.37-executor-loss-response.md`。
+`docs/acceptance/2026-07-27-release-0.3.37-executor-loss-response.md`。中断工具即时
+终态和外部会话跨轮有界保留实机见
+`docs/acceptance/2026-07-27-release-0.3.39-interrupted-history.md`。
