@@ -277,10 +277,12 @@ Executor 独立失联响应修复和精确候选复测；
 - 已完成：审批等待中由附着 MCP 对同一 turn 发起 `turn/interrupt`，46 ms 返回；
   审批为 `decision=cancelled`。路由层先写入 `started` 审计再发现已中断信号并在
   0 ms 内取消，但没有进入远端执行器；后置标记不存在、相关进程为 0。
-- 运行中取消当前 1/3：首轮误点“允许一次”后，用户从官方 UI 停止 turn；
-  `remote_tool.cancel` 的来源为 `vscode`、`cancelledCalls=1`，远端命令执行
-  8,906 ms 后以 `CANCELLED` 终结，取消请求到终态为 97 ms。标记按预期已产生，
-  当前相关进程为 0；再补 2 次，并在每次终态后立即复核完整进程树。
+- 已完成：官方 UI 运行中取消达到 3/3。三轮 `remote_tool.cancel` 均来自
+  `vscode`、`cancelledCalls=1`；远端命令分别运行 8,906、2,739、6,680 ms，
+  取消请求到 `CANCELLED` 分别为 97、78、77 ms，P50 为 78 ms、最大值为
+  97 ms、失败数为 0。后两个命令分别记录父子 PID `49701/49710` 和
+  `49960/49969`，活动 VS Code transport 在 366、380 ms 的后置探针中确认存活数
+  均为 0；首轮及当前全部相关进程也为 0。
 - 从官方 UI 各发起一次新 turn、steer 和 cancel；CLI/MCP 侧由 Codex 同时观察流式
   文本、工具、输出、终态和完整历史，检查通知不重复。
 
