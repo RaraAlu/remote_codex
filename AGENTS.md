@@ -16,6 +16,22 @@
   `remote-executor/package.json` only when the Remote Executor implementation or its protocol
   changes; Controller/Shim-only targets bump the root package.
 
+## Documentation Lifecycle
+
+- Keep the root `README.md` focused on the current product: purpose, architecture, supported
+  behavior, installation, operation, configuration, development, and current support boundary.
+  Do not accumulate historical implementation plans, acceptance transcripts, completed TODOs,
+  or per-patch release evidence in the root README.
+- Before replacing a milestone README, preserve it verbatim under `docs/archive/`. Name a
+  development-series archive by its series entry version, for example
+  `docs/archive/README-0.3.0.md` for the complete `0.3.x` development history.
+- Archive files are immutable historical records. Never overwrite or rewrite an existing archive;
+  create a new archive for the next series or milestone.
+- Put implementation evolution in `docs/implementation-status.md`, active manual verification in
+  `docs/manual-acceptance-backlog.md`, and dated immutable evidence in `docs/acceptance/`.
+- When a README archive is created, verify that the archived bytes match the pre-replacement root
+  README and keep a link to the archive from the new root README.
+
 ## Remote SSH Safety
 
 - The user performs Remote SSH connection, password entry, and window reload steps manually, then reports when the window is connected.

@@ -1,546 +1,140 @@
 # Codex Remote Bridge
 
-这是 `docs/codex-vscode-remote-bridge-requirements.md` 的可行性验证实现。目标是让官方
-Codex VS Code 扩展及其内置 app-server 留在可联网的本地 Windows x64 或 Ubuntu x64，
-默认复用 VS Code Remote SSH 已认证的远程通道访问离线 Ubuntu 工作区；独立 OpenSSH
-执行器保留为回退模式。系统安装的 Codex CLI 不是运行依赖，其版本不会参与 Bridge
-发现、选择或回退。
+## 概览
 
-> 当前 `0.3.42` 是已收束的 Linux x64 / `g1_1` Remote SSH 候选，不是最终发布版。
-> 2026-07-27 用户决定关闭剩余 Linux 人工补测；未执行项只记为“已关闭”，不记为通过。
-> 根包、锁文件和产物继续保持 `0.3.42`，等待 Windows x64 原生验证后再决定是否形成
-> `0.4.0`。未显式选择的 OpenSSH 回退也继续保持未验证，不从 Linux 结果推断。
+Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持在本机运行，
+同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
+已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-## 当前实现
+> 当前源码版本为 `0.3.42` 候选。Linux x64 / Remote SSH 已有实机证据，Windows x64
+> 原生验证尚未完成；在双平台门禁完成前不发布 `0.4.0`，也不扩大支持声明。
 
-- Bridge 扩展固定声明为 VS Code `ui` 扩展，并提供需求中的 6 个命令。
-- 单根 Remote SSH 工作区打开后自动识别主机和根目录、保存配置并连接，无需手动启动。
-- 首次接管官方 Codex 设置时自动重载一次；后续打开工作区直接进入 `ready`。
-- `chatgpt.cliExecutable` 虽为全局设置，但 Shim 只在 Remote SSH 会话中注入远程策略；
-  普通本地窗口保留官方请求语义，仅经过本机共享网关以支持外部 CLI 附着。
-- 每个工作区首次就绪时把 Codex Webview 恢复到默认右侧栏，修复旧布局中的灰色面板。
-- 修改 `chatgpt.cliExecutable` 和 `remote.extensionKind` 前保存原值，并提供恢复命令。
-- 按官方扩展 API 获取当前 `openai.chatgpt` 的安装目录，并只启动对应平台的内置
-  Codex；扩展缺失、平台不支持、二进制缺失、所需能力缺失或消息结构不支持时失败关闭，
-  不按任何版本值门禁。
-- Controller 将验证后的插件内置运行时写入受限状态文件，Shim 在本地窗口和 Remote
-  SSH 窗口都只读取该指针；旧 `codexExecutable` 配置会被忽略且不再公开。
-- Windows 使用 Node SEA 打包的原生 `codex-bridge-shim.exe`，Linux 使用 CJS Shim；
-  启动器安装到按版本和内容哈希隔离的本地状态目录，扩展升级后路径仍然有效。
-- 自动识别并迁移 Bridge 旧版本或另一平台遗留的 `chatgpt.cliExecutable`，同时只恢复
-  Bridge 实际接管过的官方设置，不覆盖用户后来新增的其他扩展映射。
-- CLI Shim 代理 app-server JSONL。Remote SSH 会话以本地只读控制目录启动进程，并把
-  唯一 `remote/primary` 根登记为线程和每轮请求的 `runtimeWorkspaceRoots`；普通本地
-  会话使用原始工作目录且不改写请求，只共享 app-server 生命周期和对话入口。
-- 新建和恢复线程注入统一的 `workspace_*` 只读工具、受审批的远程命令工具和路由
-  策略；读取、目录树、字面搜索和 `git status` 默认落到远程主根，显式指定
-  `target="local"` 与授权根 ID 时由本地 Controller 执行。每次 turn 通过独立应用
-  上下文刷新全部授权根与 `remote_exec` 提醒，不覆盖官方扩展已有上下文。
-- 每次 Remote SSH turn 自动从当前 VS Code 编辑器采集 IDE 背景：非空选区优先，否则
-  使用 128 KiB 以内的完整活动文件，并保留真实 `vscode-remote` URI、远端相对路径和
-  稳定资源 URI。显式文件/选区命令只作为可选的一轮覆盖；本地次级根、控制目录、二进制
-  和超限文件不会被误注入，正文不写入审计。
-- Bridge 自有工具在返回官方界面前投影为原生 `commandExecution` 项，使用本地 Codex
-  相同的读取、列目录、搜索和命令外观，不修改官方扩展文件。
-- `workspace_open_file` 通过 Controller 复用当前窗口的原始 `vscode-remote` 工作区 URI
-  打开文件并定位选区；`workspace_show_diff` 将经 SHA-256 校验的 1 MiB 以内旧内容放入
-  有界内存快照，与当前远程文件打开 VS Code Diff。普通读取和写入结果返回
-  `codex-bridge` 资源 URI；内容提供器只接受当前 Bridge 会话登记过且根授权仍有效的
-  URI，不把远程 POSIX 路径投影为本地文件动作。
-- `remote_exec` 只接受结构化 `argv`；“完全访问”模式不重复询问，其他权限模式使用
-  官方命令审批并显示远程主机、规范化 `cwd`、完整命令和环境变量变更。
-- stdout/stderr 实时转发；自动放行和人工审批结果都写入本地审计日志。
-- `turn/interrupt` 会按 thread/turn 取消活动 Bridge 工具调用；默认 VS Code Remote
-  通道发送显式 `cancel` 请求，远端 Executor 终止命令的 POSIX 进程组。取消等待审批
-  不会启动远端进程；真实 Remote SSH 窗口中的官方 UI 运行中取消已达到 3/3，取消后
-  远端父子进程均归零。
-- `remote_exec` 从 thread、turn 和 call 身份派生稳定幂等键。Remote Executor 在当前
-  Extension Host 代次内用有界账本合并运行中重复请求、回放终态结果，并通过
-  `resultStatus` 区分 running、completed、cancelled、failed 和 unknown；参数冲突
-  失败关闭，执行、合并和回放结果写入审计。
-- 有副作用命令的 transport 中断后，Shim 中的远端执行客户端使用原幂等键从新 socket
-  查询账本：completed 返回原结果，cancelled/failed 保留远端错误，running 在有界
-  窗口内轮询；unknown、查询不可达或窗口结束时返回 `RESULT_UNKNOWN`，不会重放原命令。
-- `remote_background_start/status/log/cancel` 在活动 VS Code Remote transport 上管理
-  非交互后台任务；任务按稳定 ID 幂等恢复，stdout/stderr 使用有界字节游标增量读取，
-  最多同时保留 8 个任务和 4 MiB 日志，取消、超时或 Extension Host 关闭会终止
-  POSIX 进程组。本地调用客户端或 Controller 断开后，已登记任务继续运行到终态、超时
-  或显式取消；OpenSSH 回退不伪装支持该生命周期。
-- 默认 `vscode-remote` 模式自动部署一个不含 Codex 和凭据的 Workspace Executor，
-  通过 VS Code Remote Extension Host 执行结构化操作；密码、公钥和 Agent 认证均由
-  已建立的 Remote SSH 窗口处理，Bridge 不再发起第二次认证。
-- 本地 Shim 与 UI 扩展通过带随机会话令牌的本机 Named Pipe/Unix socket 通信；UI
-  扩展再通过 VS Code 命令通道调用远端 Executor。
-- 回退 `openssh` 模式使用结构化 `argv`、严格主机密钥校验、连接超时和输出上限。
-- 直连主机可单独配置 SSH 用户、端口和可选 IdentityFile；私钥内容不由 Bridge 读取。
-- Linux 上同一 `connectionId` 使用受限 ControlMaster 复用，并在停止时显式关闭；
-  Windows 为兼容系统 OpenSSH，使用独立 SSH 会话。
-- 路径同时经过词法限制和远端 `realpath` 校验，符号链接不能逃逸工作区。
-- 远端缺少 `rg` 时自动使用不跟随目录符号链接的 GNU `grep` 搜索。
-- SSH 子进程只继承必要环境变量，不继承 Codex、OpenAI 或其他应用凭据。
-- 未知 app-server 服务端请求默认拒绝；操作审计日志只保存在本地并结构化脱敏。
-- Remote SSH 会话中的本地 Core 客户端请求按 `fs/`、`process/`、`command/exec`、
-  `fuzzyFileSearch` 和后台终端等风险命名空间整体失败关闭；官方协议未来新增同类方法
-  也不会因尚未进入已知方法清单而穿透。
-- 当前协议子集由官方扩展内置 Codex 生成；最近 Linux 实测组合为
-  `openai.chatgpt@26.721.41059` / `0.146.0-alpha.3.1`。所有版本值只用于诊断、快照
-  索引和回归触发，不作为运行时门禁。运行时只因缺少实际能力、消息结构错误或真实
-  操作失败而拒绝。
-- Remote SSH 窗口自动扫描本机 Codex MCP：本机能力继续留在本机；满足安全条件的工作区
-  stdio MCP 在默认模式下复用当前 VS Code Remote 通道，在回退模式下通过 OpenSSH 中转。
-- 可按窗口切换 MCP 访问范围；显式选择 `all` 时启用全部已配置服务、清空工具禁用
-  列表，并将服务默认工具审批设为 `approve`，不改写全局 Codex 配置。
+## 工作原理
 
-## `0.4.0` 收尾状态（等待 Windows）
+```text
+官方 Codex UI / 本地 Codex CLI
+              |
+       本地 Shim 与 Controller
+              |
+    VS Code Remote SSH 已认证通道
+              |
+      Remote Workspace Executor
+              |
+          远程工作区
+```
 
-本节是当前唯一权威 README 状态。Linux x64 Controller、Linux Shim、远端 Ubuntu
-Executor，以及 `g1_1:/home/unitree/mimiclite-sim2real` 的真实 VS Code Remote SSH
-链路已停止继续补测。关闭项不代表通过；已有证据继续保留，未采集数据不补写为零。
-当前只保留 Windows x64 原生验证和其后的 `0.4.0` 发布决策。
+- Controller 是本地 `ui` 扩展，负责配置、审批、审计、资源映射和远程 Executor 部署。
+- Shim 代理官方扩展内置 app-server，并为 Remote SSH thread 注入 Bridge 工具和安全策略。
+- Remote Executor 是远端 Workspace 扩展，只执行结构化、受根目录约束的操作。
+- 默认 `vscode-remote` 模式复用活动 Remote SSH transport；`openssh` 仅作为显式回退。
+- 官方扩展、内置 Codex、Controller、Shim 和 Executor 组成兼容集合，但版本值只用于
+  诊断和回归触发，不作为运行时接纳条件。
 
-版本按实现范围推进：`0.3.32` 保留自动 IDE 背景证据；普通本地会话
-`full-access` 的独立行为修复形成 `0.3.33`，活动 VS Code transport 关闭时挂起请求的
-修复形成 `0.3.34`，远端 Executor 失联响应的副作用语义修复形成 `0.3.35` 候选；
-新增实际能力门槛并确保修复版 Executor 自动部署后形成 `0.3.36` 候选。
-失联临时文件登记与死亡拥有者清理形成 `0.3.37` 候选；中断 turn 的即时工具项终态
-投影修复形成 `0.3.38` 候选；外部会话读取对中断工具终态的有界保留形成 `0.3.39`
-候选；官方权限模式与内部本地拒绝档案的显示隔离依次经过 `0.3.40`、`0.3.41`
-失败候选，并由 `0.3.42` 完成线程、配置和权限档案列表投影。用户已决定不在本轮
-更新根包为 `0.4.0`。本次远端写入完整性修复更新 Remote Executor 为 `0.2.19`，
-诊断协议为 11。
+## 主要能力
 
-### 实现与证据
+- 自动识别单根 Remote SSH 工作区并部署匹配的 Remote Executor。
+- 远程读取、目录树、字面搜索、Git 状态和结构化命令执行。
+- 基于 SHA-256 的双端安全写入、精确补丁、重命名和删除。
+- 远程命令和重要写操作沿用官方 Codex 权限模式及审批界面。
+- 运行中取消、进程组终止、有界幂等账本和断线结果查询。
+- 受控后台任务的启动、状态、增量日志和取消。
+- 远程文件定位、选区、资源 URI 和 Diff 映射。
+- 每轮自动采集当前 Remote SSH 编辑器文件或非空选区作为 IDE 背景。
+- 符合安全条件的 stdio MCP 可通过当前 VS Code Remote 通道在远端运行。
+- 本地 Codex CLI 可附着和介入活动 VS Code Codex thread。
+- 本地次级根必须由用户显式授权，并可随时撤销。
+- 本地结构化审计不记录文件正文、密码、私钥、Token 或完整环境变量。
 
-- [x] 将最终精确 `0.3.32` 官方自动 IDE 背景样本、L03 同名诱饵默认远端路由、
-  双向补丁恢复、本地 `on-request` 诊断和审计零泄漏写入验收记录并提交。
-- [x] 修复普通本地会话从外部入口选择 `full-access` 时发送无效权限档案的问题；
-  改发协议支持的 `danger-full-access` sandbox，Remote SSH 再映射为 Bridge 权限档案。
-  精确 `0.3.33` 本地读取/Git 和远端自动审批回归均通过，不使用组件版本门禁。
-- [x] 修复 `VsCodeRemoteExecutor.close()` 只销毁 socket、活动请求 Promise 不终结的
-  问题；监听 socket `close` 并按副作用语义返回明确错误。精确 `0.3.34` 写入中断
-  29 ms 内返回 `RESULT_UNKNOWN`，原哈希不变、临时文件为 0。
-- [x] 修复远端 Extension Host 丢失时已发送副作用收到可重试
-  `REMOTE_TRANSPORT_DISCONNECTED` 的问题；`0.3.37` 将该响应提升为
-  `RESULT_UNKNOWN` 并查询原幂等键，不自动重放。写入脚本同时校验声明字节数，短流
-  不得替换目标；能力握手要求 `executeStdinExactLength`，不能仅因旧包版本可响应而
-  跳过部署。写入在创建临时文件前登记拥有进程，新 Executor 只清理当前工作区中拥有
-  进程已死亡的登记项，并以 `workspaceWriteOrphanCleanup` 能力驱动部署。精确候选
-  已完成实机复核：Extension Host 从 PID `52431` 切换为 `56533`，调用方返回不可重试
-  `RESULT_UNKNOWN`，原文件哈希与 28 字节大小不变，临时文件、远端登记和残留观察
-  进程均为 0；审计只有一次 started/unknown，不存在重放。
-- [x] 修复刚中断 turn 的 `dynamicToolCall` 仍投影为
-  `commandExecution.status=inProgress` 的问题；仅在包含该工具项的 turn 明确为
-  `interrupted` 时投影为失败终态和中断说明，实时 `item/started` 仍保持运行中。
-  `0.3.38` 自动化 60 个文件、268 项测试通过，实机复核列入 L04。下一 turn 开始后
-  官方 `thread/turns/list` 会省略该中断工具项，跨 turn 完整历史单独保持待处理。
-- [x] 外部 MCP 会话客户端缓存已读取到的中断 `commandExecution` 失败终态；后续
-  `thread/turns/list` 省略该项时按 thread、turn 和 item ID 有界恢复。只缓存最多
-  64 个中断 turn、每个最多 32 个失败命令项，不读取或解析 Codex 会话文件，也不恢复
-  未完成状态。`0.3.39` 自动化 60 个文件、269 项测试通过，实机复核列入 L04。
-- [x] 保持 app-server 内部 `codex-remote-bridge` 本地拒绝档案不变，同时把线程
-  权限响应投影为官方内置档案，并从 `config/read` 和 `permissionProfile/list`
-  隐藏内部档案。`0.3.42` 自动化 60 个文件、274 项测试通过；实机连续切换后不再
-  显示内部档案，协议探针只返回 `:read-only`、`:workspace` 和
-  `:danger-full-access`。
-- [x] 最终同步 README、实施状态、兼容矩阵、统一补测清单和升级跟进记录，清除已经
-  由后续提交实现的历史 TODO。
-- [x] 已移除持久化本地次级根授权，删除本地授权根、控制目录及远端工作区中的
-  L03/L04 验收夹具；控制目录恢复 `0500`。远端夹具计数为 0，主根保持非 Git，
-  本地测试根已删除。
+## 支持边界
 
-### L01 当前候选与官方任务
+- 本地 Controller 目标为 Linux x64 或 Windows x64；两者必须在各自原生平台构建和验收。
+- 远端目标为 VS Code Remote SSH 打开的 Linux x64 工作区。
+- 自动初始化只接受当前窗口中唯一的远程工作区根，不猜测多根工作区。
+- 默认模式不会建立第二条 SSH 认证链路。
+- `remote_exec` 限制启动目录但不是远端文件系统沙箱；批准命令前仍需检查完整参数。
+- 选择“完全访问”会取消逐次审批，但不会开放本地项目目录。
+- Windows、Linux 和 OpenSSH 的构包或运行结果不能互相替代。
 
-- [x] 精确 `0.3.37` Linux VSIX 已安装、重载并恢复 `ready`；活动 Shim 来自
-  `0.3.37-efb8ea7d5b649882`，远端 Executor 为 `0.2.19` 且与内嵌实现摘要一致。
-- [x] 精确 `0.3.38` Linux VSIX 已安装、重载并在 4,055 ms 内恢复 `ready`；
-  活动 Shim 来自 `0.3.38-d27416d3a5f42b3e` 且与构建摘要一致，Executor 仍为
-  `0.2.19` 且实现摘要不变。
-- [x] 精确 `0.3.39` Linux VSIX 已安装、重载并在 4,463 ms 内恢复 `ready`；外部 MCP
-  配置和活动 Shim 均来自 `0.3.39-0d0f441ff1c8f0d8`，活动文件与构建摘要一致。
-  Executor 仍为 `0.2.19` 且实现摘要不变。
-- [x] 精确 `0.3.42` Linux VSIX 已安装、重载并在 3,700 ms 内从 `configuring`
-  恢复 `ready`；活动 Shim 来自 `0.3.42-7ddbaa1de6be6669`，用户连续切换官方权限
-  模式后确认选择器正常。
-- [x] `0.3.32` 官方直接新建回归证据 1 次：创建 84 ms，turn 5,984 ms，自动选区正确。
-- [x] 当前最终候选热启动达到 3/3；样本为 4,354 ms、3,999 ms、3,871 ms，
-  P50 为 3,999 ms、最大值为 4,354 ms、失败数为 0。
-- [x] 当前最终候选冷启动达到 3/3；样本为 4,269 ms、4,010 ms、4,396 ms，
-  P50 为 4,269 ms、最大值为 4,396 ms、失败数为 0。
-- [x] 当前候选通过外部 MCP 注入新建和恢复各达到 3/3；新建 turn 样本为
-  19,934 ms、7,571 ms、8,734 ms，P50 为 8,734 ms；恢复样本为 9,415 ms、
-  7,793 ms、6,147 ms，P50 为 7,793 ms。6 次操作均进入当前 Shim，并由审计确认
-  `target=remote`、`rootId=remote-primary`、规范远端根正确且失败数为 0。
-- [x] 精确 `0.3.39` 官方面板直接新建和恢复各达到 3/3，均进入当前 Shim；新建
-  conversation 创建耗时 P50 为 1,581 ms、最大值为 1,678 ms，新建 turn 耗时
-  P50 为 13,312 ms、最大值为 18,782 ms；恢复 turn 耗时 P50 为 8,681 ms、
-  最大值为 15,053 ms。6 次远端调用均为 `clientSource=vscode`，规范远端根正确，
-  失败数和 `Unknown local project` 均为 0。
+当前组件矩阵和已验证范围见
+[兼容矩阵](https://github.com/RaraAlu/remote_codex/blob/main/docs/compatibility.md)，
+完整安全说明见
+[安全边界](https://github.com/RaraAlu/remote_codex/blob/main/docs/security-notes.md)。
 
-### L02-L03 根、上下文与 Core 诱饵
+## 安装与启动
 
-- [x] 本地次级根选择、持久化、双端读写、撤销失败关闭和重新授权闭环通过。
-- [x] 自动远端选区、自动完整文件、真实 `vscode-remote` URI 和正文不入审计通过。
-- [x] 精确 `0.3.33` Remote SSH task 实际发起 5 次 Core 本地读取、Git 和写入尝试，
-  均在受限 sandbox 启动阶段失败；两个本地诱饵哈希不变、临时文件为 0。随后远端
-  同名文件和 `pwd` 成功；当前候选重载后的成功本地项目操作为 0。
-- [x] 精确 `0.3.33` 普通本地 Shim 以 `approvalPolicy=never` /
-  `sandbox=danger-full-access` 完成真实本地文件读取和 Git 命令；没有继承 Remote SSH
-  的本地拒绝档案。
-- [x] 精确 `0.3.34` 固定远端读取、目录树、有效查询搜索、Git 和 `pwd` 各 5/5
-  成功；P50 分别为 130、118、98、91、77 ms，审计均为
-  `remote/remote-primary/primary`。隔离 Git 元数据已清理，主根恢复非 Git 状态。
+1. 安装与本地平台匹配的 Controller VSIX：
+   - Linux x64：`codex-remote-bridge-<version>-linux-x64.vsix`
+   - Windows x64：`codex-remote-bridge-<version>-win32-x64.vsix`
+2. 使用 VS Code Remote SSH 打开一个远程工作区根目录。
+3. 等待 Bridge 自动配置、部署 Executor，并在必要时完成一次窗口重载。
+4. 确认状态栏显示 `Codex: local -> <host> (ready)`。
+5. 运行 `Codex Bridge: Run Diagnostics`，确认远端身份、工作区根和
+   `remote.codexInstalled=false`。
+6. 在官方 Codex 面板创建任务，并通过日志和审计确认项目操作位于远端。
 
-### L04 审批、取消、写入与双向 thread
+关闭 `codexRemoteBridge.autoInitialize` 后，可以使用 Configure 和 Start 命令手动
+控制。停用前应执行 `Codex Bridge: Restore Official Codex Settings`，恢复 Bridge
+接管过的官方设置。
 
-- [x] 精确 `0.3.34` 原始 1,048,577 字节写入在 17 ms 内以 `OUTPUT_TRUNCATED`
-  拒绝；写入中关闭活动 transport socket 在 29 ms 内返回 `RESULT_UNKNOWN`。两者
-  后置检查均确认原哈希不变、临时文件为 0，且没有本地或 OpenSSH 回退。
-- [x] 精确 `0.3.37` 重跑 Executor 独立失联写入；`0.3.34` 已确认 Extension Host
-  自动换 PID且临时文件为 0，但短 stdin 被当作正常 EOF，目标被部分新内容替换，
-  错误还误报为可重试 `REMOTE_TRANSPORT_DISCONNECTED`；`0.3.36` 已保持原哈希并
-  返回 `RESULT_UNKNOWN`，但发现 1 个 SIGKILL 后临时文件。复核最终修复后原哈希
-  不变、临时文件和远端登记均为 0，且不自动重放；独立后置探针再次确认目标、登记、
-  临时文件和观察进程均无残留。
-- [x] 精确 `0.3.37` 外部 MCP 注入式 steer 保持同一 turn 并完成；运行中取消
-  3/3 返回 `CANCELLED`，从 `turn/interrupt` 到取消审计分别为 55、50、47 ms，
-  三轮远端父子进程后置检查均为 0。固定 `codegraph_status` 调用 5/5 成功，工具
-  耗时 P50 为 9 ms、最大值为 66 ms、`isError=false`。
-- [x] 精确 `0.3.38` 重载后再次取消运行中远端命令；`turn/interrupt` 到远端
-  `CANCELLED` 为 48 ms，随后的完整 turn 读取把 `commandExecution` 投影为
-  `failed` 并给出中断说明，父子进程后置检查为 0。
-- [x] 精确 `0.3.39` 重载后再次执行“运行中取消、即时读取、后置新 turn、再次读取”；
-  中断前独立确认远端父子进程存活，`turn/interrupt` 46 ms 返回，远端命令在 566 ms
-  以 `CANCELLED` 终结。即时和后置 turn 完成后的外部 MCP 历史均只包含同一个失败
-  `commandExecution` 及中断说明，父子进程后置检查为 0。
-- [x] 精确 `0.3.42` 重载后连续切换官方权限模式，选择器不再回落或显示
-  `codex-remote-bridge`；协议复核确认可见权限档案只有三个官方内置 ID，
-  `default_permissions=null`、可见自定义档案和内部权限来源计数均为 0。
-- [x] 精确 `0.3.42` 由用户在官方 UI 接受 1 次需审批远端命令；官方日志记录人工
-  `accept`，Bridge 审计确认命令仅在 `g1_1` 的 `remote-primary`、规范 cwd
-  `/home/unitree/mimiclite-sim2real` 执行 1 次，421 ms 成功结束且不是自动放行。
-- [x] 精确 `0.3.42` 官方审批卡片实测只提供“拒绝/允许一次”，没有独立停止 turn
-  入口；用户点击“拒绝”后没有 `remote_exec started`，远端标记和残留进程均为 0。
-  审批等待期间再由附着 MCP 发起 `turn/interrupt`，46 ms 返回，路由在执行器调用前
-  0 ms 取消，后置标记和进程同样为 0。
-- [x] 从官方 UI 取消运行中长命令达到 3/3；`remote_tool.cancel` 均来自
-  `vscode` 且每次只取消 1 个调用，取消请求到远端 `CANCELLED` 分别为
-  97、78、77 ms，P50 为 78 ms、最大值为 97 ms、失败数为 0。后两个父子进程样本
-  的记录 PID 均在 380 ms 内的活动 transport 探针中归零，当前三轮相关进程为 0。
-- [x] 官方 UI new turn 已完成：外部观察器捕获真实流式文本、工具、终态和历史，
-  精确重复帧为 0；官方 UI 运行中 cancel 另已达到 3/3。官方 UI 同 turn steer 的
-  同时观测未执行，按用户决定关闭，不计为通过。
+## 常用命令
 
-### L05 远程资源视觉
 
-- [x] 已关闭（未执行，不计为通过）：本地/远端同名文件、选区和 Diff 的视觉确认。
-- [x] 已关闭（未执行，不计为通过）：过期快照、越界路径、已撤销根和过期资源的
-  错误视觉确认。
+| 命令                                              | 用途                               |
+| ------------------------------------------------- | ---------------------------------- |
+| `Codex Bridge: Configure Current Remote`          | 保存当前 Remote SSH 主机和工作区根 |
+| `Codex Bridge: Start`                             | 启动或重新连接 Bridge              |
+| `Codex Bridge: Stop`                              | 停止当前 Bridge 会话               |
+| `Codex Bridge: Run Diagnostics`                   | 显示脱敏后的组件、连接和能力状态   |
+| `Codex Bridge: Show Audit Log`                    | 打开本地审计日志                   |
+| `Codex Bridge: Authorize Local Root`              | 授权一个本地次级根                 |
+| `Codex Bridge: Revoke Local Root`                 | 撤销本地次级根授权                 |
+| `Codex Bridge: Add Remote File to Next Turn`      | 为下一轮显式加入当前远程文件       |
+| `Codex Bridge: Add Remote Selection to Next Turn` | 为下一轮显式加入当前远程选区       |
+| `Codex Bridge: Enable Automatic CLI Integration`  | 启用本地 Codex CLI 自动附着        |
+| `Codex Bridge: Disable Automatic CLI Integration` | 停用 CLI 集成并恢复托管入口        |
+| `Codex Bridge: Restore Official Codex Settings`   | 恢复 Bridge 接管前的官方设置       |
 
-### L06 托管入口与权限撤销
+## 主要设置
 
-- [x] 已关闭（未执行，不计为通过）：单活动窗口下普通 `codex` 无参数附着唯一会话。
-- [x] 已关闭（未执行，不计为通过）：停用/重新启用外部 CLI/MCP 集成后的描述符、
-  端点和权限撤销。
 
-### L07 Executor 失联与最终窗口关闭
+| 设置                                      | 默认值          | 说明                                       |
+| ----------------------------------------- | --------------- | ------------------------------------------ |
+| `codexRemoteBridge.autoInitialize`        | `true`          | 单根 Remote SSH 窗口自动配置和连接         |
+| `codexRemoteBridge.connectionMode`        | `vscode-remote` | 使用 VS Code transport 或显式 OpenSSH 回退 |
+| `codexRemoteBridge.remoteMcpRouting`      | `auto`          | 自动路由合格 stdio MCP，或全部保留本机     |
+| `codexRemoteBridge.remoteMcpAccess`       | `enabled`       | 保留现有 MCP 策略；`all` 为显式宽权限模式  |
+| `codexRemoteBridge.commandTimeoutMs`      | `120000`        | 单次远程操作超时                           |
+| `codexRemoteBridge.maxOutputBytes`        | `10485760`      | 每个远程输出流的最大捕获字节数             |
+| `codexRemoteBridge.connectTimeoutSeconds` | `10`            | OpenSSH 连接超时                           |
+| `codexRemoteBridge.sshExecutable`         | `ssh`           | OpenSSH 回退使用的本地客户端               |
+| `codexRemoteBridge.externalCliExecutable` | `codex`         | 外部 CLI 集成使用的本地 Codex 入口         |
 
-- [x] 已关闭（未执行，不计为通过）：Remote Executor 独立失联下的命令、写入、
-  后台任务和 stdio MCP 组合矩阵。
-- [x] 已关闭（未执行，不计为通过）：Remote SSH 整窗带载关闭、重开和全链路清理。
-- [x] 已关闭（未执行，不计为通过）：重开后的最终 MimicLite task、固定 MCP 调用和
-  全范围敏感信息扫描。
+`remoteMcpAccess=all` 会在当前 Remote SSH app-server 进程中尝试启用通过校验的 MCP，
+清空其禁用工具列表并将默认工具审批设为允许。它不会修改全局 Codex 配置，但可能开放
+具有副作用的本地或远端 MCP 工具，仅应在信任全部相关服务时使用。
 
-### 本轮候选收尾
+## CLI 介入
 
-- [x] 最终源码 `npm run check` 通过：60 个测试文件、274 项通过、6 项按环境跳过；
-  构建、Shim 冒烟和 Linux `0.3.42` 构包通过。包内版本、Linux CJS Shim、嵌入
-  Executor、副本一致性、字节数和 SHA-256 已核对。
-- [x] 已按 G0-G9 归档现有 Linux 指标；本轮未执行的视觉、撤销、组合失联、整窗关闭和
-  全范围安全扫描明确记为“已关闭（未执行）”，没有写成通过或零。
-- [x] 已明确停止 `0.4.0` 发布动作：根包和锁文件保持 `0.3.42`，未创建 `0.4.0`
-  验收记录，未发布、未推送。
-- [x] 当前只保留 Linux x64 / `g1_1` 的历史候选证据，不形成最终支持声明；OpenSSH
-  未选择，Windows x64 不由 Linux 结果推断。
+启用自动 CLI 集成后，在与活动 VS Code thread 匹配的工作目录运行无参数 `codex`，
+Bridge 会尝试附着该 thread。存在多个候选会话时会失败关闭，可使用：
 
-### 唯一保留的发布前置
+```bash
+codex-vscode --session-pid <pid>
+```
 
-- [ ] 在 Windows x64 原生环境完成构建、SEA Shim、安装、官方任务、Remote SSH、
-  取消、MCP、设置恢复和包内容验证，并单独记录 Windows 证据。
-- [ ] Windows 验证正常后，重新执行双平台 G0-G9 与产物收集；届时再决定更新为
-  `0.4.0`、创建不可覆盖的发布验收记录和提交。未经用户确认不发布、不推送。
+介入能力包括列出对话、读取完整 turn、发起新 turn 或 steer，以及中断运行中的 turn。
+已经启动的旧 CLI 进程不能热切换 app-server，需要退出后重新启动。停用集成后也应
+重新启动 CLI，使恢复后的官方入口生效。
 
-详细人工步骤和历史量化证据见
-`docs/manual-acceptance-backlog.md`；发布硬门禁和必填指标见
-`docs/upgrade-tracking.md`。
-
-## 历史实施计划
-
-以下内容保留设计演进和能力边界，复选框反映对应阶段当时的状态，不再作为当前执行
-清单；当前任务只以上方 `0.4.0` Linux 台阶代办为准。
-
-### 所有待实现功能的实施前置流程
-
-以下流程适用于本节、下方双端读写计划以及其他任务文档中的全部待实现功能。
-
-- [ ] 开始任何待实现功能前，重新汇总 README 与任务文档中的现有清单，标明待实施、
-  待验证、受阻和已完成项，并按目标、依赖关系和风险重新排序。
-- [ ] 对照目标检查当前实现、协议、测试、审计和相关真实运行链路，记录可复用能力、
-  明确能力边界与缺口；涉及 Remote SSH 时必须检查真实远程链路，不得仅凭旧文档或
-  构建产物推定运行时已经支持。
-- [ ] 完成能力探查后再制定详细实施计划，写明修改范围、实施顺序、验收标准、定向测试、
-  发布门禁、真实环境证据、风险和回退方式，并同步更新相关任务文档。
-- [ ] 按单项执行“实施、定向自测、更新清单与证据、中文意图提交”的闭环；一个提交只
-  处理一个已验证问题，不积压无关改动，缺失的真实环境证据继续标为 `待补测`。
-
-当前重新汇总的任务清单、能力边界和详细实施顺序见
-`docs/capability-boundary-plan.md`。所有需要用户、真实 VS Code/Remote SSH 或 Windows
-实机参与的项目已统一列入 `docs/manual-acceptance-backlog.md`，不再阻塞源码实现；
-当前已打开的 Remote SSH 会话可由 Codex 注入执行无需安装和重载的候选探针，最终候选
-安装、手动重载和完整 UI 验收仍统一收口。
-
-- [x] 将官方 `openai.chatgpt` 扩展及其内置 Codex 设为 Bridge 唯一 app-server 来源；
-  系统 `codex` CLI 不再参与发现、版本选择或运行时回退。
-- [x] 从插件内置 Codex 生成协议并按内置 app-server 能力建立兼容门禁；官方扩展版本
-  不固定，外部稳定版 `0.145.0` 只保留为历史探针，不再是运行或发布依赖。
-- [ ] 在真实 Remote SSH 窗口验证当前候选的新建任务、恢复任务、本地窗口共享入口、固定
-  远端操作和日志证据；完成前不声明支持当前官方插件组合。
-- [x] 面向 Remote SSH 任务在新建、恢复和每次 turn 强化命令路由提醒，明确要求 Codex
-  使用 `remote_exec` 执行远程项目命令，并保留官方扩展已有线程指令和逐轮上下文。
-- [ ] 在真实官方界面的新建和恢复任务中复核远程主根显示、附件/当前文件以及本地 Shell
-  误用为 0；当前 app-server 探针和活动 VS Code transport 回环已经通过。
-- [x] 建立适用于全部远端 stdio MCP 的启动适配注册表；通用传输只携带受控适配器
-  标识，不复制本机环境或凭据，由远端启动侧解析已审核的参数与环境变化。CodeGraph
-  全工具暴露只作为首个适配器和验收样例，不得写成传输层特例。
-- [x] 同一任务通过显式目标和根 ID 受控读写本地授权目录与远程工作区；写入、精确
-  补丁、目录创建、重命名和删除均已接入大小限制、哈希冲突、原子替换、审批、审计和
-  幂等自动化，真实候选窗口统一待补测。
-- [x] 运行中命令取消已接通 turn、Controller transport、Remote Executor 和 POSIX
-  进程组，并通过自动化验证；真实 Remote SSH 候选窗口、Windows 进程树和取消确认
-  耗时待补测。
-- [x] 非幂等命令已携带稳定幂等键，Remote Executor 的有界结果账本和
-  `resultStatus` 查询已通过自动化；Shim 中的远端执行客户端在 transport 断线后会通过
-  新 socket 查询并恢复终态，未知结果不重放。真实 Remote SSH 断线链路仍待补测。
-- [x] 活动 VS Code Remote transport 已提供后台任务启动、状态、游标日志和取消工具；
-  任务数量、日志、超时、工作目录和环境继承均有边界，重连按任务 ID 恢复观察而不重启，
-  Extension Host 关闭时同步终止进程组；真实候选窗口和 Windows 生命周期待补测。
-- [ ] 对 Codex Core 内置本地 Shell 和文件工具执行前硬阻断。阶段 2C 已让 Remote
-  Bridge 会话强制使用本地拒绝权限配置，并在 Shim 边界拒绝 25 个已知本地客户端请求；
-  五类 Core 本地审批请求也会直接失败关闭。真实模型对本地诱饵的专用工具负测仍待
-  补测；当前写工具只作为自动化候选，不据此宣称 Core 强制边界闭环。
-- [x] 为远程文件提供可打开的资源 URI、Diff 和文件跳转；资源身份绑定 host、根 ID、
-  目标端和相对路径，远程映射复用当前窗口实际 URI，OpenSSH 回退失败关闭。真实同名
-  诱饵、选区和 Diff 左右端仍按统一人工清单补测。
-- [x] 建立 Windows/Linux 原生构建与受控产物收集流程；双端 stage、清单和临时目录
-  验证已实现，缺少任一原生平台时失败关闭。Windows stage 与最终双端收集待补测。
-- 在目标 Remote SSH 主机和 MimicLite 仓库上的完整 P0 验收。
-- [ ] 当前优先实施本地 Codex CLI 对话介入：Bridge 向当前 CLI 对话长期提供 MCP 工具，
-  用于列出、读取和介入官方扩展正在进行的 thread，并继续经现有 `remote_exec` 路由
-  操作远端；待通用写入协议完成后，再接入受控文件写入。外部 CLI 不成为官方
-  app-server 的运行时来源或回退。
-
-Core 本地工具负测与完整 P0 验收仍是阶段 C 的安全门槛。当前 Shim 除了把 app-server
-放在本地控制目录并注入远程路由策略，还会强制本地拒绝权限配置、阻断已知本地客户端
-请求；但官方明确不保证 hook 覆盖全部专用工具，因此真实诱饵证据补齐前仍不能宣称
-Core 强制边界已经闭环。
-
-这里的 Core 本地阻断只用于保证项目操作落到用户选择的远端，而不是额外权限等级；
-`full-access` 在远程目标上的命令和后续写入仍应自动放行并记录审计。
-
-远程工作区中的 Codex 可以继续调用本地 app-server 原有的 MCP、App 和 Connector
-增强能力，它们无需安装到远端。Bridge 会扫描本机 MCP 配置，但不会修改全局
-`~/.codex/config.toml`：HTTP MCP、包含环境变量/本地工作目录的服务和包管理器启动器
-继续留在本机；无凭据的直接 stdio 可执行文件只有在远端也存在时才通过当前 Bridge 通道中转。
-远端启动器自动探测 `PATH`、`~/.local/bin` 和 `/usr/local/bin`，并以远程工作区为
-当前目录。默认 `vscode-remote` 模式由本地 MCP relay、窗口级认证 IPC 和 Remote
-Executor 中的长生命周期子进程组成，MCP 字节流与普通远程操作共用已认证的 VS Code
-Remote SSH 连接，不再发起第二次 SSH 登录。该通道适用于所有通过安全筛选的直接 stdio
-MCP；CodeGraph 只是首个工作区参数适配器，会额外绑定远程索引根目录。可将
-`codexRemoteBridge.remoteMcpRouting` 设为 `local`，让所有 MCP 保持本机运行。
-`codexRemoteBridge.remoteMcpAccess` 默认为 `enabled`，保留用户已有启用和审批策略；
-设为 `all` 后只对当前 Remote SSH 窗口的 app-server 尝试启用已配置 MCP、清空
-`disabled_tools`，并设置 `default_tools_approval_mode="approve"`。覆盖会先由同版本
-Codex 校验；若插件配置层的局部覆盖会替换 transport，该服务保持原配置，避免拖垮
-app-server。服务自身未提供的工具不会被 Bridge 虚构，已有 `enabled_tools` allowlist
-或托管策略仍是上层边界。
-服务通过私有环境变量或参数控制工具注册时，Bridge 使用代码内共享适配器注册表：
-app-server 参数只携带受控适配器 ID，VS Code Remote 由 Executor 在远端解析，
-OpenSSH 回退通过 stdin 控制头传递已审核的非凭据变化。不会复制 MCP 配置环境、
-本机进程环境或凭据。当前首个适配器在 `remoteMcpAccess=all` 时让远端 CodeGraph
-注册八个工具；后续服务复用同一注册、路由和失败关闭接口。
-
-## 本地与远程目录双端读写计划
-
-目标是在同一个 Codex 任务中显式选择并受控访问本地授权目录或当前 Remote SSH
-工作区。默认仍复用已建立的 VS Code Remote SSH 通道，不为远程文件操作启动第二次
-SSH 认证，也不改写或伪造 VS Code 工作区 URI。以下项目按独立验收目标逐项落实。
-
-### 阶段一：权限边界与协议
-
-- [x] 定义独立的本地授权根目录，并继续使用规范化的远程 POSIX 工作区根目录。
-- [x] Remote Codex 反代启动并识别 Remote SSH 工作区后，将规范化的远程工作区根目录
-  登记为 Codex 主工作目录和默认项目上下文；本地控制目录不得冒充项目目录，也不得
-  为此改写或伪造 VS Code 工作区 URI。
-- [x] 将本地授权根目录登记为次级工作目录，在任务上下文、双端工具请求、结果和审计
-  记录中显式保留主次角色与 `local | remote` 目标端，避免双端读写时混淆目录归属。
-- [x] 为目录树、读取、搜索和状态请求增加显式的 `target: local | remote`，
-  不根据路径格式猜测目标端。
-- [ ] 为后续写入请求增加相同的显式目标端和根 ID，不根据路径格式猜测目标端。
-- [x] 明确本地根目录的选择、持久化和撤销流程；配置中不保存密码、私钥、Token 或
-  Remote SSH 会话令牌。
-- [x] 本地和远程绝对路径都必须落在各自授权根目录内，禁止通过 `..`、符号链接或
-  路径编码逃逸。
-
-### 阶段二：双端文件操作
-
-- [x] 统一两端的目录树、文件读取、字面文本搜索和 Git 状态结果，保留目标端、根身份
-  和规范化路径。
-- [ ] 增加写入、补丁、创建目录、重命名和删除操作，并为两端返回一致的错误语义。
-- [x] 本地只读操作由 Bridge Controller 在本地 Extension Host 中执行；远程操作由
-  Remote Executor 通过现有 VS Code 命令通道执行。
-- [x] `openssh` 仅保留为用户明确选择的远程回退路径；默认 `vscode-remote` 模式复用
-  活动窗口通道，不发起新的 SSH 登录或密码询问；本地根在回退模式下失败关闭。
-
-### 阶段三：写入安全与审计
-
-- [ ] 修改已有文件前校验调用方读取到的内容哈希，检测并拒绝覆盖并发变更。
-- [ ] 使用临时文件和同目录原子替换完成整文件写入，失败时不留下半写文件。
-- [ ] 覆盖、重命名和删除等重要操作接入现有审批策略；“完全访问”仍记录自动放行结果。
-- [ ] 审计日志记录目标端、规范化路径、操作类型、审批结果、字节数和错误码，但不记录
-  文件正文或敏感凭据。
-- [ ] 对文件大小、目录项数量、搜索结果和单次写入量设置可测试的上限。
-
-### 阶段四：测试与发布门禁
-
-- [x] 单元测试覆盖两端读取路径限制、本地符号链接逃逸、撤销和未授权根失败。
-- [ ] 写入实现后补充哈希冲突、权限错误和部分失败测试。
-- [x] Shim 集成测试覆盖同一任务交替读取本地与远程文件，不把本地路径投影成远程
-  路径。
-- [ ] 写入实现后覆盖同一任务交替修改两端文件。
-- [ ] 验证远程断线、窗口重载和 Executor 失联时写入安全失败，且不会自动切换到第二次
-  SSH 认证。
-- [ ] 在真实 VS Code Remote SSH 窗口检查 Codex 日志和 Bridge 审计日志，确认远程操作
-  到达 Shim 并被记录为远程执行。
-- [ ] 运行定向测试和 `npm run check`，按 `docs/upgrade-tracking.md` 更新发布记录，再
-  分别验证 Linux x64 与 Windows x64 的真实运行链路。
-
-完成标准：同一任务可以分别读取和修改本地授权根目录与远程工作区内的文件；越界和
-过期写入被拒绝且原文件保持完整；默认远程路径只复用 VS Code Remote SSH transport；
-两端操作可从日志中区分并完成审计。
-
-## 外部 Codex CLI 介入
-
-该功能已经实现。Codex CLI 只运行在本地；Bridge 插件提供两种互补入口：
-现有 CLI 对话通过持久 MCP 列出、读取和介入 VS Code Codex thread；需要双向实时一致
-时，本地 CLI 通过受鉴权的 `--remote` 入口恢复同一个 thread，使 CLI 与 VS Code
-同时成为同一 app-server 的客户端。远端仍不安装 Codex。
-
-2026-07-23 已完成官方能力探针：两个独立 WebSocket 客户端可同时初始化同一
-app-server；第二客户端能够恢复第一客户端创建的 thread，并对其活动 turn 成功执行
-`turn/steer` 和 `turn/interrupt`。因此底层复用官方 thread/turn 并发语义、
-`expectedTurnId` 和事件广播；上层由 MCP 提供对话列表、读取、自动选择 steer 或新
-turn、取消等稳定工具。Bridge 只负责本机鉴权、请求改写、权限继承、远程路由和审计。
-
-权限以所接入 thread 的 Codex 权限模式为唯一操作权限来源，不另设 Bridge 权限等级。
-用户选择 `full-access` 时，外部 CLI 与 VS Code 插件都在已选目标端获得最大操作权限，
-写入和命令自动放行并保留审计；其他模式完全沿用 Codex 的分级和审批语义。目标端标识、
-并发顺序、幂等和传输路由属于正确性约束，不用于额外降低 `full-access` 权限。
-
-- [x] 探查官方 app-server 多客户端、thread 恢复、turn 追加输入和取消能力；确认
-  `codex --remote` 可作为外部客户端入口，不固定外部 CLI 版本。
-- [x] 建立仅本机可访问的共享 app-server 网关和短期凭证；外部客户端与官方扩展使用
-  独立上游连接，且都经过相同的请求改写、权限继承和远程工具路由。
-- [x] 由 Controller 激活时自动注册并随插件升级刷新当前 CLI 的本地 MCP、显式
-  `codex-vscode` 入口和 POSIX 普通 `codex` 入口；接管前保存官方启动符号链接的原始
-  目标，停用时原样恢复。用户可显式停用或重新启用，不固定 CLI 版本，不把外部 CLI
-  纳入 app-server 运行时选择。
-- [x] MCP 支持列出和读取当前反代对话，并向指定 thread 自动执行新 turn 或
-  `turn/steer`、执行 `turn/interrupt`；Bridge 将各独立上游收到的无 ID 流式通知去重后
-  广播给 VS Code 与所有外部客户端，带 ID 的响应返回原连接；官方 app-server 广播的
-  同一动态工具请求按 thread、turn 和 call 身份协调为单次执行，不通过修改 rollout
-  文件伪造对话。
-- [x] 提供长期自维护的本地附着入口：无参数 `codex` 自动按当前工作目录选择
-  唯一活动 VS Code thread，`codex-vscode` 保留显式选择能力，并安全执行
-  `codex resume <thread> --remote ...`；令牌只通过子进程环境传递，不进入命令行、
-  日志或仓库。
-- [x] 自动化验证同一 thread 中来自 CLI 和 VS Code 的输入、流式 item、工具状态、取消
-  和最终历史都能实时到达另一端；任一端断开不得终止另一端。普通本地与真实 Remote
-  SSH 窗口已验证 CLI 发起 turn、多轮流式通知和工具过程投影；Windows 以及官方 UI
-  发起方向的 Remote SSH 取消仍待补测。
-- [x] CLI 发起的项目文件写入复用 Bridge 的远程工具、目标端、`expectedHash`、
-  原子替换、幂等和审计；审批完全继承 thread 的 Codex 权限模式，`full-access` 不追加
-  Bridge 二次确认，但不允许 CLI 绕过插件另开通道写远端工作区。
-- [x] 保留并验证官方 `expectedTurnId`、turn 状态和事件顺序；Bridge 不另加会降低
-  `full-access` 能力的单写者租约，协议明确拒绝的并发冲突直接投影给两个客户端。
-- [x] 外部 CLI 的接入、读取、turn 写入、项目写入、审批、取消和断开均记录来源客户端
-  与 operation ID；插件 UI 可见并可撤销接入权限。
-- [ ] 完成双客户端诱饵、并发、恢复、权限撤销、敏感信息和 Linux/Windows 实机验收，
-  再重新执行完整 P0 发布门禁。
-- [ ] 完成真实 Remote SSH 剩余闭环：CLI 新建同步 thread、`remote_exec`、远程读取、
-  CodeGraph、权限继承、VS Code UI 投影和审计已通过；官方 UI 新任务和固定远端探针
-  已通过，取消、断线、附件/当前文件和完整生命周期仍待补测。
-
-本批次已经按“所有待实现功能的实施前置流程”重新汇总清单并完成能力探查；MCP 控制
-模式见 `docs/capability-boundary-plan.md` 的阶段 2D，双向实时同 thread 模式见阶段
-2E。已经运行的普通 CLI 会话无法原地切换 app-server；首次进入实时模式需要退出并由
-托管入口重新附着，之后的输入和事件都留在共享 thread。
-
-Bridge Controller 在 VS Code 激活、配置变化或扩展安装状态变化时自动注册 MCP，并随
-插件升级和 Shim 内容地址变化刷新 `~/.local/bin/codex-vscode`；需要迁移运行中 Shim
-时自动重载窗口。在 POSIX 上还会安全接管当前 PATH 实际解析到的普通 `codex` 符号
-链接。官方 CLI 的绝对入口和原始链接目标保存在权限受限的集成元数据中，子命令、参数
-调用和没有活动 Bridge thread 的情况继续透传官方 CLI，停用集成时恢复原链接。已经
-运行的 CLI 仍需退出并重新启动一次；它不能热切换到另一个 app-server。当前 CLI 对话
-随后可调用：
-
-- `vscode_codex_list_conversations`
-- `vscode_codex_read_conversation`
-- `vscode_codex_intervene`
-- `vscode_codex_interrupt`
-
-进入双向实时模式前只需结束已运行的旧 CLI，然后在对应工作目录重新运行无参数
-`codex`；它优先恢复工作目录完全匹配的唯一活动 VS Code thread，只有一个活动会话时
-也可自动选择。存在多个歧义会话时会失败关闭，使用对话列表返回的 `sessionPid` 执行
-`codex-vscode --session-pid <pid>` 明确选择。启动入口只把网关令牌放入 Codex 子进程
-环境，不把令牌写入命令行或配置。
-
-撤销时执行 `Codex Bridge: Disable Automatic CLI Integration`，再重启 CLI 卸载工具；
-该选择会持久保留。重新启用可执行
-`Codex Bridge: Enable Automatic CLI Integration`。注册只使用系统 CLI 的
-`codex mcp` 配置接口，不读取其登录材料，也不改变官方扩展内置 app-server 的运行时
-选择。
-
-## 开发与自测
+## 开发与验证
 
 ```bash
 npm install
 npm run check
 ```
 
-`npm run check` 依次执行 TypeScript 类型检查、单元/集成测试、扩展和 Shim 构建、
-本地窗口共享网关与 Remote SSH 窗口初始化、线程列表和线程创建冒烟测试，以及 VSIX
-打包。
-协议生成和 Shim 冒烟都自动发现最新安装的官方 Codex 扩展，不调用 PATH 或
-`~/.local/bin` 中的 Codex CLI。
-当前平台的 VSIX 使用 `npm run package`。发布候选不能在一个平台伪造另一平台：
-
-```bash
-# 分别在 Linux x64 和 Windows x64 原生构建机执行
-npm run check
-npm run package:stage
-
-# 把两个 artifacts/controller-<version>-<target>/ 目录放到同一收集机后执行
-npm run package:collect -- <linux-stage-dir> <windows-stage-dir>
-npm run package:verify
-```
-
-`npm run package:all` 是使用标准 `artifacts/` 路径执行收集的简写，不再跨平台构建。
-每个 stage 清单固定来源平台、架构、Controller/Executor 版本、文件大小和 SHA-256。
-收集器重新核对清单、VSIX 元数据、平台启动器隔离、内嵌 Executor 实现以及两个 stage
-的一致性；全部在临时目录验证通过后才更新 `dist/`，并删除历史版本 VSIX。Linux
-stage 不能替代 Windows 原生 SEA 构建，构包也不能替代对应平台的 Extension Host 和
-Remote SSH 实机验收。
-
-真实远端只读验收使用环境变量提供目标，不把主机和私钥路径写入仓库：
+`npm run check` 依次执行类型检查、测试、构建、Shim 冒烟和当前平台构包。真实远端
+只读测试通过环境变量显式启用：
 
 ```bash
 CODEX_BRIDGE_REMOTE_TEST=1 \
@@ -551,83 +145,46 @@ CODEX_BRIDGE_TEST_WORKSPACE=/absolute/remote/workspace \
 npm run test:remote
 ```
 
-需要指定密钥时额外设置 `CODEX_BRIDGE_TEST_IDENTITY=/absolute/local/key/path`。
+需要指定密钥时设置
+`CODEX_BRIDGE_TEST_IDENTITY=/absolute/local/key/path`。仓库和验收材料不得记录凭据。
 
-生成物：
-
-- `dist/codex-bridge-shim.exe`（Windows 构建）
-- `dist/codex-bridge-shim.cjs`
-- `dist/codex-remote-bridge-<version>-win32-x64.vsix`
-- `dist/codex-remote-bridge-<version>-linux-x64.vsix`
-- `dist/codex-remote-bridge-executor-<version>-linux-x64.vsix`
-- `dist/codex-remote-bridge-executor.vsix`
-
-它们属于同一个扩展 ID 和同一套源码，只是针对本地 Extension Host 平台的两个分发
-产物。Controller VSIX 内嵌匹配版本的远端 Executor，并在 Remote SSH 窗口中通过
-VS Code 文件系统和扩展安装服务自动部署。Windows SEA 启动器包含 Node 运行时，因此
-VSIX 明显大于 Linux 包，并且当前构建未做代码签名；发布前应加入正式签名流程。
-
-从最新安装的官方扩展内置 Codex 重新生成协议子集：
+发布候选必须在 Linux x64 与 Windows x64 原生构建机分别执行：
 
 ```bash
-npm run protocol:generate
+npm run check
+npm run package:stage
 ```
 
-生成后必须重新运行 `npm run check`，并更新兼容矩阵。生成清单会记录来源插件版本
-作为证据，但不会把该版本写成启动门禁。
+随后在收集机验证两个 stage：
 
-## 升级与发布跟进
+```bash
+npm run package:collect -- <linux-stage-dir> <windows-stage-dir>
+npm run package:verify
+```
 
-兼容集合中任一组件升级时，按 `docs/upgrade-tracking.md` 的触发矩阵、硬门禁和量化
-指标执行，并从 `docs/acceptance/release-template.md` 创建一份不可覆盖的候选版本记录。
-当前基线为 `docs/acceptance/2026-07-18-release-0.2.7.md`。
-当前已验证 Linux 功能候选为
-`docs/acceptance/2026-07-27-release-0.3.39-interrupted-history.md`，官方 UI 直接新建和
-恢复任务的最低样本见
-`docs/acceptance/2026-07-27-release-0.3.39-official-task-samples.md`。在上述 `0.4.0`
-Linux 台阶门禁完成前，这些记录只代表已验证的限定能力，不构成最终发布声明。
+跨平台构包只能证明包内容，不能替代对应平台的 Extension Host、Shim、官方任务和
+Remote SSH 实机验证。完整门禁和量化指标见
+[升级跟进](https://github.com/RaraAlu/remote_codex/blob/main/docs/upgrade-tracking.md)。
 
-Windows x64 和 Linux x64 必须分别填写运行结果。`npm run package:all` 只会收集并
-验证两个原生 stage，不会生成异平台启动器；该结果能证明两个目标 VSIX 已完成版本、
-摘要、Executor 和平台内容隔离，但不能替代任一平台的 Extension Host、Shim、官方
-任务创建和真实 Remote SSH 验收。缺少的数据写
-`待补测`，并限制兼容性声明范围。
+## 产物
 
-## 试用流程
+- `dist/codex-bridge-shim.exe`：Windows 原生 Shim 构建输出。
+- `dist/codex-bridge-shim.cjs`：Linux Shim 构建输出。
+- `dist/codex-remote-bridge-<version>-<target>.vsix`：Controller 平台包。
+- `dist/codex-remote-bridge-executor-<version>-linux-x64.vsix`：版本化 Executor 包。
+- `dist/codex-remote-bridge-executor.vsix`：Controller 内嵌 Executor 副本。
 
-1. 按本地平台安装对应 VSIX：Windows 使用 `win32-x64`，Ubuntu 使用 `linux-x64`。
-2. 用 Remote SSH 打开单个远程工作区。
-3. Bridge 自动保存当前主机和根目录、部署远端 Executor；首次接管设置或安装
-   Executor 时窗口会自动重载。
-4. 等待状态栏显示 `Codex: local -> <host> (ready)`。
-5. 运行 `Codex Bridge: Run Diagnostics`，确认本地扩展宿主、官方设置、远端身份和
-   `remote.codexInstalled=false`。
-6. 需要全部 MCP 时，将 `codexRemoteBridge.remoteMcpAccess` 设为 `all` 后完整重启
-   VS Code；审计中的 `remoteMcpAccess` 应为 `all`。
-7. 新建 Codex 任务，验证远程读取、目录树、搜索、`git status` 和 MCP 工具。
-8. 请求执行 `pwd` 或仓库测试命令；“完全访问”应直接执行，其他模式应显示审批。
-9. 停用原型前执行 `Codex Bridge: Restore Official Codex Settings`；该命令同时关闭
-   `codexRemoteBridge.autoInitialize`，避免重载后再次接管。
+`dist/` 只保留当前版本产物，不作为历史归档。
 
-自动流程仅在 `codexRemoteBridge.autoInitialize=true`、当前窗口为 Remote SSH 且恰好
-打开一个远程根目录时运行。关闭该设置后仍可使用 Configure 和 Start 命令手动控制。
-普通本地工作区即使同时打开，也不会读取远程 Bridge 配置或重写 app-server 消息；
-它只经过本机共享网关，以便 `codex-vscode` 附着当前官方 thread。
+## 文档
 
-本地配置和审计日志的默认位置如下：
+- [实施状态](https://github.com/RaraAlu/remote_codex/blob/main/docs/implementation-status.md)
+- [兼容矩阵](https://github.com/RaraAlu/remote_codex/blob/main/docs/compatibility.md)
+- [安全边界](https://github.com/RaraAlu/remote_codex/blob/main/docs/security-notes.md)
+- [升级跟进与发布门禁](https://github.com/RaraAlu/remote_codex/blob/main/docs/upgrade-tracking.md)
+- [人工验收记录](https://github.com/RaraAlu/remote_codex/blob/main/docs/manual-acceptance-backlog.md)
+- [验收记录目录](https://github.com/RaraAlu/remote_codex/tree/main/docs/acceptance)
+- [0.3.0 系列历史 README](https://github.com/RaraAlu/remote_codex/blob/main/docs/archive/README-0.3.0.md)
 
-- Windows：`%APPDATA%\codex-remote-bridge\config.json` 和
-  `%LOCALAPPDATA%\codex-remote-bridge\audit.jsonl`。
-- Linux：`~/.config/codex-remote-bridge/config.json` 和
-  `~/.local/state/codex-remote-bridge/audit.jsonl`。
-
-Remote SSH 窗口会额外创建按本地 Extension Host PID 隔离的会话配置；其中只保存
-本机 IPC 端点和随机会话令牌，不保存 SSH 密码、私钥或 OpenAI Token。默认连接模式为
-`vscode-remote`；需要独立连接时可选择 `openssh`，Windows 会自动发现系统 OpenSSH，
-也可通过 `codexRemoteBridge.sshExecutable` 指定路径或命令名。
-Codex Core 会清理 stdio MCP 子进程的 `CODEX_BRIDGE_*` 环境变量，因此 Bridge 会把该
-会话配置文件的绝对路径作为 `mcp-proxy --session-config` 参数传递；随机令牌仍只存放在
-受限文件中，不进入进程命令行。
-
-更多边界与验收信息见 `docs/implementation-status.md`、`docs/compatibility.md`、
-`docs/upgrade-tracking.md` 和 `docs/security-notes.md`。
+根 README 只描述当前产品和当前支持边界。版本演进、历史计划、验收流水和关闭的待办
+保存在不可覆盖的归档与验收文档中。
