@@ -71,6 +71,14 @@ thread start/resume/fork 和每轮上下文中明确列出已绑定远端主根�
 `server=codegraph`、`tool=codegraph_explore`、`status=completed` 的 MCP 工具项，
 没有 `remote_exec` 或 `workspace_*` 调用；模型返回
 `REMOTE_CODEGRAPH_MCP_0346_OK`，证明缺少 `target/rootId` 不再被误判为不可调用。
+`0.3.47` 修正首次 Remote SSH 自动初始化的官方扩展检测顺序。此前未托管 Shim 的窗口
+会先调用 UI Extension Host 的 `vscode.extensions.getExtension("openai.chatgpt")`，
+而 `remote.extensionKind.openai.chatgpt=["ui"]` 尚未写入，导致实际装在远端
+Extension Host 的官方扩展被误报为未安装。自动初始化现在先走现有设置配置与窗口重载
+链路；已有托管入口也先修复 extension kind，再刷新官方 Codex 运行时。只有设置已经
+生效后才检测官方扩展和内置 Codex。定向类型检查与 automatic initialization、
+Controller reconfigure、settings manager 共 11 项测试通过；精确 `0.3.47` 的真实窗口
+重载仍待本批最终候选安装后复核。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

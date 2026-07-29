@@ -304,17 +304,6 @@ export class BridgeController implements vscode.Disposable {
       return;
     }
 
-    if (plan.refreshOfficialRuntime) {
-      try {
-        await this.#refreshOfficialCodexRuntime();
-      } catch (error) {
-        const bridgeError = asBridgeError(error, "PROTOCOL_MISMATCH");
-        this.#log(`official Codex runtime validation failed: ${bridgeError.message}`);
-        void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
-        return;
-      }
-    }
-
     if (plan.repairManagedExecutable) {
       try {
         const shimPath = await installShimExecutable(this.#context);
@@ -326,6 +315,17 @@ export class BridgeController implements vscode.Disposable {
       } catch (error) {
         const bridgeError = asBridgeError(error, "INVALID_CONFIG");
         this.#log(`managed launcher repair failed: ${bridgeError.message}`);
+        void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+        return;
+      }
+    }
+
+    if (plan.refreshOfficialRuntime) {
+      try {
+        await this.#refreshOfficialCodexRuntime();
+      } catch (error) {
+        const bridgeError = asBridgeError(error, "PROTOCOL_MISMATCH");
+        this.#log(`official Codex runtime validation failed: ${bridgeError.message}`);
         void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
         return;
       }

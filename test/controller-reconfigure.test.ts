@@ -86,6 +86,13 @@ vi.mock("../src/core/config-store.js", () => ({
   saveBridgeConfig: mock.saveConfig,
 }));
 
+vi.mock("../src/core/local-workspace-context.js", () => ({
+  clearLocalWorkspaceContext: vi.fn(async () => undefined),
+  localWorkspaceContextPath: () => "/tmp/codex-bridge-local-workspace.json",
+  publishLocalWorkspaceRoot: vi.fn(() => null),
+  saveLocalWorkspaceContext: vi.fn(async () => undefined),
+}));
+
 vi.mock("../src/extension/remote-context.js", () => ({
   detectRemoteWorkspace: () => ({
     host: "g1_1",
@@ -147,6 +154,17 @@ describe("BridgeController restored-state configuration", () => {
     expect(mock.settingsConfigure.mock.invocationCallOrder[0]).toBeLessThan(
       mock.executeCommand.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("bootstraps UI settings before automatic official runtime detection", async () => {
+    const controller = new BridgeController(context());
+
+    await controller.initialize();
+
+    expect(mock.settingsConfigure).toHaveBeenCalledWith("/managed/codex-bridge-shim.cjs");
+    expect(mock.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
+    expect(mock.officialExtension).not.toHaveBeenCalled();
+    expect(mock.transportStart).not.toHaveBeenCalled();
   });
 
   it("registers local root authorization and revocation commands", () => {

@@ -57,7 +57,7 @@ describe("planAutomaticInitialization", () => {
     ).toEqual({
       connectRemote: true,
       reconcileExternalCli: false,
-      refreshOfficialRuntime: true,
+      refreshOfficialRuntime: false,
       repairManagedExecutable: false,
     });
   });

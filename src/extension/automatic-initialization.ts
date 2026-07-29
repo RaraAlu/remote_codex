@@ -25,7 +25,7 @@ export function planAutomaticInitialization(
   return {
     connectRemote,
     reconcileExternalCli: input.externalCliIntegration,
-    refreshOfficialRuntime: input.managedExecutable || connectRemote,
+    refreshOfficialRuntime: input.managedExecutable,
     repairManagedExecutable: input.managedExecutable,
   };
 }
