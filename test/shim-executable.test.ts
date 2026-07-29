@@ -29,8 +29,24 @@ describe("platform Shim installation", () => {
 
   it("selects only supported local UI host launchers", () => {
     expect(packagedShimName("win32")).toBe("codex-bridge-shim.exe");
-    expect(packagedShimName("linux")).toBe("codex-bridge-shim.cjs");
+    expect(packagedShimName("linux")).toBe("codex-bridge-shim");
     expect(() => packagedShimName("darwin")).toThrow(/does not support/);
+  });
+
+  it("installs the self-contained Linux launcher without a script suffix", async () => {
+    const root = await mkdtemp(join(tmpdir(), "codex-bridge-linux-shim-install-"));
+    const extension = join(root, "extension");
+    const state = join(root, "state");
+    await mkdir(join(extension, "dist"), { recursive: true });
+    await writeFile(join(extension, "dist", "codex-bridge-shim"), "linux-launcher");
+    const context = {
+      asAbsolutePath: (relative: string) => join(extension, relative),
+      extension: { packageJSON: { version: "0.3.48" } },
+    } as unknown as vscode.ExtensionContext;
+
+    const installed = await installShimExecutable(context, "linux", state);
+    expect(installed).toMatch(/codex-bridge-shim$/);
+    expect(await readFile(installed, "utf8")).toBe("linux-launcher");
   });
 
   it("fails closed when a content-addressed launcher was modified", async () => {
@@ -55,6 +71,11 @@ describe("platform Shim installation", () => {
     expect(
       isBridgeShimPath(
         "/home/test/.vscode/extensions/zkbot.codex-vscode-remote-bridge-0.1.11/dist/codex-bridge-shim.cjs",
+      ),
+    ).toBe(true);
+    expect(
+      isBridgeShimPath(
+        "/home/test/.local/state/codex-remote-bridge/bin/0.3.48/codex-bridge-shim",
       ),
     ).toBe(true);
     expect(

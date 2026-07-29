@@ -58,7 +58,7 @@ describe("native package artifact workflow", () => {
     const common = ["extension/dist/codex-remote-bridge-executor.vsix"];
     expect(() =>
       validateControllerEntryNames(
-        [...common, "extension/dist/codex-bridge-shim.cjs"],
+        [...common, "extension/dist/codex-bridge-shim"],
         "linux-x64",
       ),
     ).not.toThrow();
@@ -72,7 +72,7 @@ describe("native package artifact workflow", () => {
       validateControllerEntryNames(
         [
           ...common,
-          "extension/dist/codex-bridge-shim.cjs",
+          "extension/dist/codex-bridge-shim",
           "extension/dist/codex-bridge-shim.exe",
         ],
         "linux-x64",
@@ -82,12 +82,22 @@ describe("native package artifact workflow", () => {
       validateControllerEntryNames(
         [
           ...common,
-          "extension/dist/codex-bridge-shim.cjs",
+          "extension/dist/codex-bridge-shim",
           "extension/artifacts/controller/manifest.json",
         ],
         "linux-x64",
       ),
     ).toThrow(/staging/);
+    expect(() =>
+      validateControllerEntryNames(
+        [
+          ...common,
+          "extension/dist/codex-bridge-shim",
+          "extension/dist/codex-bridge-shim.cjs",
+        ],
+        "linux-x64",
+      ),
+    ).toThrow(/isolation/);
   });
 
   it.each(["linux-x64", "win32-x64"] as const)(

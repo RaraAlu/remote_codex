@@ -47,9 +47,8 @@ await Promise.all([
   }),
 ]);
 
-if (process.platform === "win32") {
+async function buildSeaExecutable(executable) {
   const shim = resolve("dist/codex-bridge-shim.cjs");
-  const executable = resolve("dist/codex-bridge-shim.exe");
   const blob = resolve("dist/codex-bridge-shim.blob");
   const seaConfig = resolve("dist/codex-bridge-shim.sea.json");
   await writeFile(
@@ -75,11 +74,21 @@ if (process.platform === "win32") {
       overwrite: true,
       sentinelFuse: "NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2",
     });
+    await chmod(executable, 0o755);
   } finally {
     await rm(blob, { force: true });
     await rm(seaConfig, { force: true });
   }
-} else {
-  await rm("dist/codex-bridge-shim.exe", { force: true });
-  await chmod("dist/codex-bridge-shim.cjs", 0o755);
 }
+
+if (process.platform === "win32") {
+  await buildSeaExecutable(resolve("dist/codex-bridge-shim.exe"));
+  await rm("dist/codex-bridge-shim", { force: true });
+} else if (process.platform === "linux" && process.arch === "x64") {
+  await buildSeaExecutable(resolve("dist/codex-bridge-shim"));
+  await rm("dist/codex-bridge-shim.exe", { force: true });
+} else {
+  await rm("dist/codex-bridge-shim", { force: true });
+  await rm("dist/codex-bridge-shim.exe", { force: true });
+}
+await chmod("dist/codex-bridge-shim.cjs", 0o755);

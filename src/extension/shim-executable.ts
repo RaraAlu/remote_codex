@@ -13,7 +13,7 @@ export function packagedShimName(
     return "codex-bridge-shim.exe";
   }
   if (hostPlatform === "linux") {
-    return "codex-bridge-shim.cjs";
+    return "codex-bridge-shim";
   }
   throw new BridgeError(
     "INVALID_CONFIG",
@@ -84,7 +84,11 @@ export function isBridgeShimPath(value: unknown): value is string {
   }
   const normalized = value.replaceAll("\\", "/").toLowerCase();
   const name = normalized.slice(normalized.lastIndexOf("/") + 1);
-  if (name !== "codex-bridge-shim.cjs" && name !== "codex-bridge-shim.exe") {
+  if (
+    name !== "codex-bridge-shim" &&
+    name !== "codex-bridge-shim.cjs" &&
+    name !== "codex-bridge-shim.exe"
+  ) {
     return false;
   }
   return (

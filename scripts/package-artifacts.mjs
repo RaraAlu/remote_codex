@@ -50,19 +50,28 @@ export function validateControllerEntryNames(entries, target) {
   if ([...names].some((name) => name.startsWith("extension/artifacts/"))) {
     throw new Error("Controller VSIX contains artifact staging files");
   }
-  const linuxLauncher = "extension/dist/codex-bridge-shim.cjs";
+  const linuxLauncher = "extension/dist/codex-bridge-shim";
   const windowsLauncher = "extension/dist/codex-bridge-shim.exe";
+  const javascriptLauncher = "extension/dist/codex-bridge-shim.cjs";
   if (!names.has("extension/dist/codex-remote-bridge-executor.vsix")) {
     throw new Error("Controller VSIX does not embed the Remote Executor package");
   }
   if (target === "linux-x64") {
-    if (!names.has(linuxLauncher) || names.has(windowsLauncher)) {
+    if (
+      !names.has(linuxLauncher) ||
+      names.has(windowsLauncher) ||
+      names.has(javascriptLauncher)
+    ) {
       throw new Error("Linux Controller VSIX launcher isolation is invalid");
     }
     return;
   }
   if (target === "win32-x64") {
-    if (!names.has(windowsLauncher) || names.has(linuxLauncher)) {
+    if (
+      !names.has(windowsLauncher) ||
+      names.has(linuxLauncher) ||
+      names.has(javascriptLauncher)
+    ) {
       throw new Error("Windows Controller VSIX launcher isolation is invalid");
     }
     return;

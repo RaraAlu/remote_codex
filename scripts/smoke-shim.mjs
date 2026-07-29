@@ -480,7 +480,7 @@ const rootDir = await mkdtemp(join(tmpdir(), "codex-bridge-smoke-"));
 const shim = resolve(
   process.platform === "win32"
     ? "dist/codex-bridge-shim.exe"
-    : "dist/codex-bridge-shim.cjs",
+    : "dist/codex-bridge-shim",
 );
 
 try {

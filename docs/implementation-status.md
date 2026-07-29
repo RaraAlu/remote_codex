@@ -79,6 +79,13 @@ Extension Host 的官方扩展被误报为未安装。自动初始化现在先�
 生效后才检测官方扩展和内置 Codex。定向类型检查与 automatic initialization、
 Controller reconfigure、settings manager 共 11 项测试通过；精确 `0.3.47` 的真实窗口
 重载仍待本批最终候选安装后复核。
+`0.3.48` 将 Linux x64 Controller 中由 `/usr/bin/env node` 启动的 JavaScript Shim
+替换为 Node SEA 自包含 ELF。构建仍保留 CJS 作为 SEA 输入和源码级中间产物，但 Linux
+VSIX 只包含 `codex-bridge-shim` 原生入口，不再包含可被官方扩展直接启动的 CJS；
+Windows VSIX 继续只包含 `codex-bridge-shim.exe`。内容寻址安装、旧 CJS 托管路径识别
+和设置迁移保持兼容。在清空环境并把 `PATH` 限定为 `/usr/bin` 的探针中，自包含入口
+能够运行并按预期因缺少测试运行时元数据失败，而不是报 `node` 不存在；完整 Shim 冒烟
+也通过。精确候选的真实官方面板启动仍待本批最终安装后复核。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知
@@ -123,7 +130,7 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
 | 官方扩展内置运行时 | 只接受当前官方扩展目录中的平台二进制；系统 CLI 不参与 | `resolveOfficialCodexExecutable` |
 | 版本无门禁 | Controller、Shim 和 Executor 不按任何组件、包或协议版本值接纳；只校验实际路径、能力、消息结构和操作结果 | `OfficialCodexRuntime` / `isRemoteExecutorPing` |
 | 旧 CLI 配置迁移 | 已删除公开设置；旧配置字段被解析器忽略 | `parseBridgeConfig` |
-| Windows 原生 Shim | Node SEA `codex-bridge-shim.exe` 已构建并通过真实 Codex 冒烟 | `scripts/build.mjs` |
+| 双平台原生 Shim | Linux x64 `codex-bridge-shim` 与 Windows x64 `codex-bridge-shim.exe` 均使用 Node SEA；Linux 无需 PATH 中安装 Node | `scripts/build.mjs` |
 | 双平台发布 | `0.3.22` 要求 Linux/Windows 原生构建分别生成带摘要清单的 stage；收集器复核版本、启动器隔离和 Executor 实现后才更新 `dist/`，不再用预存异平台启动器交叉构包 | `scripts/package.mjs` / `scripts/package-artifacts.mjs` |
 | VS Code Remote 通道 | 已实现本机 IPC、远端 Workspace Executor 和内嵌 VSIX 自动部署；真实 Remote SSH 窗口只读回环已通过 | `VsCodeTransportServer` / `LocalProcessExecutor` |
 | 密码/密钥认证复用 | `vscode-remote` 模式不新建 SSH，复用当前 Remote SSH 窗口认证 | `codexRemoteBridge.connectionMode` |

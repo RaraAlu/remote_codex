@@ -18,4 +18,5 @@ dist/*.vsix
 !dist/codex-remote-bridge-executor.vsix
 dist/codex-bridge-shim.cjs
 dist/codex-bridge-shim.cjs.map
+dist/codex-bridge-shim
 package-lock.json

@@ -60,7 +60,7 @@ for (const target of targets) {
   const launcher =
     target === "win32-x64"
       ? "dist/codex-bridge-shim.exe"
-      : "dist/codex-bridge-shim.cjs";
+      : "dist/codex-bridge-shim";
   await access(launcher);
   const packagePath = resolve(
     "dist",
