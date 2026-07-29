@@ -607,6 +607,23 @@ try {
     .digest("hex")
     .slice(0, 32);
   const remoteControlPath = join(remoteStateDir, "remote-control", remoteControlId);
+  const runtimeStatus = JSON.parse(
+    await readFile(
+      join(remoteStateDir, "shim-runtime", `${remoteControlId}.json`),
+      "utf8",
+    ),
+  );
+  if (
+    runtimeStatus.running !== false ||
+    runtimeStatus.shimLastExitCode !== 0 ||
+    typeof runtimeStatus.appServerInitializedAtMs !== "number" ||
+    runtimeStatus.appServerLastError !== null ||
+    runtimeStatus.nodeExecutable !== null
+  ) {
+    throw new Error(
+      `Self-contained Shim runtime status is incomplete: ${JSON.stringify(runtimeStatus)}`,
+    );
+  }
   const auditedControlPath = shimStart?.details?.controlDirectory?.path;
   if (
     typeof auditedControlPath !== "string" ||

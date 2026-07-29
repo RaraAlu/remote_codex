@@ -4,6 +4,7 @@ import {
   bridgeConfigPath,
   bridgeRemoteControlDir,
   bridgeSessionConfigPath,
+  bridgeShimRuntimeStatusPath,
   bridgeStateDir,
 } from "../src/core/locations.js";
 
@@ -58,6 +59,14 @@ describe("bridge window session locations", () => {
         "linux",
       ),
     ).not.toBe(first);
+    expect(
+      bridgeShimRuntimeStatusPath(
+        "g1_1",
+        "/home/unitree/mimiclite-sim2real",
+        environment,
+        "linux",
+      ),
+    ).toMatch(/^\/tmp\/bridge-state\/shim-runtime\/[0-9a-f]{32}\.json$/);
   });
 
   it("uses Windows application data directories for persistent state", () => {

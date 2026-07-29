@@ -14,6 +14,7 @@ const mock = vi.hoisted(() => ({
   showOpenDialog: vi.fn(async () => undefined),
   settingsConfigure: vi.fn(async () => true),
   settingsUpdate: vi.fn(async () => undefined),
+  showErrorMessage: vi.fn(),
   transportStart: vi.fn(async () => {
     throw new Error("transport must not start before reload");
   }),
@@ -49,7 +50,7 @@ vi.mock("vscode", () => ({
       hide: vi.fn(),
       show: vi.fn(),
     }),
-    showErrorMessage: vi.fn(),
+    showErrorMessage: mock.showErrorMessage,
     showInformationMessage: vi.fn(),
     showOpenDialog: mock.showOpenDialog,
     showWarningMessage: vi.fn(async () => "Configure"),
@@ -165,6 +166,19 @@ describe("BridgeController restored-state configuration", () => {
     expect(mock.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
     expect(mock.officialExtension).not.toHaveBeenCalled();
     expect(mock.transportStart).not.toHaveBeenCalled();
+  });
+
+  it("does not report reload cancellation as a settings bootstrap failure", async () => {
+    mock.executeCommand.mockRejectedValueOnce(
+      Object.assign(new Error("Canceled"), { name: "Canceled" }),
+    );
+    const controller = new BridgeController(context());
+
+    await controller.initialize();
+
+    expect(mock.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
+    expect(mock.showErrorMessage).not.toHaveBeenCalled();
+    expect(mock.officialExtension).not.toHaveBeenCalled();
   });
 
   it("registers local root authorization and revocation commands", () => {

@@ -19,6 +19,10 @@ import {
   bridgeExternalCliTokenPath,
   bridgeUpstreamTokenPath,
 } from "../core/locations.js";
+import {
+  saveShimRuntimeStatus,
+  type ShimRuntimeStatus,
+} from "../core/shim-runtime-status.js";
 import type { SpawnProcess } from "../core/ssh-executor.js";
 import type {
   AuditEvent,
@@ -99,6 +103,7 @@ export interface SharedAppServerOptions {
   output?: Writable;
   errorOutput?: Writable;
   remoteMcpServers?: readonly string[];
+  runtimeStatusPath?: string;
   spawnCodex?: (
     command: string,
     args: readonly string[],
@@ -224,6 +229,8 @@ export class SharedAppServer {
   #upstreamToken = "";
   #descriptorQueue = Promise.resolve();
   #auditQueue = Promise.resolve();
+  #runtimeStatus: ShimRuntimeStatus | null = null;
+  #runtimeStatusQueue = Promise.resolve();
   #stdioWriter: RpcMessageWriter | null = null;
   readonly #externalWriters = new Map<string, RpcMessageWriter>();
   readonly #externalRelayCounts = new Map<string, number>();
@@ -248,6 +255,11 @@ export class SharedAppServer {
     const directory = bridgeExternalCliDir();
     await mkdir(directory, { mode: 0o700, recursive: true });
     await chmodIfSupported(directory, 0o700);
+    try {
+      await this.#startRuntimeStatus();
+    } catch (error) {
+      errorOutput.write(`codex-bridge: unable to record Shim runtime status: ${String(error)}\n`);
+    }
 
     this.#upstreamToken = randomBytes(32).toString("base64url");
     this.#externalToken = randomBytes(32).toString("base64url");
@@ -272,6 +284,8 @@ export class SharedAppServer {
     child.stderr.pipe(errorOutput, { end: false });
     child.stdout.pipe(errorOutput, { end: false });
 
+    let exitCode: number | null = null;
+    let runtimeError: string | null = null;
     try {
       const upstream = await this.#connectUpstream();
       const externalPort = await this.#startExternalServer(errorOutput);
@@ -283,10 +297,80 @@ export class SharedAppServer {
         workspaceRoot: this.#activeWorkspaceRoot,
         details: { endpoint: `ws://${LOOPBACK_HOST}:${externalPort}` },
       });
-      return await this.#runStdioClient(upstream, input, output, errorOutput);
+      exitCode = await this.#runStdioClient(upstream, input, output, errorOutput);
+      return exitCode;
+    } catch (error) {
+      runtimeError = error instanceof Error ? error.message : String(error);
+      throw error;
     } finally {
       await this.#close();
+      const appServerLastError =
+        runtimeError ??
+        (exitCode !== null && exitCode !== 0
+          ? `Official Codex app-server exited with code ${exitCode}`
+          : null);
+      try {
+        await this.#updateRuntimeStatus({
+          running: false,
+          shimLastExitCode: exitCode,
+          appServerLastError,
+        });
+      } catch (error) {
+        errorOutput.write(
+          `codex-bridge: unable to finalize Shim runtime status: ${String(error)}\n`,
+        );
+      }
     }
+  }
+
+  async #startRuntimeStatus(): Promise<void> {
+    if (!this.#options.runtimeStatusPath || !this.#options.config) {
+      return;
+    }
+    const scriptEntry = process.argv[1] ?? "";
+    const scriptRuntime = scriptEntry.toLowerCase().endsWith(".cjs");
+    this.#runtimeStatus = {
+      version: 1,
+      host: this.#options.config.host,
+      workspaceRoot: this.#options.config.workspaceRoot,
+      shimExecutable: scriptRuntime ? scriptEntry : process.execPath,
+      nodeExecutable: scriptRuntime ? process.execPath : null,
+      extensionHostPid: process.ppid,
+      shimPid: process.pid,
+      shimStartedAtMs: this.#startedAtMs,
+      running: true,
+      shimLastExitCode: null,
+      appServerInitializedAtMs: null,
+      appServerLastError: null,
+      updatedAtMs: Date.now(),
+    };
+    await this.#updateRuntimeStatus({});
+  }
+
+  async #updateRuntimeStatus(
+    patch: Partial<
+      Pick<
+        ShimRuntimeStatus,
+        | "running"
+        | "shimLastExitCode"
+        | "appServerInitializedAtMs"
+        | "appServerLastError"
+      >
+    >,
+  ): Promise<void> {
+    if (!this.#runtimeStatus || !this.#options.runtimeStatusPath) {
+      return;
+    }
+    this.#runtimeStatus = {
+      ...this.#runtimeStatus,
+      ...patch,
+      updatedAtMs: Date.now(),
+    };
+    const snapshot = { ...this.#runtimeStatus };
+    this.#runtimeStatusQueue = this.#runtimeStatusQueue
+      .catch(() => undefined)
+      .then(() => saveShimRuntimeStatus(this.#options.runtimeStatusPath!, snapshot));
+    await this.#runtimeStatusQueue;
   }
 
   async #connectUpstream(): Promise<WebSocket> {
@@ -805,6 +889,7 @@ export class SharedAppServer {
     }
     const params = isRecord(message.params) ? message.params : {};
     if (
+      message.method === "initialize" ||
       message.method === "thread/start" ||
       message.method === "thread/resume" ||
       message.method === "turn/start" ||
@@ -840,6 +925,16 @@ export class SharedAppServer {
       const pending = pendingClientRequests.get(message.id);
       if (pending) {
         pendingClientRequests.delete(message.id);
+        if (
+          !message.error &&
+          pending.method === "initialize" &&
+          pending.clientIdentity.clientSource === "vscode"
+        ) {
+          void this.#updateRuntimeStatus({
+            appServerInitializedAtMs: Date.now(),
+            appServerLastError: null,
+          }).catch(() => undefined);
+        }
         const result = isRecord(message.result) ? message.result : {};
         const thread = result.thread;
         if (isRecord(thread) && typeof thread.id === "string") {

@@ -14,6 +14,7 @@ import {
   activeBridgeConfigPath,
   bridgeAuditPath,
   bridgeRemoteControlDir,
+  bridgeShimRuntimeStatusPath,
   officialCodexRuntimePath,
 } from "../core/locations.js";
 import type { BridgeConfig } from "../core/types.js";
@@ -313,6 +314,9 @@ async function main(): Promise<number> {
     localWorkspaceContextPath: localWorkspaceContextFile,
     localWorkspaceRoot,
     remoteMcpServers,
+    runtimeStatusPath: config
+      ? bridgeShimRuntimeStatusPath(config.host, config.workspaceRoot)
+      : undefined,
   });
   return await proxy.run();
 }

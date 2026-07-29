@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 60 个测试文件通过、1 个真实远端条件文件跳过，267 项通过、6 项
+`npm run test` 为 62 个测试文件通过、1 个真实远端条件文件跳过，290 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -86,6 +86,16 @@ Windows VSIX 继续只包含 `codex-bridge-shim.exe`。内容寻址安装、旧 
 和设置迁移保持兼容。在清空环境并把 `PATH` 限定为 `/usr/bin` 的探针中，自包含入口
 能够运行并按预期因缺少测试运行时元数据失败，而不是报 `node` 不存在；完整 Shim 冒烟
 也通过。精确候选的真实官方面板启动仍待本批最终安装后复核。
+`0.3.49` 把状态栏 `ready` 从“远端 Executor 探针成功”收紧为“远端 transport 可用且
+本机 Shim 存活、官方 app-server 已完成 VS Code 客户端 initialize”。Shim 按远端
+工作区写入不含凭据的原子运行状态，记录自包含/Node 入口、PID、启动时间、最后退出码、
+app-server 初始化时间和最后错误；Controller 持续检查 PID 与状态文件，在
+`degraded`/`ready` 间恢复，不把仅远端连通的窗口标为完整就绪。Diagnostics 新增
+`nodeExecutable`、`shimStarted`、`shimPid`、`shimLastExitCode`、
+`appServerInitialized` 和 `appServerLastError`。设置写入触发窗口重载时的精确
+`Canceled` 现在视为 Extension Host 正常终止信号，不再弹出无意义的 bootstrap failed。
+状态持久化、位置、共享 app-server 与重载路径共 21 项定向测试通过；自包含 Shim 冒烟
+同时验证 initialize 和退出状态。真实状态栏恢复与官方面板仍待最终候选安装后复核。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

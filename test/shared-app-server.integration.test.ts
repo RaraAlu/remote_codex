@@ -10,6 +10,7 @@ import {
   bridgeExternalCliSessionPath,
   bridgeExternalCliTokenPath,
 } from "../src/core/locations.js";
+import { loadShimRuntimeStatus } from "../src/core/shim-runtime-status.js";
 import {
   SharedAppServer,
   withSharedWebSocketTransport,
@@ -305,6 +306,7 @@ describe("SharedAppServer", () => {
       }
     });
     let sshSpawns = 0;
+    const runtimeStatusPath = join(directory, "shim-runtime.json");
     const server = new SharedAppServer({
       appServerArgs: ["app-server", "--listen", "stdio://"],
       auditPath: join(directory, "audit.jsonl"),
@@ -317,6 +319,7 @@ describe("SharedAppServer", () => {
       input,
       output,
       errorOutput,
+      runtimeStatusPath,
       spawnCodex: fakeWebSocketAppServer,
       spawnSsh: () => {
         sshSpawns += 1;
@@ -342,6 +345,17 @@ describe("SharedAppServer", () => {
     await waitFor(() =>
       vscodeMessages.some((message) => message.id === 2) ? true : undefined,
     );
+    const initializedRuntime = await waitFor(async () => {
+      const current = await loadShimRuntimeStatus(runtimeStatusPath);
+      return current?.appServerInitializedAtMs ? current : undefined;
+    });
+    expect(initializedRuntime).toMatchObject({
+      host: "g1_1",
+      workspaceRoot: "/remote/workspace",
+      running: true,
+      shimLastExitCode: null,
+      appServerLastError: null,
+    });
 
     const descriptorPath = bridgeExternalCliSessionPath();
     const descriptor = await waitFor(async () => {
@@ -604,6 +618,11 @@ describe("SharedAppServer", () => {
       reason: "Bridge app-server restarting",
     });
     await expect(running).resolves.toBe(0);
+    await expect(loadShimRuntimeStatus(runtimeStatusPath)).resolves.toMatchObject({
+      running: false,
+      shimLastExitCode: 0,
+      appServerLastError: null,
+    });
     await expect(readFile(descriptorPath, "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });

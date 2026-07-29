@@ -101,6 +101,27 @@ export function bridgeRemoteControlDir(
   );
 }
 
+export function bridgeShimRuntimeStatusPath(
+  host: string,
+  workspaceRoot: string,
+  environment: NodeJS.ProcessEnv = process.env,
+  hostPlatform: NodeJS.Platform = process.platform,
+  homeDirectory = homedir(),
+): string {
+  const pathApi = hostPlatform === "win32" ? win32 : posix;
+  const workspaceId = createHash("sha256")
+    .update(host)
+    .update("\0")
+    .update(workspaceRoot)
+    .digest("hex")
+    .slice(0, 32);
+  return pathApi.join(
+    bridgeStateDir(environment, hostPlatform, homeDirectory),
+    "shim-runtime",
+    `${workspaceId}.json`,
+  );
+}
+
 export function bridgeExternalCliDir(environment: NodeJS.ProcessEnv = process.env): string {
   return join(bridgeStateDir(environment), "external-cli");
 }

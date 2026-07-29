@@ -6,7 +6,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.48` 候选。Linux x64 / Remote SSH 已有实机证据，Windows x64
+> 当前源码版本为 `0.3.49` 候选。Linux x64 / Remote SSH 已有实机证据，Windows x64
 > 原生验证尚未完成；在双平台门禁完成前不发布 `0.4.0`，也不扩大支持声明。
 
 ## 工作原理
@@ -68,9 +68,11 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
    - Windows x64：`codex-remote-bridge-<version>-win32-x64.vsix`
 2. 使用 VS Code Remote SSH 打开一个远程工作区根目录。
 3. 等待 Bridge 自动配置、部署 Executor，并在必要时完成一次窗口重载。
-4. 确认状态栏显示 `Codex: local -> <host> (ready)`。
+4. 状态栏可能先显示远端 transport 已就绪但仍在等待 Codex；只有 Shim 进程存活且
+   官方 app-server 完成 `initialize` 后才显示 `Codex: local -> <host> (ready)`。
 5. 运行 `Codex Bridge: Run Diagnostics`，确认远端身份、工作区根和
-   `remote.codexInstalled=false`。
+   `remote.codexInstalled=false`，并检查 `shimStarted`、`appServerInitialized`、
+   `shimLastExitCode` 与 `appServerLastError`。
 6. 在官方 Codex 面板创建任务，并通过日志和审计确认项目操作位于远端。
 
 关闭 `codexRemoteBridge.autoInitialize` 后，可以使用 Configure 和 Start 命令手动

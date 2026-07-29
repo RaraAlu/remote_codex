@@ -21,6 +21,7 @@ import {
   bridgeControlDir,
   bridgeRemoteControlDir,
   bridgeSessionConfigPath,
+  bridgeShimRuntimeStatusPath,
   officialCodexRuntimePath,
 } from "../core/locations.js";
 import {
@@ -31,6 +32,12 @@ import {
 import { redact } from "../core/redaction.js";
 import { OpenSshExecutor } from "../core/ssh-executor.js";
 import { resolveSshExecutable } from "../core/ssh-executable.js";
+import {
+  EMPTY_SHIM_RUNTIME_HEALTH,
+  loadShimRuntimeStatus,
+  shimRuntimeHealth,
+  type ShimRuntimeHealth,
+} from "../core/shim-runtime-status.js";
 import { BridgeStateMachine } from "../core/state-machine.js";
 import type { BridgeConfig, BridgeState, RemoteIdentity } from "../core/types.js";
 import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
@@ -99,6 +106,12 @@ interface DiagnosticReport {
     codexVersion: string | null;
     codexExtensionVersion: string | null;
     shimPath: string;
+    nodeExecutable: string | null;
+    shimStarted: boolean;
+    shimPid: number | null;
+    shimLastExitCode: number | null;
+    appServerInitialized: boolean;
+    appServerLastError: string | null;
     officialSettings: OfficialSettingsStatus;
     authorizedRoots: LocalRootDiagnostic[];
   };
@@ -126,6 +139,18 @@ function stateIcon(state: BridgeState): string {
     default:
       return "$(debug-disconnect)";
   }
+}
+
+function isReloadCancellation(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = error as { message?: unknown; name?: unknown };
+  return (
+    candidate.name === "Canceled" ||
+    candidate.name === "CancellationError" ||
+    candidate.message === "Canceled"
+  );
 }
 
 async function localMachineId(): Promise<string | null> {
@@ -168,6 +193,9 @@ export class BridgeController implements vscode.Disposable {
   #shutdown: Promise<void> | null = null;
   #autoSuppressed = false;
   #remoteIdentity: RemoteIdentity | null = null;
+  #shimRuntimeHealth: ShimRuntimeHealth = { ...EMPTY_SHIM_RUNTIME_HEALTH };
+  #shimRuntimeMonitor: NodeJS.Timeout | null = null;
+  #shimRuntimeMonitorGeneration = 0;
 
   constructor(context: vscode.ExtensionContext) {
     this.#context = context;
@@ -309,7 +337,7 @@ export class BridgeController implements vscode.Disposable {
         const shimPath = await installShimExecutable(this.#context);
         if (await this.#settings.repairManagedExecutable(shimPath)) {
           this.#log(`migrated the managed Codex launcher to ${shimPath}; reloading the window`);
-          await vscode.commands.executeCommand("workbench.action.reloadWindow");
+          await this.#reloadWindow();
           return;
         }
       } catch (error) {
@@ -486,6 +514,8 @@ export class BridgeController implements vscode.Disposable {
   }
 
   async #configureCurrentRemote(interactive: boolean): Promise<void> {
+    this.#stopShimRuntimeMonitor();
+    this.#shimRuntimeHealth = { ...EMPTY_SHIM_RUNTIME_HEALTH };
     if (this.#state.state !== "disabled") {
       this.#executor?.close();
       this.#executor = null;
@@ -524,7 +554,7 @@ export class BridgeController implements vscode.Disposable {
             .update("autoInitialize", true, vscode.ConfigurationTarget.Global);
         }
         this.#log("official Codex settings updated; reloading the window once");
-        await vscode.commands.executeCommand("workbench.action.reloadWindow");
+        await this.#reloadWindow();
         if (this.#state.state === "configuring") {
           this.#state.transition("disabled");
         }
@@ -538,7 +568,9 @@ export class BridgeController implements vscode.Disposable {
       await this.#connect();
       if (interactive) {
         void vscode.window.showInformationMessage(
-          `Codex Bridge ready: official extension Codex -> ${config.host}`,
+          this.#state.state === "ready"
+            ? `Codex Bridge ready: official extension Codex -> ${config.host}`
+            : `Codex Bridge remote transport ready; waiting for official Codex app-server -> ${config.host}`,
         );
       }
     } catch (error) {
@@ -548,6 +580,17 @@ export class BridgeController implements vscode.Disposable {
       );
       this.#transitionFailure(bridgeError);
       void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+    }
+  }
+
+  async #reloadWindow(): Promise<void> {
+    try {
+      await vscode.commands.executeCommand("workbench.action.reloadWindow");
+    } catch (error) {
+      if (!isReloadCancellation(error)) {
+        throw error;
+      }
+      this.#log("window reload request canceled this Extension Host activation as expected");
     }
   }
 
@@ -570,7 +613,9 @@ export class BridgeController implements vscode.Disposable {
       await this.#saveWindowSession(this.#config);
       await this.#connect();
       void vscode.window.showInformationMessage(
-        `Codex Bridge ready: official extension Codex -> ${this.#config.host}`,
+        this.#state.state === "ready"
+          ? `Codex Bridge ready: official extension Codex -> ${this.#config.host}`
+          : `Codex Bridge remote transport ready; waiting for official Codex app-server -> ${this.#config.host}`,
       );
     } catch (error) {
       const bridgeError = asBridgeError(error, "SSH_DISCONNECTED");
@@ -582,6 +627,8 @@ export class BridgeController implements vscode.Disposable {
 
   async stop(): Promise<void> {
     this.#autoSuppressed = true;
+    this.#stopShimRuntimeMonitor();
+    this.#shimRuntimeHealth = { ...EMPTY_SHIM_RUNTIME_HEALTH };
     await this.#clearWindowSession();
     const executor = this.#executor;
     let remoteStop:
@@ -740,6 +787,7 @@ export class BridgeController implements vscode.Disposable {
   }
 
   async #shutdownOnce(): Promise<void> {
+    this.#stopShimRuntimeMonitor();
     this.#executor?.close();
     this.#executor = null;
     try {
@@ -854,6 +902,7 @@ export class BridgeController implements vscode.Disposable {
     if (!this.#config) {
       throw new BridgeError("INVALID_CONFIG", "Bridge is not configured");
     }
+    this.#stopShimRuntimeMonitor();
     if (this.#config.connectionMode === "vscode-remote") {
       await this.#ensureRemoteExecutor();
     }
@@ -877,11 +926,16 @@ export class BridgeController implements vscode.Disposable {
         },
       );
     }
-    this.#state.transition("ready");
+    this.#shimRuntimeHealth = await this.#readShimRuntimeHealth(this.#config);
+    const connectedState = this.#shimRuntimeHealth.appServerInitialized
+      ? "ready"
+      : "degraded";
+    this.#state.transition(connectedState);
+    this.#startShimRuntimeMonitor();
     await this.#audit.write({
       operation: "bridge.connect",
       outcome: "succeeded",
-      state: "ready",
+      state: connectedState,
       connectionId: this.#executor.connectionId,
       hostId: this.#config.host,
       workspaceRoot: this.#config.workspaceRoot,
@@ -890,6 +944,8 @@ export class BridgeController implements vscode.Disposable {
         connectionMode: this.#config.connectionMode,
         hostname: this.#remoteIdentity.hostname,
         machineId: this.#remoteIdentity.machineId,
+        appServerInitialized: this.#shimRuntimeHealth.appServerInitialized,
+        shimStarted: this.#shimRuntimeHealth.shimStarted,
       },
     });
     try {
@@ -899,6 +955,74 @@ export class BridgeController implements vscode.Disposable {
       }
     } catch (error) {
       this.#log(`Codex view location repair skipped: ${String(error)}`);
+    }
+  }
+
+  async #readShimRuntimeHealth(config: BridgeConfig): Promise<ShimRuntimeHealth> {
+    try {
+      const status = await loadShimRuntimeStatus(
+        bridgeShimRuntimeStatusPath(config.host, config.workspaceRoot),
+      );
+      return shimRuntimeHealth(status, undefined, process.pid);
+    } catch (error) {
+      this.#log(`Shim runtime status unavailable: ${String(error)}`);
+      return {
+        ...EMPTY_SHIM_RUNTIME_HEALTH,
+        appServerLastError:
+          error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  #startShimRuntimeMonitor(): void {
+    this.#stopShimRuntimeMonitor();
+    const generation = this.#shimRuntimeMonitorGeneration;
+    const poll = async (): Promise<void> => {
+      if (
+        generation !== this.#shimRuntimeMonitorGeneration ||
+        !this.#config ||
+        !this.#executor
+      ) {
+        return;
+      }
+      const previous = this.#shimRuntimeHealth;
+      this.#shimRuntimeHealth = await this.#readShimRuntimeHealth(this.#config);
+      const currentState = this.#state.state;
+      if (
+        this.#shimRuntimeHealth.appServerInitialized &&
+        currentState === "degraded"
+      ) {
+        this.#state.transition("ready");
+        this.#log("official Codex Shim and app-server initialization confirmed");
+      } else if (
+        !this.#shimRuntimeHealth.appServerInitialized &&
+        currentState === "ready"
+      ) {
+        this.#state.transition("degraded");
+        this.#log("official Codex Shim or app-server heartbeat was lost");
+      } else if (
+        previous.appServerLastError !== this.#shimRuntimeHealth.appServerLastError ||
+        previous.shimStarted !== this.#shimRuntimeHealth.shimStarted
+      ) {
+        this.#renderStatus();
+      }
+      if (
+        generation === this.#shimRuntimeMonitorGeneration &&
+        this.#executor
+      ) {
+        this.#shimRuntimeMonitor = setTimeout(() => void poll(), 1_000);
+        this.#shimRuntimeMonitor.unref();
+      }
+    };
+    this.#shimRuntimeMonitor = setTimeout(() => void poll(), 250);
+    this.#shimRuntimeMonitor.unref();
+  }
+
+  #stopShimRuntimeMonitor(): void {
+    this.#shimRuntimeMonitorGeneration += 1;
+    if (this.#shimRuntimeMonitor) {
+      clearTimeout(this.#shimRuntimeMonitor);
+      this.#shimRuntimeMonitor = null;
     }
   }
 
@@ -1058,6 +1182,9 @@ export class BridgeController implements vscode.Disposable {
     const controlDir = config
       ? bridgeRemoteControlDir(config.host, config.workspaceRoot)
       : bridgeControlDir();
+    const shimHealth = config
+      ? await this.#readShimRuntimeHealth(config)
+      : { ...EMPTY_SHIM_RUNTIME_HEALTH };
     return {
       generatedAt: new Date().toISOString(),
       bridge: {
@@ -1090,6 +1217,12 @@ export class BridgeController implements vscode.Disposable {
         codexExtensionVersion:
           (codexExtension?.packageJSON.version as string | undefined) ?? null,
         shimPath,
+        nodeExecutable: shimHealth.nodeExecutable,
+        shimStarted: shimHealth.shimStarted,
+        shimPid: shimHealth.shimPid,
+        shimLastExitCode: shimHealth.shimLastExitCode,
+        appServerInitialized: shimHealth.appServerInitialized,
+        appServerLastError: shimHealth.appServerLastError,
         officialSettings: this.#settings.status(shimPath),
         authorizedRoots: await this.#localRootDiagnostics(config),
       },
@@ -1195,7 +1328,20 @@ export class BridgeController implements vscode.Disposable {
 
   #renderStatus(): void {
     const target = this.#config?.host ?? "unconfigured";
-    this.#status.text = `${stateIcon(this.#state.state)} Codex: local -> ${target} (${this.#state.state})`;
+    const stateLabel =
+      this.#state.state === "degraded" &&
+      this.#remoteIdentity &&
+      !this.#shimRuntimeHealth.appServerInitialized
+        ? this.#shimRuntimeHealth.appServerLastError
+          ? "remote ready; Codex failed"
+          : this.#shimRuntimeHealth.shimStarted
+            ? "remote ready; Codex starting"
+            : "remote ready; waiting for Codex"
+        : this.#state.state;
+    this.#status.text = `${stateIcon(this.#state.state)} Codex: local -> ${target} (${stateLabel})`;
+    this.#status.tooltip =
+      this.#shimRuntimeHealth.appServerLastError ??
+      "Codex Remote Bridge diagnostics";
     this.#status.backgroundColor =
       this.#state.state === "incompatible" || this.#state.state === "disconnected"
         ? new vscode.ThemeColor("statusBarItem.errorBackground")
