@@ -98,6 +98,7 @@ export interface SharedAppServerOptions {
   input?: Readable;
   output?: Writable;
   errorOutput?: Writable;
+  remoteMcpServers?: readonly string[];
   spawnCodex?: (
     command: string,
     args: readonly string[],
@@ -724,6 +725,7 @@ export class SharedAppServer {
       clientIdentity,
       remoteToolCalls: this.#remoteToolCalls,
       remoteToolPriority,
+      remoteMcpServers: this.#options.remoteMcpServers,
       turnClients: this.#turnClients,
       observeApprovalPolicy,
       rewriteClientMessages: this.#options.config !== null,

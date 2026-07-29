@@ -19,7 +19,8 @@ const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
 - For a long-running non-interactive command, use remote_background_start once, then remote_background_status and remote_background_log with cursors; use remote_background_cancel when it must stop.
 - Never use background tasks for commands that require an interactive terminal or stdin after launch.
 - Local MCP, app, and connector tools may be used for complementary capabilities.
-- A local MCP tool must not read, write, or execute workspace paths unless it explicitly supports the selected Bridge target and root.
+- MCP servers listed below as remote-routed are already bound to the remote primary root. Their tools intentionally do not need target or rootId.
+- An unlisted local MCP tool must not read, write, or execute workspace paths unless it explicitly supports the selected Bridge target and root.
 - Never use built-in local shell or filesystem tools to bypass Bridge workspace tools.
 - The local cwd is an empty control directory and is not the project.
 - When a required capability is unavailable, stop and report that the bridge does not support it. Never fall back to unapproved local execution.`;
@@ -37,7 +38,33 @@ function remotePrimaryRoot(config: BridgeConfig): WorkspaceRootConfig {
   return root;
 }
 
-function remotePolicy(config: BridgeConfig): string {
+function remoteMcpPolicy(remoteMcpServers: readonly string[]): string {
+  const servers = [...new Set(remoteMcpServers)]
+    .filter((server) => server.length > 0)
+    .sort();
+  const codegraphRouted = servers.includes("codegraph");
+  return [
+    "MCP routing for this app-server:",
+    `- Remote-routed servers: ${servers.length > 0 ? servers.join(", ") : "none"}.`,
+    ...(servers.length > 0
+      ? [
+          "- Use tools from the listed servers directly for their remote workspace capabilities; do not reject them for omitting target or rootId.",
+        ]
+      : []),
+    ...(codegraphRouted
+      ? [
+          "- Prefer the remote-routed Codegraph MCP explore, node, and impact tools for source analysis before workspace scans.",
+        ]
+      : [
+          "- If Codegraph analysis is useful, first use remote_exec to probe codegraph --version and invoke its remote CLI from the primary root when available.",
+        ]),
+  ].join("\n");
+}
+
+function remotePolicy(
+  config: BridgeConfig,
+  remoteMcpServers: readonly string[],
+): string {
   remotePrimaryRoot(config);
   const roots = [
     "Authorized workspace roots:",
@@ -47,11 +74,20 @@ function remotePolicy(config: BridgeConfig): string {
         `- Root id: ${root.id}; target: ${root.target}; role: ${root.role}; path: ${root.path}`,
     ),
   ].join("\n");
-  return [REMOTE_INSTRUCTIONS, roots].join("\n\n");
+  return [REMOTE_INSTRUCTIONS, remoteMcpPolicy(remoteMcpServers), roots].join(
+    "\n\n",
+  );
 }
 
-function mergeInstructions(existing: unknown, config: BridgeConfig): string {
-  return [remotePolicy(config), typeof existing === "string" ? existing : ""]
+function mergeInstructions(
+  existing: unknown,
+  config: BridgeConfig,
+  remoteMcpServers: readonly string[],
+): string {
+  return [
+    remotePolicy(config, remoteMcpServers),
+    typeof existing === "string" ? existing : "",
+  ]
     .filter(Boolean)
     .join("\n\n");
 }
@@ -60,6 +96,7 @@ function mergeAdditionalContext(
   existing: unknown,
   config: BridgeConfig,
   editorContext: RemoteEditorContext | null,
+  remoteMcpServers: readonly string[],
 ): Record<string, unknown> {
   const current = isRecord(existing) ? { ...existing } : {};
   delete current[REMOTE_EDITOR_CONTEXT_KEY];
@@ -67,7 +104,7 @@ function mergeAdditionalContext(
     ...current,
     [REMOTE_TURN_CONTEXT_KEY]: {
       kind: "application",
-      value: remotePolicy(config),
+      value: remotePolicy(config, remoteMcpServers),
     },
     ...(editorContext
       ? {
@@ -145,6 +182,7 @@ export function rewriteClientMessage(
   config: BridgeConfig | null,
   controlDir: string,
   editorContext: RemoteEditorContext | null = null,
+  remoteMcpServers: readonly string[] = [],
 ): RpcMessage {
   if (!("method" in message) || !isRecord(message.params)) {
     return message;
@@ -179,6 +217,7 @@ export function rewriteClientMessage(
               developerInstructions: mergeInstructions(
                 message.params.developerInstructions,
                 config,
+                remoteMcpServers,
               ),
               dynamicTools: mergeDynamicTools(message.params.dynamicTools),
             }
@@ -200,6 +239,7 @@ export function rewriteClientMessage(
               developerInstructions: mergeInstructions(
                 message.params.developerInstructions,
                 config,
+                remoteMcpServers,
               ),
             }
           : {}),
@@ -228,6 +268,7 @@ export function rewriteClientMessage(
                 message.params.additionalContext,
                 config,
                 editorContext,
+                remoteMcpServers,
               ),
             }
           : {}),
@@ -257,6 +298,7 @@ export function rewriteClientMessage(
               developerInstructions: mergeInstructions(
                 message.params.developerInstructions,
                 config,
+                remoteMcpServers,
               ),
             }
           : { sandbox: "read-only" }),

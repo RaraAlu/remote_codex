@@ -93,6 +93,8 @@ describe("app-server request rewriting", () => {
       },
       config,
       "/local/control",
+      null,
+      ["codegraph"],
     ) as { params: Record<string, unknown> };
     expect(rewritten.params.cwd).toBe("/local/control");
     expect(rewritten.params.runtimeWorkspaceRoots).toEqual([
@@ -107,6 +109,15 @@ describe("app-server request rewriting", () => {
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
       "Local MCP, app, and connector tools may be used",
+    );
+    expect(String(rewritten.params.developerInstructions)).toContain(
+      "Remote-routed servers: codegraph",
+    );
+    expect(String(rewritten.params.developerInstructions)).toContain(
+      "do not reject them for omitting target or rootId",
+    );
+    expect(String(rewritten.params.developerInstructions)).toContain(
+      "Prefer the remote-routed Codegraph MCP",
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
       "Root id: remote-primary",
@@ -145,6 +156,8 @@ describe("app-server request rewriting", () => {
       },
       config,
       "/local/control",
+      null,
+      [],
     ) as { params: Record<string, unknown> };
 
     expect(rewritten.params.permissions).toBe(REMOTE_PERMISSION_PROFILE_ID);
@@ -233,6 +246,10 @@ describe("app-server request rewriting", () => {
     expect(bridgeContext.value).toContain("role: primary");
     expect(bridgeContext.value).toContain(
       "Use remote_exec for all project commands",
+    );
+    expect(bridgeContext.value).toContain("Remote-routed servers: none");
+    expect(bridgeContext.value).toContain(
+      "first use remote_exec to probe codegraph --version",
     );
     expect(bridgeContext.value).not.toContain("stale");
     expect(additionalContext).not.toHaveProperty(

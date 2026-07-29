@@ -312,6 +312,7 @@ async function main(): Promise<number> {
     controlDir,
     localWorkspaceContextPath: localWorkspaceContextFile,
     localWorkspaceRoot,
+    remoteMcpServers,
   });
   return await proxy.run();
 }

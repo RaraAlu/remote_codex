@@ -72,6 +72,7 @@ export interface ShimProxyOptions {
   clientIdentity?: BridgeClientIdentity;
   remoteToolCalls?: RemoteToolCallCoordinator;
   remoteToolPriority?: number;
+  remoteMcpServers?: readonly string[];
   turnClients?: RemoteTurnClientTracker;
   observeApprovalPolicy?: boolean;
   rewriteClientMessages?: boolean;
@@ -694,6 +695,7 @@ export class ShimProxy {
             this.#options.config,
             this.#options.controlDir,
             editorContext,
+            this.#options.remoteMcpServers,
           );
     writeServer(rewritten);
   }

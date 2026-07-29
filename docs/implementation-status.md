@@ -57,6 +57,20 @@ Core `cwd`：Bridge 根据规范化的 `host + workspaceRoot` 生成稳定摘要
 运行，逻辑主根仍由 `runtimeWorkspaceRoots` 和 Bridge 工具承载；官方 VS Code 客户端
 的 `thread/list` 只查询当前控制目录。外部 CLI 的显式 thread 恢复能力保持不变。
 旧版共享控制目录中的远程历史无法可靠区分所属远端根，因此不会合并进新列表。
+`0.3.46` 修正 Remote SSH thread 对已远程路由 MCP 的工具选择说明。真实 `g1_1`
+会话已经把 `codegraph` 通过活动 VS Code transport 绑定到远端主根，但旧策略只说明
+“本地 MCP 必须显式支持 target/rootId”，没有把本次 app-server 实际接受的远程路由
+列表交给模型，导致模型把无 `target/rootId` 参数的远端 Codegraph 工具误判成本地
+工具。Shim 现在把实际 `remoteMcpServers` 从启动路由结果传入每个共享代理会话，在
+thread start/resume/fork 和每轮上下文中明确列出已绑定远端主根的服务；列出的工具
+可直接调用且不需要 Bridge 根参数。Codegraph 未被远程路由时，策略才要求先通过
+`remote_exec` 探测并调用远端 CLI，而不是仅凭 MCP Schema 宣告能力不可用。
+用户安装候选并手动重载 `g1_1` 后，活动 Shim 切换到精确 `0.3.46`，Bridge 重新进入
+`ready`，远端 Codegraph MCP 进程继续绑定
+`/home/unitree/mimiclite-sim2real`。共享 app-server 的真实新 turn 直接产生
+`server=codegraph`、`tool=codegraph_explore`、`status=completed` 的 MCP 工具项，
+没有 `remote_exec` 或 `workspace_*` 调用；模型返回
+`REMOTE_CODEGRAPH_MCP_0346_OK`，证明缺少 `target/rootId` 不再被误判为不可调用。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知
@@ -484,6 +498,8 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 `docs/acceptance/2026-07-28-release-0.3.44-local-task-list-scope.md`；Remote SSH
 任务列表隔离和 g1_1 只读远程操作见
 `docs/acceptance/2026-07-28-release-0.3.45-remote-task-list-scope.md`。
+远程路由 MCP 工具身份修复见
+`docs/acceptance/2026-07-28-release-0.3.46-remote-mcp-tool-guidance.md`。
 
 ## 本地 MCP 边界
 

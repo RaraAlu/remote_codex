@@ -1,6 +1,6 @@
 # 兼容矩阵
 
-更新日期：2026-07-27
+更新日期：2026-07-28
 
 当前源码是“官方扩展内置运行时”候选，本次实测来源为
 `openai.chatgpt@26.721.41059` 及其内置 Codex `0.146.0-alpha.3.1`。协议生成、差异
@@ -15,7 +15,7 @@ Codex CLI 仅作为可选外部客户端按能力探测，不固定版本，也�
 | --- | --- | --- | --- |
 | VS Code | `1.130.0`（Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | 官方面板和外部 CLI 发起的 Remote SSH 任务通过 |
 | 官方 Codex 扩展 | 本次探测 `openai.chatgpt@26.721.41059` | 固定扩展 ID，不固定版本；使用 VS Code 当前实际加载版本 | 普通本地窗口、Remote SSH 官方新任务和外部 CLI 双向投影通过 |
-| Bridge Controller | `0.3.43` Linux 本地候选；`0.3.42` Linux Remote SSH 实机；`0.2.7` Windows 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | `0.3.43` 本地托管入口已安装并重载；其他工作区多个活动 thread 不再拦截普通 `codex`；Windows stage、候选安装与双平台实机待补测 |
+| Bridge Controller | `0.3.46` Linux Remote SSH 候选；`0.2.7` Windows 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | `0.3.46` 已安装并在 `g1_1` 重载；任务列表隔离和远程 Codegraph MCP 工具身份通过；Windows stage、候选安装与双平台实机待补测 |
 | Remote Executor | `0.2.19`，诊断协议 11，Linux x64 候选 | Workspace 扩展；通过当前 Remote SSH 通道自动部署；ping 按所需能力集合验收，不按包版本或协议号门禁 | 精确 stdin 长度和死亡拥有者写入清理能力已驱动真实自动升级；`g1_1` Extension Host SIGKILL 后原文件不变、无临时文件或登记、不自动重放 |
 | 官方扩展内置 Codex/app-server | 本次探测 `0.146.0-alpha.3.1` | 只从当前官方扩展安装目录启动；版本仅作诊断和协议快照索引 | 真实 Shim 冒烟、普通本地、Remote SSH 官方面板和外部 CLI thread 通过 |
 | 系统 Codex CLI | 本次探针 `0.145.0`，不固定 | 仅用于 MCP、远程外部客户端和 POSIX 普通入口；运行时探测所需参数，官方扩展内置 app-server 仍是唯一服务端 | `0.3.43` 普通 `codex` 当前目录无匹配时真实透传；`codex-vscode` Remote SSH 多轮实机通过；Windows 待验证 |
@@ -57,7 +57,11 @@ transport 关闭终结修复及 Linux Remote SSH 实机见
 失联响应、写入短流和死亡拥有者清理见
 `docs/acceptance/2026-07-27-release-0.3.37-executor-loss-response.md`。
 当前普通 CLI 工作区选择和跨目录透传证据见
-`docs/acceptance/2026-07-27-release-0.3.43-plain-cli-workspace-selection.md`。
+`docs/acceptance/2026-07-27-release-0.3.43-plain-cli-workspace-selection.md`；当前
+Remote SSH 任务列表隔离见
+`docs/acceptance/2026-07-28-release-0.3.45-remote-task-list-scope.md`；远程
+Codegraph MCP 工具身份和真实 `codegraph_explore` 见
+`docs/acceptance/2026-07-28-release-0.3.46-remote-mcp-tool-guidance.md`。
 
 当前协议文件位于 `protocol/0.146.0-alpha.3/`。`ServerRequest.json` 的方法集合由自动化测试与
 Shim 的已知请求白名单逐项比对；出现新请求时测试失败，而不是静默转发潜在副作用。
