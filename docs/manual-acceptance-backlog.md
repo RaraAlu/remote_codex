@@ -130,7 +130,10 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
   `codegraph-all-tools-v1` 暴露 8 个工具，启动参数和当前进程级审批覆盖均与设置一致。
   Executor `0.2.15` 主动停止、relay 断开和 `0.3.28` Extension Host 重载均确认
   两层 CodeGraph 进程与本地测试 relay 为 0。`0.3.29` 显式停止和设置恢复又分别清理
-  1 个远端 stdio 会话及本地 relay，遗留均为 0。窗口关闭矩阵仍待补。
+  1 个远端 stdio 会话及本地 relay，遗留均为 0。精确 `0.3.49` 重载后又完成一次
+  直接 Codegraph MCP `codegraph_status`：`29 ms` 返回远端项目 93 个索引文件；同一
+  turn 的 `remote_exec(["pwd"])` 在省略 `target/rootId` 时以 `19 ms` 返回远端主根，
+  两条路径均由当前 VS Code Remote transport 和远端进程确认。窗口关闭矩阵仍待补。
 - M10：外部 MCP 方向完成新 thread、steer、3 次取消、历史观察、安全写入和
   `expectedTurnId` 冲突拒绝；官方 UI 反向操作、断开、重启、描述符过期和权限撤销
   中，重载后的旧端点已确认 `ECONNREFUSED`，旧 Token 访问当前网关返回 401，当前
@@ -153,8 +156,10 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
   中断、运行中远端进程归零且无命令重放；3 个活动令牌样本对审计、588 个 Code
   日志、212 个 Git 文件、701 个进程参数和 MCP 配置的命中均为 0，远端测试路径、
   Codex/app-server、标记进程和敏感环境键也均为 0。Remote SSH 窗口关闭仍待补。
-- Linux 本地 Controller 已安装并重载为 `0.3.43` 候选，最新 Remote SSH 实机仍为
-  `0.3.42`，Executor 保持 `0.2.19`；
+- Linux 本地 Controller 已安装并在 `g1_1` 重载为精确 `0.3.49` 候选，Executor
+  保持 `0.2.19`；当前自包含 Shim、app-server initialize 心跳、等待态到 `ready`、
+  官方新 turn、远端 `pwd` 和直接 Codegraph MCP 已闭环，证据见
+  `docs/acceptance/2026-07-28-release-0.3.49-linux-startup-real.md`。
   中断工具即时终态和跨 turn 有界历史恢复均已完成实机复核，
   `0.3.37` 的精确安装、重载、能力升级和独立失联写入已经闭环。L02、自动 IDE
   背景、外部 `full-access` 和 transport socket 关闭挂起修复均已闭环。精确
@@ -164,12 +169,16 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
 
 ## 当前 Linux 剩余人工批次
 
-以下只列当前 `0.3.42` Linux 候选无法由注入、协议探针或静态检查替代的人工动作。
+以下保留 Linux 候选无法由注入、协议探针或静态检查替代的人工动作及已完成证据。
 每次用户完成动作后，Codex 负责读取日志、审计、会话和远端进程，执行其余工具矩阵并
 更新证据。Windows x64 和未选择的 OpenSSH 回退不在本轮。
 
 ### L01 当前候选启动与官方任务样本
 
+- 当前证据：精确 `0.3.49` 在用户重载 `g1_1` 后用 `3,615 ms` 从 `connecting`
+  到达 `ready`；期间先进入 `degraded`，在当前 Shim 的 app-server initialize 后
+  `250 ms` 才转为 `ready`。自包含 ELF Shim 不依赖 Node，官方新 turn 在
+  `13,935 ms` 内完成远端 `pwd` 和直接 Codegraph MCP 状态调用，失败数为 0。
 - 当前证据：精确 `0.3.37` 三次重载分别在 4,354 ms、3,999 ms、3,871 ms 从
   `configuring` 到达 `ready`，当前热启动 3/3，P50 为 3,999 ms、最大值为
   4,354 ms、失败数为 0；活动 Shim 和 Executor 摘要均与最终构建一致。

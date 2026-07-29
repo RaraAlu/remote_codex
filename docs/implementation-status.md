@@ -78,14 +78,17 @@ Extension Host 的官方扩展被误报为未安装。自动初始化现在先�
 链路；已有托管入口也先修复 extension kind，再刷新官方 Codex 运行时。只有设置已经
 生效后才检测官方扩展和内置 Codex。定向类型检查与 automatic initialization、
 Controller reconfigure、settings manager 共 11 项测试通过；精确 `0.3.47` 的真实窗口
-重载仍待本批最终候选安装后复核。
+迁移已随 `0.3.49` 最终候选重载复核：官方扩展运行于本地 UI Extension Host，日志
+没有再次误报官方扩展未安装，窗口重载取消按正常生命周期记录。
 `0.3.48` 将 Linux x64 Controller 中由 `/usr/bin/env node` 启动的 JavaScript Shim
 替换为 Node SEA 自包含 ELF。构建仍保留 CJS 作为 SEA 输入和源码级中间产物，但 Linux
 VSIX 只包含 `codex-bridge-shim` 原生入口，不再包含可被官方扩展直接启动的 CJS；
 Windows VSIX 继续只包含 `codex-bridge-shim.exe`。内容寻址安装、旧 CJS 托管路径识别
 和设置迁移保持兼容。在清空环境并把 `PATH` 限定为 `/usr/bin` 的探针中，自包含入口
 能够运行并按预期因缺少测试运行时元数据失败，而不是报 `node` 不存在；完整 Shim 冒烟
-也通过。精确候选的真实官方面板启动仍待本批最终安装后复核。
+也通过。精确 `0.3.49` 的真实官方面板已从内容寻址 ELF 启动；运行状态为
+`nodeExecutable=null`，重载后日志没有 `/usr/bin/env: node`、退出 `127` 或 stdin
+destroyed。
 `0.3.49` 把状态栏 `ready` 从“远端 Executor 探针成功”收紧为“远端 transport 可用且
 本机 Shim 存活、官方 app-server 已完成 VS Code 客户端 initialize”。Shim 按远端
 工作区写入不含凭据的原子运行状态，记录自包含/Node 入口、PID、启动时间、最后退出码、
@@ -95,7 +98,12 @@ app-server 初始化时间和最后错误；Controller 持续检查 PID 与状�
 `appServerInitialized` 和 `appServerLastError`。设置写入触发窗口重载时的精确
 `Canceled` 现在视为 Extension Host 正常终止信号，不再弹出无意义的 bootstrap failed。
 状态持久化、位置、共享 app-server 与重载路径共 21 项定向测试通过；自包含 Shim 冒烟
-同时验证 initialize 和退出状态。真实状态栏恢复与官方面板仍待最终候选安装后复核。
+同时验证 initialize 和退出状态。精确 `0.3.49` 已在 `g1_1` 真实窗口完成最终复核：
+app-server 在 Shim 启动后 `127 ms` 完成 initialize；Bridge 先进入 `degraded`，
+`250 ms` 后才进入 `ready`。官方新 turn 的 `remote_exec(["pwd"])` 和直接 Codegraph
+MCP `codegraph_status` 均经活动 VS Code Remote transport 落在
+`/home/unitree/mimiclite-sim2real`，模型返回 `REMOTE_STARTUP_0349_OK`。完整实机
+证据见 `docs/acceptance/2026-07-28-release-0.3.49-linux-startup-real.md`。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知
@@ -524,7 +532,13 @@ Controller 到远端 Ubuntu Executor 的主链路已通过；Linux x64 Controlle
 任务列表隔离和 g1_1 只读远程操作见
 `docs/acceptance/2026-07-28-release-0.3.45-remote-task-list-scope.md`。
 远程路由 MCP 工具身份修复见
-`docs/acceptance/2026-07-28-release-0.3.46-remote-mcp-tool-guidance.md`。
+`docs/acceptance/2026-07-28-release-0.3.46-remote-mcp-tool-guidance.md`；首次配置顺序见
+`docs/acceptance/2026-07-28-release-0.3.47-official-extension-bootstrap-order.md`；
+Linux 自包含 Shim 见
+`docs/acceptance/2026-07-28-release-0.3.48-linux-self-contained-shim.md`；app-server
+就绪门槛及最终 Linux 实机分别见
+`docs/acceptance/2026-07-28-release-0.3.49-app-server-readiness.md` 和
+`docs/acceptance/2026-07-28-release-0.3.49-linux-startup-real.md`。
 
 ## 本地 MCP 边界
 

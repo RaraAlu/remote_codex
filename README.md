@@ -196,27 +196,6 @@ Remote SSH 实机验证。完整门禁和量化指标见
 
 ## TODO
 
-### `0.3.49` Linux 首次启动实机回归
-
-- 已在本机安装精确 `0.3.49` Linux x64 Controller 候选。用户需要在当前
-  `g1_1` Remote SSH 窗口手动执行一次 `Developer: Reload Window`；Bridge 不得自行
-  发起第二条 SSH 认证或代替用户处理连接与密码。
-- 重载后确认官方 `openai.chatgpt` 运行于本地 UI Extension Host，托管入口为内容寻址
-  目录中的自包含 `codex-bridge-shim`，系统或用户 PATH 中是否存在 `node` 不影响启动，
-  Codex 日志不得再出现 `/usr/bin/env: node`、退出 `127` 或 stdin destroyed。
-- 状态栏必须先如实显示等待/启动状态，并只在当前 Extension Host 的 Shim 存活且官方
-  app-server 完成 VS Code `initialize` 后进入 `ready`。Diagnostics 应报告
-  `nodeExecutable=null`、`shimStarted=true`、`appServerInitialized=true`，且没有
-  `appServerLastError`。
-- 在官方 Codex 面板创建真实 turn，确认 Webview 不再持续加载、任务到达
-  `shim.start`，至少一个项目操作和 Codegraph MCP 调用仍经活动 VS Code Remote
-  transport 落在远端主根；检查 Codex 日志、Bridge 审计、Shim/Executor 进程和重载后
-  遗留进程。
-- 退出条件：首次 extension kind 配置不再误报官方扩展缺失，Linux 自包含 Shim、
-  app-server 心跳、状态栏、Diagnostics、官方任务、远端操作、MCP 与生命周期全部通过。
-  完成后从本 TODO 删除本节，并在新的 `docs/acceptance/` 实机记录中保留精确版本、
-  组件版本、日志、审计、量化结果和产物摘要。
-
 ### 统一工具代理与远程位置透明
 
 - 为当前 app-server 建立统一工具路由清单，按实际运行结果标记 Bridge 动态工具、远程
