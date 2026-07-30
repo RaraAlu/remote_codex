@@ -1,6 +1,6 @@
 # 实施状态
 
-更新日期：2026-07-28
+更新日期：2026-07-29
 
 ## 能力边界复核
 
@@ -19,7 +19,7 @@
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 62 个测试文件通过、1 个真实远端条件文件跳过，290 项通过、6 项
+`npm run test` 为 62 个测试文件通过、1 个真实远端条件文件跳过，293 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -104,6 +104,15 @@ app-server 在 Shim 启动后 `127 ms` 完成 initialize；Bridge 先进入 `deg
 MCP `codegraph_status` 均经活动 VS Code Remote transport 落在
 `/home/unitree/mimiclite-sim2real`，模型返回 `REMOTE_STARTUP_0349_OK`。完整实机
 证据见 `docs/acceptance/2026-07-28-release-0.3.49-linux-startup-real.md`。
+`0.3.50` 修正 Remote SSH 对话中的文件引用跳转。官方扩展运行在本地 UI Extension
+Host，收到远端 POSIX 绝对 Markdown 目标时会按本机 `file:` URI 打开并失败；Shim
+现在只对 agent message 中位于规范远端主根内的 Markdown 文件目标做工作区相对投影，
+保留行、列和行范围后缀。实时完成项与 `thread/read` 恢复的历史项使用同一投影；
+代码段、普通路径文字、用户消息、根外路径和本地次级根保持原样。策略同时要求模型在
+远程 thread 中直接生成工作区相对引用。精确 `0.3.50` 安装并重载 `g1_1` 后，用户在
+恢复的历史对话中点击文件引用，确认 VS Code 成功打开远端文档并定位；重载后的 Codex
+日志没有新增 `Failed to handle absolute path`。完整实机证据见
+`docs/acceptance/2026-07-29-release-0.3.50-remote-file-links.md`。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

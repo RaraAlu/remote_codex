@@ -7,6 +7,7 @@ import {
 } from "node:path";
 import type { BridgeConfig, WorkspaceRootConfig } from "../core/types.js";
 import { normalizeRemotePath } from "../core/path-policy.js";
+import { workspaceRelativePath } from "../core/workspace-resource-uri.js";
 import {
   normalizeWorkspaceToolName,
   REMOTE_TOOL_NAMES,
@@ -19,6 +20,149 @@ interface NativeCommandPresentation {
   command: string;
   commandActions: Array<Record<string, unknown>>;
   cwd?: string;
+}
+
+interface FileReference {
+  path: string;
+  location: string;
+}
+
+function splitFileReference(target: string): FileReference {
+  const hashLocation = /^(.*)(#L\d+(?:C\d+)?(?:-L\d+(?:C\d+)?)?)$/.exec(target);
+  if (hashLocation?.[1] && hashLocation[2]) {
+    return { path: hashLocation[1], location: hashLocation[2] };
+  }
+  const colonLocation =
+    /^(.*)(:\d+(?::\d+)?(?:[-–]\d+(?::\d+)?)?)$/.exec(target);
+  if (colonLocation?.[1] && colonLocation[2]) {
+    return { path: colonLocation[1], location: colonLocation[2] };
+  }
+  return { path: target, location: "" };
+}
+
+function projectRemoteFileReference(
+  target: string,
+  config: BridgeConfig,
+): string {
+  const reference = splitFileReference(target);
+  if (!reference.path.startsWith("/")) {
+    return target;
+  }
+  const root = config.roots.find(
+    (candidate) => candidate.target === "remote" && candidate.role === "primary",
+  );
+  if (!root) {
+    return target;
+  }
+  try {
+    const relativePath = workspaceRelativePath(root.path, reference.path, "remote");
+    return `${relativePath}${reference.location}`;
+  } catch {
+    return target;
+  }
+}
+
+function projectLinkDestination(
+  content: string,
+  config: BridgeConfig,
+): string {
+  const leadingLength = content.length - content.trimStart().length;
+  const leading = content.slice(0, leadingLength);
+  const remainder = content.slice(leadingLength);
+  if (remainder.startsWith("<")) {
+    const end = remainder.indexOf(">");
+    if (end < 0) {
+      return content;
+    }
+    const target = remainder.slice(1, end);
+    const projected = projectRemoteFileReference(target, config);
+    return projected === target
+      ? content
+      : `${leading}<${projected}>${remainder.slice(end + 1)}`;
+  }
+
+  let end = 0;
+  while (end < remainder.length) {
+    if (remainder[end] === "\\") {
+      end += 2;
+      continue;
+    }
+    if (/\s/.test(remainder[end] ?? "")) {
+      break;
+    }
+    end += 1;
+  }
+  const target = remainder.slice(0, end);
+  const projected = projectRemoteFileReference(target, config);
+  return projected === target
+    ? content
+    : `${leading}${projected}${remainder.slice(end)}`;
+}
+
+function markdownLinkEnd(text: string, start: number): number {
+  let nested = 0;
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === "\\") {
+      index += 1;
+      continue;
+    }
+    if (character === "(") {
+      nested += 1;
+      continue;
+    }
+    if (character === ")") {
+      if (nested === 0) {
+        return index;
+      }
+      nested -= 1;
+    }
+  }
+  return -1;
+}
+
+function projectAgentMessageLinks(text: string, config: BridgeConfig): string {
+  let cursor = 0;
+  let copiedThrough = 0;
+  let projected = "";
+  let changed = false;
+
+  while (cursor < text.length) {
+    if (text[cursor] === "`") {
+      let delimiterLength = 1;
+      while (text[cursor + delimiterLength] === "`") {
+        delimiterLength += 1;
+      }
+      const delimiter = "`".repeat(delimiterLength);
+      const end = text.indexOf(delimiter, cursor + delimiterLength);
+      if (end < 0) {
+        break;
+      }
+      cursor = end + delimiterLength;
+      continue;
+    }
+    if (text[cursor] !== "]" || text[cursor + 1] !== "(") {
+      cursor += 1;
+      continue;
+    }
+
+    const destinationStart = cursor + 2;
+    const destinationEnd = markdownLinkEnd(text, destinationStart);
+    if (destinationEnd < 0) {
+      break;
+    }
+    const destination = text.slice(destinationStart, destinationEnd);
+    const nextDestination = projectLinkDestination(destination, config);
+    if (nextDestination !== destination) {
+      projected += text.slice(copiedThrough, destinationStart);
+      projected += nextDestination;
+      copiedThrough = destinationEnd;
+      changed = true;
+    }
+    cursor = destinationEnd + 1;
+  }
+
+  return changed ? `${projected}${text.slice(copiedThrough)}` : text;
 }
 
 function toolArguments(value: unknown): Record<string, unknown> {
@@ -577,7 +721,10 @@ function projectValue(
   let changed = false;
   const projected: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value)) {
-    const next = projectValue(entry, config, nestedInterruptedTurn);
+    const next =
+      value.type === "agentMessage" && key === "text" && typeof entry === "string"
+        ? projectAgentMessageLinks(entry, config)
+        : projectValue(entry, config, nestedInterruptedTurn);
     projected[key] = next;
     changed ||= next !== entry;
   }

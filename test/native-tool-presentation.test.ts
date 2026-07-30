@@ -546,6 +546,94 @@ describe("native Codex tool presentation", () => {
     });
   });
 
+  it("projects completed agent links under the remote root to workspace-relative links", () => {
+    const projected = projectServerMessage(
+      {
+        method: "item/completed",
+        params: {
+          item: {
+            id: "agent-message",
+            type: "agentMessage",
+            text: [
+              "已更新 [入口脚本](/remote/workspace/scripts/run.sh:294)。",
+              "另见 [实现](/remote/workspace/src/main.ts#L12-L18)。",
+            ].join("\n"),
+            phase: "final_answer",
+          },
+        },
+      },
+      config,
+    ) as unknown as {
+      params: { item: { text: string } };
+    };
+
+    expect(projected.params.item.text).toBe(
+      [
+        "已更新 [入口脚本](scripts/run.sh:294)。",
+        "另见 [实现](src/main.ts#L12-L18)。",
+      ].join("\n"),
+    );
+  });
+
+  it("projects restored thread links and preserves angle brackets, titles, and line ranges", () => {
+    const projected = projectServerMessage(
+      {
+        id: 7,
+        result: {
+          thread: {
+            turns: [
+              {
+                items: [
+                  {
+                    id: "agent-message",
+                    type: "agentMessage",
+                    text:
+                      '[配置]( </remote/workspace/docs/with space.md:4-9> "说明")',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      config,
+    ) as unknown as {
+      result: {
+        thread: { turns: Array<{ items: Array<{ text: string }> }> };
+      };
+    };
+
+    expect(projected.result.thread.turns[0]?.items[0]?.text).toBe(
+      '[配置]( <docs/with space.md:4-9> "说明")',
+    );
+  });
+
+  it("does not rewrite non-link text, code examples, outside paths, or user messages", () => {
+    const agentText = [
+      "远端路径是 /remote/workspace/src/main.ts:8。",
+      "`[示例](/remote/workspace/src/main.ts:8)`",
+      "```md",
+      "[示例](/remote/workspace/src/main.ts:8)",
+      "```",
+      "[外部](/remote/other/src/main.ts:8)",
+    ].join("\n");
+    const message = {
+      result: {
+        items: [
+          { type: "agentMessage", text: agentText },
+          {
+            type: "userMessage",
+            text: "[用户输入](/remote/workspace/src/main.ts:8)",
+          },
+        ],
+      },
+    };
+
+    const projected = projectServerMessage(message, config);
+
+    expect(projected).toBe(message);
+  });
+
   it("leaves unrelated dynamic tools and local passthrough messages untouched", () => {
     const message = {
       item: {

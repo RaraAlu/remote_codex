@@ -9,6 +9,7 @@ const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
 - Use workspace_* dynamic tools for bounded file reads and writes, exact patches, directory operations, literal search, and Git status.
 - Before replacing, patching, renaming, or deleting a file, read it and pass its returned SHA-256 as expectedHash. Never retry a FILE_CONFLICT without reading again.
 - Use workspace_open_file for editor jumps; never ask VS Code to open a remote POSIX path as though it were local.
+- In final responses, make remote workspace file citations clickable by using workspace-relative Markdown targets with optional line suffixes. Never use an absolute remote path as a Markdown link target.
 - After changing a text file, use workspace_show_diff with the complete pre-change content and hash returned by workspace_read_file when a visual review is useful.
 - Preserve and report the returned codex-bridge resourceUri as the stable workspace resource identity.
 - Omitting target and rootId selects the remote primary root.

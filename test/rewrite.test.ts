@@ -135,6 +135,9 @@ describe("app-server request rewriting", () => {
       "Use workspace_open_file for editor jumps",
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
+      "workspace-relative Markdown targets",
+    );
+    expect(String(rewritten.params.developerInstructions)).toContain(
       "use workspace_show_diff",
     );
     const tools = rewritten.params.dynamicTools as Array<{ name: string }>;
