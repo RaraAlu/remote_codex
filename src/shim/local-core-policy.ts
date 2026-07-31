@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RpcMessage, RpcNotification, RpcRequest } from "./rpc.js";
 
 export const REMOTE_PERMISSION_PROFILE_ID = "codex-remote-bridge";
@@ -44,6 +46,107 @@ const REMOTE_PERMISSION_OVERRIDES = [
   `permissions.${REMOTE_PERMISSION_PROFILE_ID}.filesystem={":root"="deny",":minimal"="read"}`,
   `permissions.${REMOTE_PERMISSION_PROFILE_ID}.network.enabled=false`,
 ];
+
+const MANAGED_ATTACHMENT_DIRECTORY =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PASTED_TEXT_FILE = "pasted-text.txt";
+const PASTED_TEXT_REGISTRY = "pasted-text-attachments.json";
+const MAX_MANAGED_ATTACHMENT_BASE64_LENGTH =
+  Math.ceil((10 * 1024 * 1024 * 4) / 3) + 4;
+
+export type LocalAttachmentRequestKind =
+  | "attachment-directory"
+  | "pasted-text"
+  | "registry";
+
+export function localCodexAttachmentRoot(): string {
+  const configuredHome = process.env.CODEX_HOME?.trim();
+  const codexHome = configuredHome
+    ? resolve(configuredHome)
+    : join(homedir(), ".codex");
+  return resolve(codexHome, "attachments");
+}
+
+function managedAttachmentPathKind(
+  rawPath: unknown,
+  attachmentRoot: string,
+): LocalAttachmentRequestKind | null {
+  if (
+    typeof rawPath !== "string" ||
+    rawPath.includes("\0") ||
+    !isAbsolute(rawPath)
+  ) {
+    return null;
+  }
+  const root = resolve(attachmentRoot);
+  const candidate = resolve(rawPath);
+  const child = relative(root, candidate);
+  if (
+    !child ||
+    child === ".." ||
+    child.startsWith(`..${sep}`) ||
+    isAbsolute(child)
+  ) {
+    return null;
+  }
+  const segments = child.split(sep);
+  if (segments.length === 1 && segments[0] === PASTED_TEXT_REGISTRY) {
+    return "registry";
+  }
+  if (
+    segments.length === 1 &&
+    MANAGED_ATTACHMENT_DIRECTORY.test(segments[0] ?? "")
+  ) {
+    return "attachment-directory";
+  }
+  if (
+    segments.length === 2 &&
+    MANAGED_ATTACHMENT_DIRECTORY.test(segments[0] ?? "") &&
+    segments[1] === PASTED_TEXT_FILE
+  ) {
+    return "pasted-text";
+  }
+  return null;
+}
+
+export function allowedLocalAttachmentRequest(
+  message: RpcMessage,
+  attachmentRoot = localCodexAttachmentRoot(),
+): LocalAttachmentRequestKind | null {
+  if (!("method" in message) || !("id" in message)) {
+    return null;
+  }
+  const params =
+    typeof message.params === "object" && message.params !== null
+      ? (message.params as Record<string, unknown>)
+      : null;
+  if (!params) {
+    return null;
+  }
+  const kind = managedAttachmentPathKind(params.path, attachmentRoot);
+  switch (message.method) {
+    case "fs/readFile":
+      return kind === "registry" || kind === "pasted-text" ? kind : null;
+    case "fs/createDirectory":
+      return kind === "attachment-directory" && params.recursive === true
+        ? kind
+        : null;
+    case "fs/writeFile":
+      return (kind === "registry" || kind === "pasted-text") &&
+        typeof params.dataBase64 === "string" &&
+        params.dataBase64.length <= MAX_MANAGED_ATTACHMENT_BASE64_LENGTH
+        ? kind
+        : null;
+    case "fs/remove":
+      return kind === "pasted-text" &&
+        params.force === true &&
+        params.recursive !== true
+        ? kind
+        : null;
+    default:
+      return null;
+  }
+}
 
 export function isBlockedLocalClientMethod(method: string): boolean {
   return BLOCKED_LOCAL_CLIENT_METHODS.has(method);

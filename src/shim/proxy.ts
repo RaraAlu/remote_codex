@@ -23,6 +23,7 @@ import {
   WORKSPACE_MUTATION_TOOL_NAMES,
 } from "./dynamic-tools.js";
 import {
+  allowedLocalAttachmentRequest,
   isBlockedLocalClientMethod,
   isBlockedLocalClientMessage,
   isBlockedLocalServerApproval,
@@ -76,6 +77,7 @@ export interface ShimProxyOptions {
   turnClients?: RemoteTurnClientTracker;
   observeApprovalPolicy?: boolean;
   rewriteClientMessages?: boolean;
+  localAttachmentRoot?: string;
   threadListCwd?: string;
   threadListCwdProvider?: () => Promise<string | null | undefined>;
   spawnCodex?: (
@@ -572,6 +574,30 @@ export class ShimProxy {
           turnId: message.params.turnId,
         },
       });
+    }
+    const localAttachmentKind =
+      this.#options.config &&
+      this.#clientIdentity.clientSource === "vscode"
+        ? allowedLocalAttachmentRequest(
+            message,
+            this.#options.localAttachmentRoot,
+          )
+        : null;
+    if (localAttachmentKind && isRpcRequest(message)) {
+      await this.#audit.write({
+        ...this.#clientIdentity,
+        operationId: String(message.id),
+        hostId: this.#options.config?.host,
+        workspaceRoot: this.#options.config?.workspaceRoot,
+        operation: "local_attachment_request.forwarded",
+        outcome: "succeeded",
+        details: {
+          kind: localAttachmentKind,
+          method: message.method,
+        },
+      });
+      writeServer(message);
+      return;
     }
     if (this.#options.config && isBlockedLocalClientMessage(message)) {
       await this.#audit.write({

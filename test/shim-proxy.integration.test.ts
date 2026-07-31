@@ -484,6 +484,89 @@ describe("ShimProxy JSONL integration", () => {
     expect(audit).not.toContain("/tmp/local-project-decoy");
   });
 
+  it("forwards managed pasted-text requests from the VS Code client", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-bridge-local-attachment-"));
+    const attachmentRoot = join(directory, ".codex", "attachments");
+    const attachmentId = "123e4567-e89b-42d3-a456-426614174000";
+    const pastedText = join(attachmentRoot, attachmentId, "pasted-text.txt");
+    const auditPath = join(directory, "audit.jsonl");
+    const serverMessages: Array<Record<string, unknown>> = [];
+    const clientMessages: Array<Record<string, unknown>> = [];
+    const proxy = new ShimProxy({
+      appServerArgs: ["app-server", "--stdio"],
+      auditPath,
+      codexExecutable: "fake-codex",
+      config: parseBridgeConfig({
+        host: "g1_1",
+        workspaceRoot: "/remote/workspace",
+      }),
+      controlDir: join(directory, "control"),
+      localAttachmentRoot: attachmentRoot,
+    });
+    const request = {
+      id: "paste-1",
+      method: "fs/writeFile",
+      params: {
+        dataBase64: "c2Vuc2l0aXZlIHBhc3RlZA==",
+        path: pastedText,
+      },
+    };
+
+    await proxy.handleClientMessage(
+      request,
+      (message) => serverMessages.push(message as Record<string, unknown>),
+      (message) => clientMessages.push(message as Record<string, unknown>),
+    );
+
+    expect(serverMessages).toEqual([request]);
+    expect(clientMessages).toEqual([]);
+    const audit = await readFile(auditPath, "utf8");
+    expect(audit).toContain('"operation":"local_attachment_request.forwarded"');
+    expect(audit).toContain('"kind":"pasted-text"');
+    expect(audit).not.toContain(pastedText);
+    expect(audit).not.toContain("c2Vuc2l0aXZlIHBhc3RlZA==");
+  });
+
+  it("does not expose managed attachment writes to non-VS Code clients", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-bridge-external-attachment-"));
+    const attachmentRoot = join(directory, ".codex", "attachments");
+    const clientMessages: Array<Record<string, unknown>> = [];
+    const proxy = new ShimProxy({
+      appServerArgs: ["app-server", "--stdio"],
+      auditPath: join(directory, "audit.jsonl"),
+      clientIdentity: { clientId: "external", clientSource: "external-mcp" },
+      codexExecutable: "fake-codex",
+      config: parseBridgeConfig({
+        host: "g1_1",
+        workspaceRoot: "/remote/workspace",
+      }),
+      controlDir: join(directory, "control"),
+      localAttachmentRoot: attachmentRoot,
+    });
+
+    await proxy.handleClientMessage(
+      {
+        id: "paste-2",
+        method: "fs/writeFile",
+        params: {
+          dataBase64: "dGVzdA==",
+          path: join(
+            attachmentRoot,
+            "123e4567-e89b-42d3-a456-426614174000",
+            "pasted-text.txt",
+          ),
+        },
+      },
+      () => undefined,
+      (message) => clientMessages.push(message as Record<string, unknown>),
+    );
+
+    expect(clientMessages[0]).toMatchObject({
+      id: "paste-2",
+      error: { code: -32003 },
+    });
+  });
+
   it("rewrites initialize and thread placement before forwarding to app-server", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-proxy-"));
     const input = new PassThrough();

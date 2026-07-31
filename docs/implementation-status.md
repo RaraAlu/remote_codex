@@ -1,6 +1,6 @@
 # 实施状态
 
-更新日期：2026-07-29
+更新日期：2026-07-30
 
 ## 能力边界复核
 
@@ -11,15 +11,15 @@
 
 同日先完成外部稳定版 `0.145.0` 协议探针，随后按用户确认的边界将官方
 `openai.chatgpt` 扩展设为唯一运行时权威。当前源码只启动 VS Code 实际加载的
-`openai.chatgpt` 所内置的 Codex；最新探测组合为 `26.721.41059` /
-`0.146.0-alpha.3.1`。源码删除公开
+`openai.chatgpt` 所内置的 Codex；最新实测组合为 `26.727.40816` /
+`0.146.0-alpha.9.2`。源码删除公开
 `codexExecutable` 设置、系统 CLI 发现和 PATH/`~/.local/bin` 回退；旧配置中的该字段
 会被忽略。官方扩展和内置 Codex 版本只用于诊断、证据和协议快照索引；Controller
 保存受限运行时指针，Shim 直接使用该指针。版本值不同、未知或缺失均不阻断启动。
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
 `ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 62 个测试文件通过、1 个真实远端条件文件跳过，293 项通过、6 项
+`npm run test` 为 62 个测试文件通过、1 个真实远端条件文件跳过，297 项通过、6 项
 跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
 拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
 缺失或版本不再影响这些路径。
@@ -113,6 +113,17 @@ Host，收到远端 POSIX 绝对 Markdown 目标时会按本机 `file:` URI 打�
 恢复的历史对话中点击文件引用，确认 VS Code 成功打开远端文档并定位；重载后的 Codex
 日志没有新增 `Failed to handle absolute path`。完整实机证据见
 `docs/acceptance/2026-07-29-release-0.3.50-remote-file-links.md`。
+`0.3.51` 修正 Remote SSH 窗口粘贴大段文本时附件一直停留在“正在添加”的问题。
+此前 Shim 按风险命名空间阻断全部本地 `fs/*` 客户端请求，也误伤了官方 VS Code
+客户端通过 app-server 管理本机 Codex 粘贴文本附件的请求。现在只对官方 VS Code
+客户端开放 Codex 自管 `attachments` 根内的固定操作：读取或写入注册表、创建 UUID
+目录、读写或删除固定 `pasted-text.txt`；方法、参数、路径形状和内容大小均受限，
+外部客户端、根外路径、未知 `fs/*` 和异常形状继续失败关闭。审计仅记录方法和受管
+路径类别，不记录路径、正文或 Base64。精确 `0.3.51` 安装并重载 `g1_1` 后，用户在
+官方 Codex 面板完成大段文本添加、恢复到输入框和随消息提交。审计记录了目录创建、
+粘贴文本与注册表写入，以及恢复后的文本删除和注册表更新，没有新的附件请求阻断。
+完整实机证据见
+`docs/acceptance/2026-07-30-release-0.3.51-remote-pasted-text.md`。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知
@@ -169,7 +180,7 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
 | app-server `initialize` 代理 | 已按官方前置全局参数通过真实 app-server 冒烟测试 | `npm run smoke:shim` |
 | `thread/start` 路径和能力注入 | 本地进程 `cwd` 与远程逻辑主根已分离并通过实测 app-server 参数探针 | `rewriteClientMessage` |
 | Remote Bridge 权限配置 | 强制 `codex-remote-bridge` named profile、`approvalPolicy=never`，移除客户端 sandbox/config 覆盖 | `local-core-policy` / `rewriteClientMessage` |
-| 本地客户端请求阻断 | 25 个 Shell、文件、命令、进程、模糊搜索和后台终端请求在 app-server 前失败关闭并审计 | `ShimProxy` / `ClientRequest.json` |
+| 本地客户端请求阻断 | 25 个 Shell、文件、命令、进程、模糊搜索和后台终端请求在 app-server 前失败关闭并审计；仅官方 VS Code 客户端的 Codex 自管粘贴文本附件请求按固定形状放行 | `ShimProxy` / `ClientRequest.json` |
 | Core 本地审批阻断 | 命令、文件、权限和两类旧协议审批在到达官方 UI 前失败关闭；Bridge 远程命令审批不受影响 | `ShimProxy` / `ServerRequest.json` |
 | `thread/resume` 工作区语义 | 本地控制 `cwd`、远程 `runtimeWorkspaceRoots` 和远程策略已覆盖；官方 UI 恢复待补测 | `rewriteClientMessage` |
 | `turn/start` 路由刷新 | 每轮合并独立应用上下文，刷新远程主根和 `remote_exec` 提醒且不覆盖已有键 | `rewriteClientMessage` |
@@ -222,7 +233,7 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
 | Executor 失联写入完整性 | `0.3.37` 把已发送副作用的 transport 错误响应提升为不可重试 `RESULT_UNKNOWN`，写入脚本在替换前校验精确 stdin 字节数；临时文件先登记拥有 PID，新 Executor 激活时只清理当前工作区死亡拥有者的登记和临时文件。能力握手要求 `executeStdinExactLength` 与 `workspaceWriteOrphanCleanup`，不以版本号门禁；精确 Linux Remote SSH 故障注入确认原文件不变、无残留且不重放 |
 | 后台任务 | `0.3.20` 在活动 VS Code Remote transport 上提供 start/status/log/cancel；稳定任务 ID 避免重连重复启动，日志按字节游标有界保留，取消、超时和 Extension Host 关闭终止进程组；OpenSSH 回退失败关闭 |
 | 远程资源映射 | `0.3.21` 提供 `workspace_open_file` 与 `workspace_show_diff`；Controller 只映射已规范化路径，复用实际打开的 Remote SSH URI，并以会话登记、根授权复核、SHA-256 和内存上限保护内容提供器与 Diff 快照 |
-| Core 内置本地工具硬阻断 | 自动化边界已实施；专用权限配置、25 个已知客户端请求、五类本地审批及未来风险命名空间均失败关闭，真实模型专用工具诱饵待补测 |
+| Core 内置本地工具硬阻断 | 自动化边界已实施；除官方 VS Code 客户端的受管粘贴文本附件操作外，专用权限配置、25 个已知客户端请求、五类本地审批及未来风险命名空间均失败关闭，真实模型专用工具诱饵待补测 |
 
 阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行，0.3.15 完成默认
 VS Code Remote 链路的运行中取消自动化闭环，0.3.16 增加当前 Executor 代次内的有界

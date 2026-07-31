@@ -70,8 +70,10 @@
   候选，不会执行遗留的 Linux 绝对路径。显式配置仍应指向受信任文件。
 - 未知 app-server 服务端请求默认返回 `-32601`。
 - Remote SSH 会话的本地 Core 客户端请求按风险命名空间阻断，而不只依赖当前协议中的
-  已知方法枚举。未来新增的 `fs/`、`process/`、`command/exec`、`fuzzyFileSearch`
-  或后台终端方法默认失败关闭并记录 `knownMethod=false`。
+  已知方法枚举。唯一的 `fs/` 例外是官方 VS Code 客户端创建粘贴文本附件：只接受本机
+  Codex 自管 `attachments` 根内的注册表、UUID 目录和固定 `pasted-text.txt` 所需形状，
+  并限制方法、参数和内容大小。其他 `fs/`、`process/`、`command/exec`、
+  `fuzzyFileSearch` 或后台终端方法仍默认失败关闭。附件审计不记录路径或内容。
 
 ## 尚未形成硬保证
 
