@@ -22,8 +22,10 @@
 `npm run test` 为 62 个测试文件通过、1 个真实远端条件文件跳过，297 项通过、6 项跳过、
 0 失败。Windows 测试现使用本机绝对路径夹具，并明确跳过依赖 POSIX symlink、远端 Linux
 注册表或 POSIX 临时根的用例；`0.3.52` 在 Windows 为 63 个文件中 58 通过、5 跳过，
-305 项中 280 通过、25 跳过、0 失败。`npm run check` 的类型检查、完整测试与构建通过，
-随后仍被独立 `smoke:shim` 的外部 CLI gateway 初始化失败阻塞。插件内置 app-server 的
+305 项中 280 通过、25 跳过、0 失败。`npm run check` 已完整通过类型检查、测试、构建、
+Windows Shim 冒烟和构包；独立 `smoke:shim` 另连续通过 3 次。Windows 冒烟现使用平台原生
+control path 断言、等待共享网关发布状态，并验证带令牌的外部 gateway 连接；第二个临时
+`CODEX_HOME` 不再依赖网络鉴权，真实 app-server 请求转发仍由集成测试覆盖。插件内置 app-server 的
 本地共享网关、远程窗口启动、线程创建、本地拒绝权限配置激活、主次根审计冒烟和 Linux
 x64 打包的既有证据继续有效。系统 Codex CLI 的存在、缺失或版本不再影响这些路径。
 

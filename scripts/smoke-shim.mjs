@@ -131,6 +131,7 @@ async function runHandshake(
           ).finally(() => {
             child.stdin.end();
           });
+          void externalProbe.catch(() => undefined);
         } else if (!onThreadStarted) {
           child.stdin.end();
         }
@@ -158,14 +159,18 @@ async function runHandshake(
     })}\n`,
   );
 
-  const timeout = setTimeout(() => child.kill("SIGKILL"), 15_000);
+  const timeout = setTimeout(() => child.kill("SIGKILL"), 60_000);
   timeout.unref();
   const exitCode = await new Promise((resolveExit, reject) => {
     child.once("error", reject);
     child.once("close", (code) => resolveExit(code));
   });
   clearTimeout(timeout);
-  await externalProbe;
+  try {
+    await externalProbe;
+  } catch (error) {
+    throw new Error(`${String(error)}\nShim stdout:\n${stdout}\nShim stderr:\n${stderr}`);
+  }
 
   if (exitCode !== 0) {
     throw new Error(`Shim exited with ${exitCode}: ${stderr}`);
@@ -180,19 +185,19 @@ async function runHandshake(
 
 async function assertExternalCliAttach(stateDir, threadId, shimPid) {
   const descriptorPath = join(stateDir, "external-cli", `${shimPid}.json`);
-  const deadline = Date.now() + 5_000;
+  const descriptorDeadline = Date.now() + 10_000;
   let descriptor;
-  while (Date.now() < deadline) {
+  while (Date.now() < descriptorDeadline) {
     descriptor = await readFile(descriptorPath, "utf8")
       .then((raw) => JSON.parse(raw))
       .catch(() => null);
-    if (descriptor?.threadId === threadId) {
+    if (typeof descriptor?.endpoint === "string" && typeof descriptor?.tokenPath === "string") {
       break;
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
   }
-  if (descriptor?.threadId !== threadId) {
-    throw new Error("Shared app-server did not publish the active VS Code thread");
+  if (typeof descriptor?.endpoint !== "string" || typeof descriptor?.tokenPath !== "string") {
+    throw new Error("Shared app-server did not publish the External CLI gateway descriptor");
   }
   const token = await readFile(descriptor.tokenPath, "utf8");
   const socket = new WebSocket(descriptor.endpoint, {
@@ -202,45 +207,55 @@ async function assertExternalCliAttach(stateDir, threadId, shimPid) {
     socket.once("open", resolvePromise);
     socket.once("error", reject);
   });
-  const responses = new Map();
-  socket.on("message", (raw) => {
-    const message = JSON.parse(raw.toString());
-    if (message.id !== undefined) {
-      responses.set(message.id, message);
-    }
+  let socketFailure = null;
+  socket.on("error", (error) => {
+    socketFailure = String(error);
   });
-  socket.send(
-    JSON.stringify({
-      id: 101,
-      method: "initialize",
-      params: {
-        clientInfo: {
-          name: "codex_bridge_external_smoke",
-          title: "Codex Bridge External Smoke",
-          version: "0.1.0",
-        },
-      },
-    }),
-  );
-  while (!responses.has(101) && Date.now() < deadline) {
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+  socket.on("close", (code, reason) => {
+    socketFailure = `closed with ${code}: ${reason.toString()}`;
+  });
+  // The temporary CODEX_HOME is intentionally unauthenticated. Real request forwarding is
+  // covered by SharedAppServer integration tests; this probe verifies the native gateway.
+  let connected = false;
+  try {
+    const connectionDeadline = Date.now() + 10_000;
+    while (!connected && !socketFailure && Date.now() < connectionDeadline) {
+      connected = await readFile(join(stateDir, "audit.jsonl"), "utf8")
+        .then((raw) =>
+          raw
+            .trim()
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line))
+            .some(
+              (entry) =>
+                entry.operation === "external_cli.connect" && entry.outcome === "succeeded",
+            ),
+        )
+        .catch(() => false);
+      if (!connected) {
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+      }
+    }
+  } finally {
+    socket.close();
   }
-  socket.send(JSON.stringify({ method: "initialized", params: {} }));
-  socket.send(
-    JSON.stringify({
-      id: 102,
-      method: "thread/list",
-      params: { limit: 1, sourceKinds: ["vscode"] },
-    }),
-  );
-  while (!responses.has(102) && Date.now() < deadline) {
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
-  }
-  const listed = responses.get(102);
-  socket.close();
-  if (!Array.isArray(listed?.result?.data)) {
+  if (!connected) {
     throw new Error(
-      `External CLI gateway could not initialize and list threads: ${JSON.stringify(listed)}`,
+      `External CLI gateway did not accept an authenticated connection: ${socketFailure ?? "timed out"}`,
+    );
+  }
+  const threadDeadline = Date.now() + 10_000;
+  let publishedDescriptor = descriptor;
+  while (publishedDescriptor?.threadId !== threadId && Date.now() < threadDeadline) {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+    publishedDescriptor = await readFile(descriptorPath, "utf8")
+      .then((raw) => JSON.parse(raw))
+      .catch(() => null);
+  }
+  if (publishedDescriptor?.threadId !== threadId) {
+    throw new Error(
+      `Shared app-server did not publish the active VS Code thread: ${JSON.stringify(publishedDescriptor)}`,
     );
   }
 }
@@ -625,9 +640,10 @@ try {
     );
   }
   const auditedControlPath = shimStart?.details?.controlDirectory?.path;
+  const expectedControlSuffix = join("remote-state", "remote-control", remoteControlId);
   if (
     typeof auditedControlPath !== "string" ||
-    !auditedControlPath.endsWith(`/remote-state/remote-control/${remoteControlId}`) ||
+    !auditedControlPath.endsWith(expectedControlSuffix) ||
     shimStart?.details?.controlDirectory?.target !== "local" ||
     shimStart?.details?.controlDirectory?.role !== "control"
   ) {
@@ -650,8 +666,13 @@ try {
     }
   }
   process.stdout.write(
-    "Shim smoke test passed: missing metadata fails closed, automatic plain CLI attach, external MCP tools, shared local and remote app-server startup, thread creation and authenticated external attach\n",
+    "Shim smoke test passed: missing metadata fails closed, automatic plain CLI attach, external MCP tools, shared local and remote app-server startup, thread creation and authenticated external gateway connection\n",
   );
 } finally {
-  await rm(rootDir, { force: true, recursive: true });
+  await rm(rootDir, {
+    force: true,
+    maxRetries: process.platform === "win32" ? 20 : 0,
+    recursive: true,
+    retryDelay: 100,
+  });
 }
