@@ -1,10 +1,25 @@
 import * as vscode from "vscode";
+import { OFFICIAL_CODEX_EXTENSION_ID } from "../core/official-codex.js";
+import { REMOTE_EXECUTOR_EXTENSION_ID } from "../core/vscode-transport.js";
 import { BridgeController } from "./controller.js";
 
 let controller: BridgeController | undefined;
 
+function relevantExtensionFingerprint(): string {
+  return [OFFICIAL_CODEX_EXTENSION_ID, REMOTE_EXECUTOR_EXTENSION_ID]
+    .map((id) => {
+      const extension = vscode.extensions.getExtension(id);
+      const version = extension?.packageJSON.version;
+      return extension
+        ? `${id}\0${extension.extensionPath}\0${typeof version === "string" ? version : "unknown"}`
+        : `${id}\0missing`;
+    })
+    .join("\0");
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   controller = new BridgeController(context);
+  let extensionFingerprint = relevantExtensionFingerprint();
   context.subscriptions.push(
     controller,
     ...controller.registerCommands(),
@@ -17,6 +32,11 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.extensions.onDidChange(() => {
+      const nextFingerprint = relevantExtensionFingerprint();
+      if (nextFingerprint === extensionFingerprint) {
+        return;
+      }
+      extensionFingerprint = nextFingerprint;
       void controller?.initialize();
     }),
   );

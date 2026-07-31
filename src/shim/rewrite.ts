@@ -39,6 +39,18 @@ function remotePrimaryRoot(config: BridgeConfig): WorkspaceRootConfig {
   return root;
 }
 
+function runtimeWorkspaceRoots(
+  config: BridgeConfig | null,
+  controlDir: string,
+): string[] {
+  const windowsNativeControlDir =
+    /^[A-Za-z]:[\\/]/.test(controlDir) || /^\\\\[^\\/]+[\\/][^\\/]+/.test(controlDir);
+  // A Windows app-server cannot deserialize a POSIX root without a drive prefix.
+  return [
+    windowsNativeControlDir || !config ? controlDir : remotePrimaryRoot(config).path,
+  ];
+}
+
 function remoteMcpPolicy(remoteMcpServers: readonly string[]): string {
   const servers = [...new Set(remoteMcpServers)]
     .filter((server) => server.length > 0)
@@ -211,7 +223,7 @@ export function rewriteClientMessage(
       params: {
         ...withLocalCorePolicy(message.params, config),
         cwd: controlDir,
-        runtimeWorkspaceRoots: [config ? remotePrimaryRoot(config).path : controlDir],
+        runtimeWorkspaceRoots: runtimeWorkspaceRoots(config, controlDir),
         ...(config ? {} : { sandbox: "read-only" }),
         ...(config
           ? {
@@ -233,7 +245,7 @@ export function rewriteClientMessage(
       params: {
         ...withLocalCorePolicy(message.params, config),
         cwd: controlDir,
-        runtimeWorkspaceRoots: [config ? remotePrimaryRoot(config).path : controlDir],
+        runtimeWorkspaceRoots: runtimeWorkspaceRoots(config, controlDir),
         ...(config ? {} : { sandbox: "read-only" }),
         ...(config
           ? {
@@ -254,7 +266,7 @@ export function rewriteClientMessage(
       params: {
         ...withLocalCorePolicy(message.params, config),
         cwd: controlDir,
-        runtimeWorkspaceRoots: [config ? remotePrimaryRoot(config).path : controlDir],
+        runtimeWorkspaceRoots: runtimeWorkspaceRoots(config, controlDir),
         ...(config
           ? {}
           : {
@@ -293,7 +305,7 @@ export function rewriteClientMessage(
       params: {
         ...withLocalCorePolicy(message.params, config),
         cwd: controlDir,
-        runtimeWorkspaceRoots: [config ? remotePrimaryRoot(config).path : controlDir],
+        runtimeWorkspaceRoots: runtimeWorkspaceRoots(config, controlDir),
         ...(config
           ? {
               developerInstructions: mergeInstructions(

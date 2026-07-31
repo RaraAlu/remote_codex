@@ -1,6 +1,6 @@
 # 实施状态
 
-更新日期：2026-07-30
+更新日期：2026-07-31
 
 ## 能力边界复核
 
@@ -18,11 +18,13 @@
 保存受限运行时指针，Shim 直接使用该指针。版本值不同、未知或缺失均不阻断启动。
 
 当前协议位于 `protocol/0.146.0-alpha.3/`，由插件内置二进制生成，并包含
-`ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。当前
-`npm run test` 为 62 个测试文件通过、1 个真实远端条件文件跳过，297 项通过、6 项
-跳过、0 失败；插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地
-拒绝权限配置激活、主次根审计冒烟和 Linux x64 打包通过。系统 Codex CLI 的存在、
-缺失或版本不再影响这些路径。
+`ClientRequest`、线程设置更新、fork 和 turn 等 Bridge 依赖结构。此前 Linux 候选的
+`npm run test` 为 62 个测试文件通过、1 个真实远端条件文件跳过，297 项通过、6 项跳过、
+0 失败。本次 Windows `0.3.52` 完整检查为 63 个文件中 54 通过、5 失败、4 跳过，
+305 项中 278 通过、7 失败、20 跳过；失败项均为既有 Windows 符号链接权限或路径表示
+差异。插件内置 app-server 的本地共享网关、远程窗口启动、线程创建、本地拒绝权限配置
+激活、主次根审计冒烟和 Linux x64 打包的既有证据继续有效。系统 Codex CLI 的存在、缺失
+或版本不再影响这些路径。
 
 2026-07-23 官方扩展自动升级到 `26.721.30844` 后，运行中的 `0.3.1` Controller 错误地
 仅因内置 Codex `0.146.0-alpha.3` 与旧快照 `0.145.0-alpha.27` 不同而进入
@@ -124,6 +126,30 @@ Host，收到远端 POSIX 绝对 Markdown 目标时会按本机 `file:` URI 打�
 粘贴文本与注册表写入，以及恢复后的文本删除和注册表更新，没有新的附件请求阻断。
 完整实机证据见
 `docs/acceptance/2026-07-30-release-0.3.51-remote-pasted-text.md`。
+`0.3.52` 修正 Windows Controller 没有持续同步配套 Remote Executor 的问题。Controller
+现在每次 Remote SSH 初始化都会读取 Executor 从自身扩展清单上报的实际包版本，并与
+当前 Controller 内嵌 VSIX 的配套版本比较；缺失、较旧或较新都触发通过活动 VS Code
+Remote SSH transport 安装内嵌版本和自动重载。能力集合仍是运行时接纳依据，版本不匹配
+只触发包同步，不会把仍兼容的 Executor 判为不兼容；同步失败时也保留兼容链路。Executor
+升级到 `0.2.20` / 诊断协议 12。精确 `0.3.52` 安装在 Windows x64 并重载
+`xj-member-42028` 后，日志记录从未上报包版本、运行版本 `0.2.19` 自动安装 `0.2.20`，
+随后自动重载；重载后的实际扩展上下文连续回报包版本和运行版本均为 `0.2.20`，Bridge
+以 `shimStarted=true`、`appServerInitialized=true` 进入 `ready`。
+
+同一候选还修正当前 Windows 内置 app-server 创建 Remote SSH task 时的
+`Invalid request: AbsolutePathBuf deserialized without a base path`。直接探针确认
+`0.146.0-alpha.9.2` 无法在 Windows 反序列化 POSIX `runtimeWorkspaceRoots`；Shim 现在仅在
+Windows 使用真实本机控制目录作为 app-server runtime root，远端 POSIX 主根继续由 Bridge
+策略、附加上下文和动态工具承载，不改写或伪造 VS Code 工作区 URI。四类 thread/turn
+请求的定向测试和隔离 Shim 探针通过。用户随后通过官方面板创建任务；活动内容寻址 Shim
+收到请求，审计记录 `workspace_git_status`、`workspace_read_file` 和 `remote_exec` 均在
+`/root/work/train/MimicLite` 成功完成。
+
+此前 VS Code 任意扩展变更事件还会使 Controller 每隔数秒重新初始化。激活入口现仅在
+官方 `openai.chatgpt` 或 Remote Executor 的安装路径/包版本指纹实际变化时重新初始化，
+忽略无关事件。最终候选重载后用户确认稳定，连续 20 秒观察期间 Bridge 日志字节数和最后
+写入时间均未变化，没有重复升级或重配置。完整证据见
+`docs/acceptance/2026-07-31-release-0.3.52-executor-package-reconciliation.md`。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

@@ -451,6 +451,7 @@ async function executeRequest(
 }
 
 export function activate(context: vscode.ExtensionContext): void {
+  const packageVersion = context.extension.packageJSON.version;
   const workspaceRoots = (vscode.workspace.workspaceFolders ?? [])
     .map((folder) => folder.uri.fsPath)
     .filter((root): root is string => typeof root === "string" && root.length > 0);
@@ -463,7 +464,10 @@ export function activate(context: vscode.ExtensionContext): void {
       await activationCleanup;
       return {
         capabilities: [...REMOTE_EXECUTOR_CAPABILITIES],
-        executorVersion: REMOTE_EXECUTOR_VERSION,
+        executorVersion:
+          typeof packageVersion === "string" ? packageVersion : REMOTE_EXECUTOR_VERSION,
+        packageVersion:
+          typeof packageVersion === "string" ? packageVersion : REMOTE_EXECUTOR_VERSION,
         protocolVersion: REMOTE_EXECUTOR_PROTOCOL_VERSION,
         remoteName: vscode.env.remoteName,
       };

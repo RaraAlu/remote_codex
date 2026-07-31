@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   planRemoteExecutorInstall,
   REMOTE_EXECUTOR_INSTALL_RESET_MS,
+  shouldRefreshRemoteExecutor,
 } from "../src/extension/remote-executor-install.js";
 
 describe("Remote Executor installation recovery", () => {
@@ -57,5 +58,13 @@ describe("Remote Executor installation recovery", () => {
         marker: { attempts: 1, digest: "new" },
       },
     );
+  });
+
+  it("refreshes an explicitly older compatible executor without version-gating admission", () => {
+    expect(shouldRefreshRemoteExecutor("0.2.3", "0.2.20")).toBe(true);
+    expect(shouldRefreshRemoteExecutor("0.2.20", "0.2.20")).toBe(false);
+    expect(shouldRefreshRemoteExecutor("0.2.21", "0.2.20")).toBe(true);
+    expect(shouldRefreshRemoteExecutor(undefined, "0.2.20")).toBe(true);
+    expect(shouldRefreshRemoteExecutor("legacy", "0.2.20")).toBe(true);
   });
 });

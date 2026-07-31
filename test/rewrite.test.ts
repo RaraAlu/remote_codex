@@ -147,6 +147,36 @@ describe("app-server request rewriting", () => {
     ]);
   });
 
+  it("uses a native Windows control root without losing the remote project policy", () => {
+    const controlDir = String.raw`C:\Users\zkbot\AppData\Local\bridge\control`;
+    for (const method of [
+      "thread/start",
+      "thread/resume",
+      "turn/start",
+      "thread/fork",
+    ] as const) {
+      const rewritten = rewriteClientMessage(
+        {
+          id: method,
+          method,
+          params: { threadId: "thread_123" },
+        },
+        config,
+        controlDir,
+      ) as { params: Record<string, unknown> };
+      const turnContext = (
+        rewritten.params.additionalContext as
+          | Record<string, { value?: unknown }>
+          | undefined
+      )?.["codex-remote-bridge"]?.value;
+      const policy = rewritten.params.developerInstructions ?? turnContext;
+
+      expect(rewritten.params.cwd).toBe(controlDir);
+      expect(rewritten.params.runtimeWorkspaceRoots).toEqual([controlDir]);
+      expect(String(policy)).toContain("/home/zkbot/work/train/MimicLite");
+    }
+  });
+
   it("maps an external full-access sandbox request to the remote permission profile", () => {
     const rewritten = rewriteClientMessage(
       {

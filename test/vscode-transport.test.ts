@@ -20,6 +20,14 @@ describe("VS Code remote transport protocol", () => {
     expect(
       isRemoteExecutorPing({
         capabilities: REMOTE_EXECUTOR_CAPABILITIES,
+        executorVersion: "0.2.3",
+        protocolVersion: 1,
+        remoteName: "ssh-remote",
+      }),
+    ).toBe(true);
+    expect(
+      isRemoteExecutorPing({
+        capabilities: REMOTE_EXECUTOR_CAPABILITIES,
         executorVersion: "99.0.0",
         protocolVersion: 999,
         remoteName: "ssh-remote",

@@ -1,23 +1,23 @@
 # 兼容矩阵
 
-更新日期：2026-07-28
+更新日期：2026-07-31
 
 当前源码是“官方扩展内置运行时”候选，本次实测来源为
-`openai.chatgpt@26.721.41059` 及其内置 Codex `0.146.0-alpha.3.1`。协议生成、差异
-审查、自动化、Linux x64 候选包、普通本地外部 `full-access`，以及真实 Remote SSH
-官方面板、外部 CLI、固定远端工具和 CodeGraph 链路已通过；Windows x64 和其余
-生命周期门禁仍待补测。Bridge 不固定官方扩展版本号；系统
+`openai.chatgpt@26.727.40816` 及其内置 Codex `0.146.0-alpha.9.2`。Windows x64 已完成
+Executor 配套版本自动同步、官方新任务、当前 Shim 和远端项目操作实测；既有 Linux x64
+候选包、普通本地外部 `full-access`、Remote SSH 外部 CLI、固定远端工具和 CodeGraph
+链路证据继续有效。完整双平台发布门禁仍待补测。Bridge 不固定官方扩展版本号；系统
 Codex CLI 仅作为可选外部客户端按能力探测，不固定版本，也不替代官方扩展内置运行时。
 2026-07-18 的 `0.144.5` 组合仍是最近一次完成 Windows 主链路验收的支持基线；候选
 自动化通过不等于发布支持。
 
 | 组件 | 已探测版本 | 当前策略 | 状态 |
 | --- | --- | --- | --- |
-| VS Code | `1.130.0`（Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | 官方面板和外部 CLI 发起的 Remote SSH 任务通过 |
-| 官方 Codex 扩展 | 本次探测 `openai.chatgpt@26.721.41059` | 固定扩展 ID，不固定版本；使用 VS Code 当前实际加载版本 | 普通本地窗口、Remote SSH 官方新任务和外部 CLI 双向投影通过 |
-| Bridge Controller | `0.3.46` Linux Remote SSH 候选；`0.2.7` Windows 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | `0.3.46` 已安装并在 `g1_1` 重载；任务列表隔离和远程 Codegraph MCP 工具身份通过；Windows stage、候选安装与双平台实机待补测 |
-| Remote Executor | `0.2.19`，诊断协议 11，Linux x64 候选 | Workspace 扩展；通过当前 Remote SSH 通道自动部署；ping 按所需能力集合验收，不按包版本或协议号门禁 | 精确 stdin 长度和死亡拥有者写入清理能力已驱动真实自动升级；`g1_1` Extension Host SIGKILL 后原文件不变、无临时文件或登记、不自动重放 |
-| 官方扩展内置 Codex/app-server | 本次探测 `0.146.0-alpha.3.1` | 只从当前官方扩展安装目录启动；版本仅作诊断和协议快照索引 | 真实 Shim 冒烟、普通本地、Remote SSH 官方面板和外部 CLI thread 通过 |
+| VS Code | `1.129.1`（Windows x64）；`1.130.0`（既有 Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | Windows 官方任务和既有 Linux 官方面板/外部 CLI Remote SSH 任务通过 |
+| 官方 Codex 扩展 | 本次探测 `openai.chatgpt@26.727.40816` | 固定扩展 ID，不固定版本；使用 VS Code 当前实际加载版本 | Windows Remote SSH 官方新任务到达当前 Shim，并完成远端文件、Git 与命令操作；普通本地和既有外部 CLI 链路通过 |
+| Bridge Controller | `0.3.52` Windows x64 候选；`0.3.51` Linux Remote SSH 候选；`0.2.7` Windows 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | `0.3.52` 已安装在 Windows x64，并在 `xj-member-42028` 完成 Executor 自动升级与重载、Windows app-server 路径适配、官方任务及远端项目操作；完整双平台门禁待补测 |
+| Remote Executor | `0.2.20`，诊断协议 12，Linux x64 Workspace 候选 | Workspace 扩展；每次初始化比较远端扩展清单实际包版本与 Controller 内嵌配套版本，不一致时通过活动 Remote SSH 通道自动部署并重载；ping 仍按所需能力集合验收，不按包版本或协议号门禁 | Windows Controller 实机将未上报包版本、运行版本 `0.2.19` 的兼容 Executor 自动替换为 `0.2.20`；重载后扩展上下文回报包版本与运行版本均为 `0.2.20`，未形成重复升级循环 |
+| 官方扩展内置 Codex/app-server | 本次探测 `0.146.0-alpha.9.2` | 只从当前官方扩展安装目录启动；版本仅作诊断和协议快照索引 | Windows 直接参数探针复现并修复 `AbsolutePathBuf` 错误；真实官方 Remote SSH task、普通本地和既有外部 CLI thread 通过 |
 | 系统 Codex CLI | 本次探针 `0.145.0`，不固定 | 仅用于 MCP、远程外部客户端和 POSIX 普通入口；运行时探测所需参数，官方扩展内置 app-server 仍是唯一服务端 | `0.3.43` 普通 `codex` 当前目录无匹配时真实透传；`codex-vscode` Remote SSH 多轮实机通过；Windows 待验证 |
 | Remote SSH | `0.124.0` | 使用 `remote.extensionKind` 探针设置 | 活动 transport、远程主根、远端工具和 CodeGraph 已通过 |
 | OpenSSH 客户端 | Linux `9.6p1`；Windows 支持基线 `9.5p2` | 严格主机校验、user/port/IdentityFile；ControlMaster 仅 Linux 启用 | 本次未触发 OpenSSH 回退实机链路 |
@@ -61,12 +61,16 @@ transport 关闭终结修复及 Linux Remote SSH 实机见
 Remote SSH 任务列表隔离见
 `docs/acceptance/2026-07-28-release-0.3.45-remote-task-list-scope.md`；远程
 Codegraph MCP 工具身份和真实 `codegraph_explore` 见
-`docs/acceptance/2026-07-28-release-0.3.46-remote-mcp-tool-guidance.md`。
+`docs/acceptance/2026-07-28-release-0.3.46-remote-mcp-tool-guidance.md`；当前 Windows
+Executor 同步、任务创建和稳定性证据见
+`docs/acceptance/2026-07-31-release-0.3.52-executor-package-reconciliation.md`。
 
 当前协议文件位于 `protocol/0.146.0-alpha.3/`。`ServerRequest.json` 的方法集合由自动化测试与
 Shim 的已知请求白名单逐项比对；出现新请求时测试失败，而不是静默转发潜在副作用。
-`ThreadStartParams`、`ThreadResumeParams` 和 `TurnStartParams` 固定远程逻辑主根与
-逐轮应用上下文所依赖的字段；Remote SSH app-server 进程仍在本地控制目录启动。普通
+`ThreadStartParams`、`ThreadResumeParams` 和 `TurnStartParams` 固定逐轮应用上下文所依赖的
+字段；Remote SSH app-server 进程仍在本地控制目录启动。POSIX 主机沿用远端逻辑主根作为
+runtime root；Windows app-server 使用原生控制目录作为 runtime root，远端 POSIX 主根由
+Bridge 策略、附加上下文与动态工具承载。普通
 本地窗口使用原始工作目录且不执行远程请求改写，仅共享 app-server 和外部附着网关。
 Bridge 另外使用该版本的 `commandExecution` 项、命令审批请求和输出增量字段。外部
 新 thread 的完全访问使用 `sandbox=danger-full-access` / `approvalPolicy=never`；
@@ -88,11 +92,12 @@ relay 再从受限文件读取 IPC 端点和随机令牌；环境值不进入 ap
 远程命令、远程文件读取和 CodeGraph stdio MCP。
 
 `openai.chatgpt@26.715.31925` 曾对本地 Extension Host 中的 Remote SSH 工作区 URI
-返回 `Unknown local project`。当前探测的 `26.721.41059` 已证明普通本地已有 thread
-可恢复并接受外部 CLI turn，也已证明 Remote SSH 官方面板可创建新任务、调用远端
-工具，外部 CLI 可介入同一 thread。
-Bridge 不会通过伪造或改写 VS Code 工作区 URI 绕过项目校验；
-官方面板任务仍必须单独执行创建验收。
+返回 `Unknown local project`；`26.721.41059` 随后证明普通本地已有 thread 可恢复、
+Remote SSH 官方面板可创建新任务，且外部 CLI 可介入同一 thread。当前探测的
+`26.727.40816` / `0.146.0-alpha.9.2` 在 Windows 无法反序列化 POSIX
+`runtimeWorkspaceRoots`，`0.3.52` 改用真实 Windows 控制目录后，官方新任务及远端
+文件、Git、命令操作已通过。Bridge 不会通过伪造或改写 VS Code 工作区 URI 绕过项目
+校验；每次新的官方扩展兼容集合仍必须单独执行任务创建验收。
 
 ## 升级步骤
 

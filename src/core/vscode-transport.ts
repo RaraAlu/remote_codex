@@ -4,8 +4,8 @@ import type { OperationSnapshot } from "./operation-ledger.js";
 export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
 export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
-export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 11;
-export const REMOTE_EXECUTOR_VERSION = "0.2.19";
+export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 12;
+export const REMOTE_EXECUTOR_VERSION = "0.2.20";
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
@@ -88,6 +88,7 @@ export type RemoteExecutorCapability = (typeof REMOTE_EXECUTOR_CAPABILITIES)[num
 export interface RemoteExecutorPing {
   capabilities: readonly RemoteExecutorCapability[];
   executorVersion?: string;
+  packageVersion?: string;
   protocolVersion?: number;
   remoteName: "ssh-remote";
 }

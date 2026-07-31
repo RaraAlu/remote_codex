@@ -46,11 +46,15 @@ import {
   REMOTE_EXECUTOR_PING_COMMAND,
   REMOTE_EXECUTOR_VERSION,
   REMOTE_OUTPUT_COMMAND,
+  type RemoteExecutorPing,
   isRemoteExecutorPing,
 } from "../core/vscode-transport.js";
 import { planAutomaticInitialization } from "./automatic-initialization.js";
 import { detectRemoteWorkspace } from "./remote-context.js";
-import { planRemoteExecutorInstall } from "./remote-executor-install.js";
+import {
+  planRemoteExecutorInstall,
+  shouldRefreshRemoteExecutor,
+} from "./remote-executor-install.js";
 import { installShimExecutable } from "./shim-executable.js";
 import {
   reconcileExternalCliLauncher,
@@ -1028,9 +1032,24 @@ export class BridgeController implements vscode.Disposable {
 
   async #ensureRemoteExecutor(): Promise<void> {
     const markerKey = `codexRemoteBridge.executorInstall.${this.#config?.host ?? "remote"}`;
-    if (await this.#waitForRemoteExecutorCommand()) {
+    const existing = await this.#waitForRemoteExecutorCommand();
+    const refreshCompatibleExecutor =
+      existing !== null &&
+      shouldRefreshRemoteExecutor(existing.packageVersion, REMOTE_EXECUTOR_VERSION);
+    if (existing) {
+      this.#log(
+        `detected compatible Remote Executor package ${existing.packageVersion ?? "unreported"} (runtime ${existing.executorVersion ?? "unreported"})`,
+      );
+    }
+    if (existing && !refreshCompatibleExecutor) {
       await this.#context.globalState.update(markerKey, undefined);
       return;
+    }
+
+    if (refreshCompatibleExecutor) {
+      this.#log(
+        `replacing Remote Executor package ${existing.packageVersion ?? "unreported"} with bundled ${REMOTE_EXECUTOR_VERSION}`,
+      );
     }
 
     const source = this.#context.asAbsolutePath("dist/codex-remote-bridge-executor.vsix");
@@ -1051,6 +1070,12 @@ export class BridgeController implements vscode.Disposable {
       digest,
     );
     if (!installPlan.allowed) {
+      if (refreshCompatibleExecutor) {
+        this.#log(
+          `skipped optional Remote Executor refresh after ${installPlan.attempts} recent attempts`,
+        );
+        return;
+      }
       throw new BridgeError(
         "REMOTE_TRANSPORT_DISCONNECTED",
         `Compatible Remote Executor is unavailable after ${installPlan.attempts} installation attempts; retry later or reinstall the Remote SSH window`,
@@ -1066,25 +1091,36 @@ export class BridgeController implements vscode.Disposable {
     const remoteVsix = folder.uri.with({
       path: `/tmp/codex-remote-bridge-executor-${digest.slice(0, 12)}.vsix`,
     });
-    await vscode.workspace.fs.writeFile(remoteVsix, packageBytes);
     try {
-      await vscode.commands.executeCommand(
-        "workbench.extensions.installExtension",
-        remoteVsix,
-        { donotSync: true },
-      );
-      await this.#context.globalState.update(markerKey, installPlan.marker);
-    } finally {
-      await vscode.workspace.fs.delete(remoteVsix, { useTrash: false }).then(
-        () => undefined,
-        () => undefined,
-      );
+      await vscode.workspace.fs.writeFile(remoteVsix, packageBytes);
+      try {
+        await vscode.commands.executeCommand(
+          "workbench.extensions.installExtension",
+          remoteVsix,
+          { donotSync: true },
+        );
+        await this.#context.globalState.update(markerKey, installPlan.marker);
+      } finally {
+        await vscode.workspace.fs.delete(remoteVsix, { useTrash: false }).then(
+          () => undefined,
+          () => undefined,
+        );
+      }
+    } catch (error) {
+      if (refreshCompatibleExecutor) {
+        this.#log(`optional Remote Executor refresh failed: ${String(error)}`);
+        return;
+      }
+      throw error;
     }
     this.#log("installed the Remote Executor through the active VS Code Remote connection");
-    if (await this.#waitForRemoteExecutorCommand()) {
-      await this.#context.globalState.update(markerKey, undefined);
-      this.#log("Remote Executor command became available without a window reload");
-      return;
+    if (!refreshCompatibleExecutor) {
+      const installed = await this.#waitForRemoteExecutorCommand();
+      if (installed) {
+        await this.#context.globalState.update(markerKey, undefined);
+        this.#log("Remote Executor command became available without a window reload");
+        return;
+      }
     }
     await this.#audit.write({
       operation: "executor.reload",
@@ -1094,7 +1130,9 @@ export class BridgeController implements vscode.Disposable {
       details: {
         automatic: true,
         executorVersion: REMOTE_EXECUTOR_VERSION,
-        reason: "installed-executor-not-active",
+        reason: refreshCompatibleExecutor
+          ? "applied-new-bundled-executor"
+          : "installed-executor-not-active",
       },
     });
     this.#log(
@@ -1110,20 +1148,20 @@ export class BridgeController implements vscode.Disposable {
     );
   }
 
-  async #waitForRemoteExecutorCommand(timeoutMs = 10_000): Promise<boolean> {
+  async #waitForRemoteExecutorCommand(timeoutMs = 10_000): Promise<RemoteExecutorPing | null> {
     const deadline = Date.now() + timeoutMs;
     do {
       try {
         const response = await vscode.commands.executeCommand<unknown>(REMOTE_EXECUTOR_PING_COMMAND);
         if (isRemoteExecutorPing(response)) {
-          return true;
+          return response;
         }
       } catch {
         // The remote command is absent until the workspace extension is installed and registered.
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     } while (Date.now() < deadline);
-    return false;
+    return null;
   }
 
   async #diagnostics(): Promise<DiagnosticReport> {

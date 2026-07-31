@@ -12,6 +12,13 @@ export type RemoteExecutorInstallPlan =
   | { allowed: true; marker: RemoteExecutorInstallMarker }
   | { allowed: false; attempts: number; retryAfterMs: number };
 
+export function shouldRefreshRemoteExecutor(
+  observedPackageVersion: unknown,
+  bundledVersion: string,
+): boolean {
+  return observedPackageVersion !== bundledVersion;
+}
+
 function isInstallMarker(value: unknown): value is RemoteExecutorInstallMarker {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;

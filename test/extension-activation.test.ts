@@ -6,12 +6,22 @@ const mock = vi.hoisted(() => ({
     shutdown: ReturnType<typeof vi.fn>;
   },
   configurationListener: null as null | ((event: { affectsConfiguration(key: string): boolean }) => void),
+  extensionVersions: new Map<string, string>(),
   extensionsListener: null as null | (() => void),
   workspaceListener: null as null | (() => void),
 }));
 
 vi.mock("vscode", () => ({
   extensions: {
+    getExtension: (id: string) => {
+      const version = mock.extensionVersions.get(id);
+      return version
+        ? {
+            extensionPath: `C:/extensions/${id}-${version}`,
+            packageJSON: { version },
+          }
+        : undefined;
+    },
     onDidChange: (listener: () => void) => {
       mock.extensionsListener = listener;
       return { dispose: vi.fn() };
@@ -52,11 +62,15 @@ describe("extension activation", () => {
   beforeEach(() => {
     mock.controller = null;
     mock.configurationListener = null;
+    mock.extensionVersions = new Map([
+      ["openai.chatgpt", "26.727.40816"],
+      ["zkbot.codex-remote-bridge-executor", "0.2.20"],
+    ]);
     mock.extensionsListener = null;
     mock.workspaceListener = null;
   });
 
-  it("initializes immediately, retries changes, and awaits shutdown", async () => {
+  it("initializes for relevant changes, ignores extension-list churn, and awaits shutdown", async () => {
     const subscriptions: unknown[] = [];
     activate({ subscriptions } as never);
 
@@ -68,7 +82,15 @@ describe("extension activation", () => {
     });
     expect(mock.controller?.initialize).toHaveBeenCalledTimes(3);
     mock.extensionsListener?.();
+    expect(mock.controller?.initialize).toHaveBeenCalledTimes(3);
+    mock.extensionVersions.set("openai.chatgpt", "26.727.40817");
+    mock.extensionsListener?.();
     expect(mock.controller?.initialize).toHaveBeenCalledTimes(4);
+    mock.extensionsListener?.();
+    expect(mock.controller?.initialize).toHaveBeenCalledTimes(4);
+    mock.extensionVersions.set("zkbot.codex-remote-bridge-executor", "0.2.21");
+    mock.extensionsListener?.();
+    expect(mock.controller?.initialize).toHaveBeenCalledTimes(5);
     expect(subscriptions).toHaveLength(4);
     const activeController = mock.controller;
     await deactivate();
