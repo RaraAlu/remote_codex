@@ -10,7 +10,11 @@ import type { OfficialCodexRuntime } from "../src/core/official-codex.js";
 
 const runtime: OfficialCodexRuntime = {
   source: "official-extension",
-  executable: "/home/tester/.vscode/extensions/openai.chatgpt/bin/linux-x86_64/codex",
+  executable: join(
+    tmpdir(),
+    "openai.chatgpt",
+    process.platform === "win32" ? "codex.exe" : "codex",
+  ),
   extensionVersion: "26.715.61943",
   codexVersion: "0.145.0-alpha.27",
 };

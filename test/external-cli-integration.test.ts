@@ -22,6 +22,8 @@ import {
   type RunCodexMcp,
 } from "../src/extension/external-cli-integration.js";
 
+const posixIt = it.skipIf(process.platform === "win32");
+
 function fakeCodexMcp(initialCommand?: string): {
   run: RunCodexMcp;
   calls: ReturnType<typeof vi.fn>;
@@ -93,7 +95,7 @@ describe("persistent current Codex CLI integration", () => {
     await expect(removeExternalMcp("codex", fake.run)).resolves.toBe(false);
   });
 
-  it("installs and refreshes a managed stable POSIX launcher", async () => {
+  posixIt("installs and refreshes a managed stable POSIX launcher", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-cli-launcher-"));
     const launcherPath = join(directory, "bin", "codex-vscode");
     const integrationPath = join(directory, "state", "integration.json");
@@ -139,7 +141,7 @@ describe("persistent current Codex CLI integration", () => {
     await expect(readFile(launcherPath, "utf8")).resolves.toBe("user-owned");
   });
 
-  it("takes over plain codex safely and restores its exact original symlink", async () => {
+  posixIt("takes over plain codex safely and restores its exact original symlink", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-cli-automatic-"));
     const binDirectory = join(directory, "bin");
     const libraryDirectory = join(directory, "lib");

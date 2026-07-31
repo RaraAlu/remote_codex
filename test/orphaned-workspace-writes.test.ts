@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanupOrphanedWorkspaceWrites } from "../src/remote-extension/orphaned-writes.js";
 
 const temporaryRoots: string[] = [];
+const posixDescribe = describe.skipIf(process.platform === "win32");
 
 async function temporaryRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "codex-bridge-orphaned-write-"));
@@ -39,7 +40,7 @@ afterEach(async () => {
   );
 });
 
-describe("orphaned workspace write cleanup", () => {
+posixDescribe("orphaned workspace write cleanup", () => {
   it("removes a dead owner's registered workspace temporary file", async () => {
     const registryDirectory = await temporaryRoot();
     const workspaceRoot = await temporaryRoot();

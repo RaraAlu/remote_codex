@@ -163,7 +163,7 @@ describe("OpenSshExecutor execution", () => {
     });
   });
 
-  it.skipIf(!posixShell)(
+  it.skipIf(process.platform === "win32" || !posixShell)(
     "does not replace a target when the write stream is shorter than declared",
     async () => {
       const root = await mkdtemp(join(process.cwd(), ".tmp-write-stream-"));

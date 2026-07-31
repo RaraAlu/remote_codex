@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
 import { projectServerMessage } from "../src/shim/native-tool-presentation.js";
@@ -6,6 +7,10 @@ const config = parseBridgeConfig({
   host: "training-gpu",
   workspaceRoot: "/remote/workspace",
 });
+
+const localReferenceRoot =
+  process.platform === "win32" ? String.raw`C:\local\reference` : "/local/reference";
+const localReferenceFile = join(localReferenceRoot, "notes.md");
 
 const dualConfig = parseBridgeConfig({
   version: 2,
@@ -22,7 +27,7 @@ const dualConfig = parseBridgeConfig({
       id: "local-reference",
       target: "local",
       role: "secondary",
-      path: "/local/reference",
+      path: localReferenceRoot,
       displayName: "Local reference",
     },
   ],
@@ -94,13 +99,13 @@ describe("native Codex tool presentation", () => {
     expect(projected.params.item).toMatchObject({
       type: "commandExecution",
       command:
-        "codex-bridge read --target local --root 'local-reference' -- '/local/reference/notes.md'",
-      cwd: "/local/reference",
+        `codex-bridge read --target local --root 'local-reference' -- '${localReferenceFile}'`,
+      cwd: localReferenceRoot,
       commandActions: [
         {
           type: "read",
           name: "notes.md",
-          path: "/local/reference/notes.md",
+          path: localReferenceFile,
         },
       ],
     });
