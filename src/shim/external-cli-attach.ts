@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
+import { prepareChildProcessCommand } from "../core/child-process-command.js";
 import { BridgeError } from "../core/errors.js";
 import { bridgeExternalCliIntegrationPath } from "../core/locations.js";
 import { isRecord } from "./rpc.js";
@@ -189,7 +190,8 @@ export async function prepareExternalCliAttach(
 }
 
 const runCodexHelp: RunCodexHelp = async (executable, args) => {
-  const { stdout } = await execFileAsync(executable, [...args], {
+  const invocation = prepareChildProcessCommand(executable, args);
+  const { stdout } = await execFileAsync(invocation.command, invocation.args, {
     encoding: "utf8",
     windowsHide: true,
   });

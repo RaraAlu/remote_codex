@@ -4,6 +4,7 @@ import {
   mkdir,
   readFile,
   readlink,
+  realpath,
   stat,
   symlink,
   writeFile,
@@ -122,6 +123,25 @@ describe("persistent current Codex CLI integration", () => {
     await expect(readlink(launcherPath)).resolves.toBe(secondShim);
     await expect(removeExternalCliLauncher(options)).resolves.toBe(true);
     await expect(stat(launcherPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("prefers a Windows PATHEXT launcher over the extensionless POSIX shim", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-cli-windows-path-"));
+    const extensionlessPath = join(directory, "codex");
+    const commandPath = join(directory, "codex.cmd");
+    await writeFile(extensionlessPath, "#!/bin/sh\n");
+    await writeFile(commandPath, "@echo off\r\n");
+
+    await expect(
+      resolveExternalCliExecutable("codex", {
+        environment: { PATH: directory, PATHEXT: ".CMD" },
+        hostPlatform: "win32",
+        integrationPath: join(directory, "integration.json"),
+      }),
+    ).resolves.toEqual({
+      commandPath,
+      executablePath: await realpath(commandPath),
+    });
   });
 
   it("does not replace an unmanaged launcher", async () => {

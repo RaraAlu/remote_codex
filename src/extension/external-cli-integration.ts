@@ -16,6 +16,7 @@ import {
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { prepareChildProcessCommand } from "../core/child-process-command.js";
 import { BridgeError } from "../core/errors.js";
 import { chmodIfSupported } from "../core/file-permissions.js";
 import {
@@ -114,7 +115,8 @@ function parseMcpConfig(raw: string): CodexMcpConfig | null {
 }
 
 const runCodexMcp: RunCodexMcp = async (codexExecutable, args) => {
-  const { stdout } = await execFileAsync(codexExecutable, [...args], {
+  const invocation = prepareChildProcessCommand(codexExecutable, args);
+  const { stdout } = await execFileAsync(invocation.command, invocation.args, {
     encoding: "utf8",
     windowsHide: true,
   });
@@ -234,9 +236,17 @@ async function resolveCommandPath(
           const extensions = (environment.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
             .split(";")
             .filter(Boolean);
-          return [join(directory, command), ...extensions.map((extension) =>
-            join(directory, `${command}${extension.toLowerCase()}`),
-          )];
+          const commandPath = join(directory, command);
+          return extensions.some((extension) =>
+            command.toLowerCase().endsWith(extension.toLowerCase()),
+          )
+            ? [commandPath]
+            : [
+                ...extensions.map((extension) =>
+                  join(directory, `${command}${extension.toLowerCase()}`),
+                ),
+                commandPath,
+              ];
         });
   for (const candidate of candidates) {
     try {

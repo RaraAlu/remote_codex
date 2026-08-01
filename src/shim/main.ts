@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { access, mkdir } from "node:fs/promises";
 import { basename, dirname, isAbsolute, normalize, resolve } from "node:path";
 import { AuditLog } from "../core/audit-log.js";
+import { prepareChildProcessCommand } from "../core/child-process-command.js";
 import { loadBridgeConfig } from "../core/config-store.js";
 import { loadOfficialCodexRuntime } from "../core/codex-runtime-store.js";
 import { BridgeError } from "../core/errors.js";
@@ -49,8 +50,9 @@ async function loadOptionalConfig(path: string, audit: AuditLog): Promise<Bridge
 }
 
 async function passthrough(executable: string, args: readonly string[]): Promise<number> {
+  const invocation = prepareChildProcessCommand(executable, args);
   return await new Promise<number>((resolvePromise, reject) => {
-    const child = spawn(executable, [...args], {
+    const child = spawn(invocation.command, invocation.args, {
       env: process.env,
       stdio: "inherit",
     });
