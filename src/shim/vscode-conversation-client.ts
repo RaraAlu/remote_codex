@@ -56,6 +56,7 @@ export class VsCodeConversationClient {
 
   static async connect(
     descriptor: ExternalCliSessionDescriptor,
+    initializeTimeoutMs = 30_000,
   ): Promise<VsCodeConversationClient> {
     const token = await readFile(descriptor.tokenPath, "utf8");
     if (!token || /[\r\n]/.test(token)) {
@@ -69,16 +70,25 @@ export class VsCodeConversationClient {
       socket.once("error", reject);
     });
     const client = new VsCodeConversationClient(descriptor, socket);
-    await client.request("initialize", {
-      clientInfo: {
-        name: "codex_vscode_bridge_mcp",
-        title: "Codex VS Code Bridge MCP",
-        version: "0.1.0",
-      },
-      capabilities: { experimentalApi: true },
-    });
-    client.notify("initialized", {});
-    return client;
+    try {
+      await client.request(
+        "initialize",
+        {
+          clientInfo: {
+            name: "codex_vscode_bridge_mcp",
+            title: "Codex VS Code Bridge MCP",
+            version: "0.1.0",
+          },
+          capabilities: { experimentalApi: true },
+        },
+        initializeTimeoutMs,
+      );
+      client.notify("initialized", {});
+      return client;
+    } catch (error) {
+      client.close();
+      throw error;
+    }
   }
 
   async request(method: string, params: unknown, timeoutMs = 30_000): Promise<unknown> {

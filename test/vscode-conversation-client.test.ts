@@ -10,7 +10,9 @@ import {
   interveneVsCodeConversation,
   readVsCodeConversation,
   startVsCodeConversation,
+  VsCodeConversationClient,
 } from "../src/shim/vscode-conversation-client.js";
+import type { ExternalCliSessionDescriptor } from "../src/shim/shared-app-server.js";
 
 let stateDirectory: string | null = null;
 let server: WebSocketServer | null = null;
@@ -37,6 +39,34 @@ afterEach(async () => {
 });
 
 describe("VS Code conversation client", () => {
+  it("closes its socket when initialize times out", async () => {
+    stateDirectory = await mkdtemp(join(tmpdir(), "codex-bridge-conversation-"));
+    const tokenPath = join(stateDirectory, "token");
+    await writeFile(tokenPath, "test-token", { mode: 0o600 });
+    server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    await new Promise<void>((resolve, reject) => {
+      server?.once("listening", resolve);
+      server?.once("error", reject);
+    });
+    const address = server.address() as AddressInfo;
+    const descriptor: ExternalCliSessionDescriptor = {
+      version: 1,
+      endpoint: `ws://127.0.0.1:${address.port}`,
+      host: "local",
+      pid: process.pid,
+      startedAtMs: Date.now(),
+      tokenEnv: "CODEX_BRIDGE_EXTERNAL_SESSION_TOKEN",
+      tokenPath,
+      workspaceRoot: stateDirectory,
+    };
+
+    await expect(VsCodeConversationClient.connect(descriptor, 20)).rejects.toThrow(
+      "request timed out: initialize",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(server.clients.size).toBe(0);
+  });
+
   it("starts a fresh thread before the first turn so current tools can be injected", async () => {
     stateDirectory = await mkdtemp(join(tmpdir(), "codex-bridge-conversation-"));
     process.env.CODEX_BRIDGE_STATE_DIR = stateDirectory;
