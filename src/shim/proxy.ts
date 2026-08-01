@@ -45,6 +45,7 @@ import {
   scopeThreadListToWorkspace,
 } from "./rewrite.js";
 import { projectServerMessage } from "./native-tool-presentation.js";
+import type { ToolRouteInventory } from "./tool-routing.js";
 
 export const KNOWN_SERVER_REQUESTS = new Set([
   "item/commandExecution/requestApproval",
@@ -73,7 +74,7 @@ export interface ShimProxyOptions {
   clientIdentity?: BridgeClientIdentity;
   remoteToolCalls?: RemoteToolCallCoordinator;
   remoteToolPriority?: number;
-  remoteMcpServers?: readonly string[];
+  toolRouteInventory?: ToolRouteInventory;
   turnClients?: RemoteTurnClientTracker;
   observeApprovalPolicy?: boolean;
   rewriteClientMessages?: boolean;
@@ -721,7 +722,7 @@ export class ShimProxy {
             this.#options.config,
             this.#options.controlDir,
             editorContext,
-            this.#options.remoteMcpServers,
+            this.#options.toolRouteInventory,
           );
     writeServer(rewritten);
   }

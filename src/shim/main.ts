@@ -32,6 +32,10 @@ import { OpenSshMcpRelay } from "./openssh-mcp-relay.js";
 import { withRemoteCorePolicy } from "./local-core-policy.js";
 import { routeRemoteMcpServers } from "./remote-mcp.js";
 import { SharedAppServer } from "./shared-app-server.js";
+import {
+  createToolRouteInventory,
+  type ToolRouteInventory,
+} from "./tool-routing.js";
 import { VsCodeMcpRelay } from "./vscode-mcp-relay.js";
 
 async function loadOptionalConfig(path: string, audit: AuditLog): Promise<BridgeConfig | null> {
@@ -286,6 +290,14 @@ async function main(): Promise<number> {
     }
     appServerArgs = withRemoteCorePolicy(appServerArgs);
   }
+  const toolRouteInventory: ToolRouteInventory | undefined = config
+    ? createToolRouteInventory(config, {
+        localMcpServers,
+        mcpRoutingFailed: mcpRoutingError !== undefined,
+        remoteMcpServers,
+        skippedMcpAccessServers,
+      })
+    : undefined;
   await audit.write({
     operation: "shim.start",
     outcome: "started",
@@ -308,6 +320,7 @@ async function main(): Promise<number> {
       remoteMcpRouting: config?.remoteMcpRouting ?? "local",
       remoteMcpServers,
       skippedMcpAccessServers,
+      toolRouteInventory,
       ...(mcpRoutingError ? { mcpRoutingError } : {}),
     },
   });
@@ -321,7 +334,7 @@ async function main(): Promise<number> {
     controlDir,
     localWorkspaceContextPath: localWorkspaceContextFile,
     localWorkspaceRoot,
-    remoteMcpServers,
+    toolRouteInventory,
     runtimeStatusPath: config
       ? bridgeShimRuntimeStatusPath(config.host, config.workspaceRoot)
       : undefined,

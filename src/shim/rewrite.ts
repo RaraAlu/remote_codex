@@ -3,6 +3,12 @@ import type { RemoteEditorContext } from "../core/vscode-transport.js";
 import { REMOTE_DYNAMIC_TOOLS, REMOTE_TOOL_NAMES } from "./dynamic-tools.js";
 import { REMOTE_PERMISSION_PROFILE_ID } from "./local-core-policy.js";
 import { isRecord, type RpcMessage } from "./rpc.js";
+import {
+  createToolRouteInventory,
+  formatToolRouteInventory,
+  serializeToolRouteInventory,
+  type ToolRouteInventory,
+} from "./tool-routing.js";
 
 const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
 - The project primary root exists on the configured remote Ubuntu host.
@@ -12,22 +18,22 @@ const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
 - In final responses, make remote workspace file citations clickable by using workspace-relative Markdown targets with optional line suffixes. Never use an absolute remote path as a Markdown link target.
 - After changing a text file, use workspace_show_diff with the complete pre-change content and hash returned by workspace_read_file when a visual review is useful.
 - Preserve and report the returned codex-bridge resourceUri as the stable workspace resource identity.
-- Omitting target and rootId selects the remote primary root.
-- Access a local secondary root only through workspace_* with its explicit target="local" and rootId.
+- For workspace_* explicit-root routes, omitting target and rootId selects the remote primary root.
+- Access a local secondary root only through a workspace_* explicit-root route with target="local" and rootId.
 - For project overviews, prefer one workspace_list_tree call before focused directory listings.
 - At the start of every turn, remember that remote_exec is the project command runner.
 - Use remote_exec for all project commands. Its approval behavior follows the active Codex permission mode.
 - For a long-running non-interactive command, use remote_background_start once, then remote_background_status and remote_background_log with cursors; use remote_background_cancel when it must stop.
 - Never use background tasks for commands that require an interactive terminal or stdin after launch.
-- Local MCP, app, and connector tools may be used for complementary capabilities.
-- MCP servers listed below as remote-routed are already bound to the remote primary root. Their tools intentionally do not need target or rootId.
-- An unlisted local MCP tool must not read, write, or execute workspace paths unless it explicitly supports the selected Bridge target and root.
+- Local MCP, app, connector, and web tools may be used for complementary capabilities at the location declared by the tool route inventory.
+- Only routes whose workspaceBinding is remote-primary or explicit-root have Bridge workspace semantics.
 - Never use built-in local shell or filesystem tools to bypass Bridge workspace tools.
 - The local cwd is an empty control directory and is not the project.
 - When a required capability is unavailable, stop and report that the bridge does not support it. Never fall back to unapproved local execution.`;
 
 const REMOTE_TURN_CONTEXT_KEY = "codex-remote-bridge";
 const REMOTE_EDITOR_CONTEXT_KEY = "codex-remote-bridge-editor-context";
+const TOOL_ROUTE_CONTEXT_KEY = "codex-remote-bridge-tool-routes";
 
 function remotePrimaryRoot(config: BridgeConfig): WorkspaceRootConfig {
   const root = config.roots.find(
@@ -51,22 +57,17 @@ function runtimeWorkspaceRoots(
   ];
 }
 
-function remoteMcpPolicy(remoteMcpServers: readonly string[]): string {
-  const servers = [...new Set(remoteMcpServers)]
-    .filter((server) => server.length > 0)
-    .sort();
-  const codegraphRouted = servers.includes("codegraph");
+function codegraphPolicy(toolRoutes: ToolRouteInventory): string {
+  const codegraphRouted = toolRoutes.routes.some(
+    (route) =>
+      route.selector === "mcp:codegraph/*" &&
+      route.location === "remote" &&
+      route.status === "route-configured",
+  );
   return [
-    "MCP routing for this app-server:",
-    `- Remote-routed servers: ${servers.length > 0 ? servers.join(", ") : "none"}.`,
-    ...(servers.length > 0
-      ? [
-          "- Use tools from the listed servers directly for their remote workspace capabilities; do not reject them for omitting target or rootId.",
-        ]
-      : []),
     ...(codegraphRouted
       ? [
-          "- Prefer the remote-routed Codegraph MCP explore, node, and impact tools for source analysis before workspace scans.",
+          "- When a Codegraph MCP tool is present in the current turn's tool list, prefer that remote-routed provider for source analysis before workspace scans. Otherwise use remote_exec to probe codegraph --version and invoke its remote CLI from the primary root when available.",
         ]
       : [
           "- If Codegraph analysis is useful, first use remote_exec to probe codegraph --version and invoke its remote CLI from the primary root when available.",
@@ -76,7 +77,7 @@ function remoteMcpPolicy(remoteMcpServers: readonly string[]): string {
 
 function remotePolicy(
   config: BridgeConfig,
-  remoteMcpServers: readonly string[],
+  toolRoutes: ToolRouteInventory,
 ): string {
   remotePrimaryRoot(config);
   const roots = [
@@ -87,18 +88,21 @@ function remotePolicy(
         `- Root id: ${root.id}; target: ${root.target}; role: ${root.role}; path: ${root.path}`,
     ),
   ].join("\n");
-  return [REMOTE_INSTRUCTIONS, remoteMcpPolicy(remoteMcpServers), roots].join(
-    "\n\n",
-  );
+  return [
+    REMOTE_INSTRUCTIONS,
+    formatToolRouteInventory(toolRoutes),
+    codegraphPolicy(toolRoutes),
+    roots,
+  ].join("\n\n");
 }
 
 function mergeInstructions(
   existing: unknown,
   config: BridgeConfig,
-  remoteMcpServers: readonly string[],
+  toolRoutes: ToolRouteInventory,
 ): string {
   return [
-    remotePolicy(config, remoteMcpServers),
+    remotePolicy(config, toolRoutes),
     typeof existing === "string" ? existing : "",
   ]
     .filter(Boolean)
@@ -109,15 +113,20 @@ function mergeAdditionalContext(
   existing: unknown,
   config: BridgeConfig,
   editorContext: RemoteEditorContext | null,
-  remoteMcpServers: readonly string[],
+  toolRoutes: ToolRouteInventory,
 ): Record<string, unknown> {
   const current = isRecord(existing) ? { ...existing } : {};
   delete current[REMOTE_EDITOR_CONTEXT_KEY];
+  delete current[TOOL_ROUTE_CONTEXT_KEY];
   return {
     ...current,
     [REMOTE_TURN_CONTEXT_KEY]: {
       kind: "application",
-      value: remotePolicy(config, remoteMcpServers),
+      value: remotePolicy(config, toolRoutes),
+    },
+    [TOOL_ROUTE_CONTEXT_KEY]: {
+      kind: "application",
+      value: serializeToolRouteInventory(toolRoutes),
     },
     ...(editorContext
       ? {
@@ -195,11 +204,15 @@ export function rewriteClientMessage(
   config: BridgeConfig | null,
   controlDir: string,
   editorContext: RemoteEditorContext | null = null,
-  remoteMcpServers: readonly string[] = [],
+  toolRouteInventory?: ToolRouteInventory,
 ): RpcMessage {
   if (!("method" in message) || !isRecord(message.params)) {
     return message;
   }
+
+  const toolRoutes = config
+    ? (toolRouteInventory ?? createToolRouteInventory(config))
+    : undefined;
 
   if (message.method === "initialize") {
     const capabilities = isRecord(message.params.capabilities)
@@ -230,7 +243,7 @@ export function rewriteClientMessage(
               developerInstructions: mergeInstructions(
                 message.params.developerInstructions,
                 config,
-                remoteMcpServers,
+                toolRoutes!,
               ),
               dynamicTools: mergeDynamicTools(message.params.dynamicTools),
             }
@@ -252,7 +265,7 @@ export function rewriteClientMessage(
               developerInstructions: mergeInstructions(
                 message.params.developerInstructions,
                 config,
-                remoteMcpServers,
+                toolRoutes!,
               ),
             }
           : {}),
@@ -281,7 +294,7 @@ export function rewriteClientMessage(
                 message.params.additionalContext,
                 config,
                 editorContext,
-                remoteMcpServers,
+                toolRoutes!,
               ),
             }
           : {}),
@@ -311,7 +324,7 @@ export function rewriteClientMessage(
               developerInstructions: mergeInstructions(
                 message.params.developerInstructions,
                 config,
-                remoteMcpServers,
+                toolRoutes!,
               ),
             }
           : { sandbox: "read-only" }),

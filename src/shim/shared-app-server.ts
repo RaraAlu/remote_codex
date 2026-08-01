@@ -45,6 +45,7 @@ import {
   type RpcId,
   type RpcMessage,
 } from "./rpc.js";
+import type { ToolRouteInventory } from "./tool-routing.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const EXTERNAL_TOKEN_ENV = "CODEX_BRIDGE_EXTERNAL_SESSION_TOKEN";
@@ -102,7 +103,7 @@ export interface SharedAppServerOptions {
   input?: Readable;
   output?: Writable;
   errorOutput?: Writable;
-  remoteMcpServers?: readonly string[];
+  toolRouteInventory?: ToolRouteInventory;
   runtimeStatusPath?: string;
   spawnCodex?: (
     command: string,
@@ -809,7 +810,7 @@ export class SharedAppServer {
       clientIdentity,
       remoteToolCalls: this.#remoteToolCalls,
       remoteToolPriority,
-      remoteMcpServers: this.#options.remoteMcpServers,
+      toolRouteInventory: this.#options.toolRouteInventory,
       turnClients: this.#turnClients,
       observeApprovalPolicy,
       rewriteClientMessages: this.#options.config !== null,

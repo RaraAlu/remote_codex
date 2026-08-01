@@ -6,10 +6,13 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.60`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
+> 当前源码版本为 `0.3.61`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
 > `codex` 自动附着、显式 `codex-vscode.exe` TUI、外部 MCP、历史 thread 同步、无 rollout
 > 冷启动降级、停用恢复和 npm 升级恢复实测；官方 Remote SSH git watcher 的路径误判
-> 与重复告警也已完成可逆兼容修复和远端只读链路实测。完整双平台门禁仍待处理。
+> 与重复告警也已完成可逆兼容修复和远端只读链路实测。Shim 现已把统一工具路由清单
+> 注入 thread 和每轮上下文，执行位置不再按 `target` / `rootId` 参数形状猜测；MCP 家族以
+> `route-configured` 区分“路由已配置”和“具体工具可调用”。完整双平台
+> 门禁仍待处理。
 > 在双平台门禁完成前不发布 `0.4.0`，也不扩大支持声明。
 
 ## 工作原理
@@ -208,10 +211,13 @@ Remote SSH 实机验证。完整门禁和量化指标见
 
 ### 统一工具代理与远程位置透明
 
-- 为当前 app-server 建立统一工具路由清单，按实际运行结果标记 Bridge 动态工具、远程
-  MCP、本机 MCP、App、Connector 和 Web 工具的执行位置、工作区绑定、能力与降级原因；
-  Shim 必须把这份清单交给 thread 和每轮模型上下文，不能再依据工具是否包含
-  `target` / `rootId` 猜测执行位置。
+- 在 `0.3.61` 已注入的统一工具路由清单基础上，继续读取 app-server 的实际工具快照，
+  把当前按 MCP server 和 App/Connector/Web provider family 声明的路由细化到实际工具；
+  对每项保留执行位置、工作区绑定、能力、状态和真实降级原因，不能退回依据参数形状猜测。
+- 排查 Windows 外部任务验收中一次 `remote_exec(["pwd"])` 的 `119,489 ms` Bridge 端到端
+  延迟（远端命令自身 `11 ms`）及一次冷连接 `initialize` 的 `30,016 ms` 超时；补齐排队、
+  转发、远端执行和结果回传的分段指标与回归测试。退出条件为 Windows Remote SSH 连续
+  5 次暖调用无超时，并保存可定位瓶颈的分段耗时分布。
 - 将现有 `mcp-proxy` 收敛为统一代理入口，以稳定的路由描述和 Provider 接口承接
   `stdio`、Streamable HTTP、SSE 与本机/云端 passthrough。Codex 侧使用统一调用路径，
   传输差异只留在代理内部；未知工具参数不得被猜测或改写。

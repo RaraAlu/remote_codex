@@ -150,4 +150,6 @@ transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
 三种 wrapper 接管、普通入口自动附着、停用恢复和 npm 覆盖后自动修复见
 `docs/acceptance/2026-08-02-release-0.3.59-windows-automatic-cli.md`；Windows 官方 Git
 初始化 watcher 可逆兼容、重载和远端只读链路见
-`docs/acceptance/2026-08-02-release-0.3.60-windows-git-init-watcher.md`。
+`docs/acceptance/2026-08-02-release-0.3.60-windows-git-init-watcher.md`；Windows 统一工具
+路由清单、模型位置透明和默认远端路由证据见
+`docs/acceptance/2026-08-02-release-0.3.61-windows-tool-route-inventory.md`。

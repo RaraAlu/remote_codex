@@ -438,7 +438,10 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
 当前状态：Windows x64 环境已投入逐目标实测，Executor 同步、官方新任务、远端项目操作、
 显式/普通 CLI、外部 MCP、停用恢复、npm 升级恢复和官方 Git 初始化 watcher 路径兼容
 已分别形成证据。`0.3.60` 重载后重复 `git-init-watcher ENOENT` 从每五秒一次降为 0，
-同一候选的远端 Git、README 读取和 `pwd` 均通过；完整 M01-M11 重跑、双平台 stage
+同一候选的远端 Git、README 读取和 `pwd` 均通过。`0.3.61` 又完成统一工具路由清单实测：
+23 条路由进入 Shim 审计、thread 指令和每轮 JSON 上下文，MCP family 不再被误报为具体
+工具可用；无 `target/rootId` 的远端 `pwd` 通过。一次 `119,489 ms` 动态工具转发延迟及
+冷连接 `30,016 ms` 超时已回填 README 活动 TODO；完整 M01-M11 重跑、双平台 stage
 收集和量化门禁仍是后续 `0.4.0` 决策前的活动前置。
 
 - 在 Windows x64 原生执行依赖安装、类型检查、测试、构建、SEA Shim 冒烟和构包。

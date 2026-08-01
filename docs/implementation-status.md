@@ -194,6 +194,27 @@ Windows 实机安装 `0.3.60` 后，官方扩展 `26.727.40816` 的直接 watche
 `workspace_read_file(README.md)` 和 `remote_exec(["pwd"])`，三项均审计为远端主根
 `/root/work/train/MimicLite`，没有伪造 URI 或本地项目回退。完整证据见
 `docs/acceptance/2026-08-02-release-0.3.60-windows-git-init-watcher.md`。
+
+`0.3.61` 完成统一工具位置透明的首个独立目标。Shim 根据实际动态工具集合、MCP 路由
+结果和 passthrough provider family 生成 schema 1 路由清单，为每个 selector 记录
+provider、执行位置、工作区绑定、能力、状态和说明，并同时注入 thread 开发者指令与每轮
+`codex-remote-bridge-tool-routes` JSON 上下文。Bridge 动态工具标记为 `available`；MCP
+server family 只标记为 `route-configured`，明确不宣称当前回合存在任何具体 provider
+tool；App、Connector 和 Web 保持 `provider-managed`。模型策略不再根据 `target` 或
+`rootId` 参数形状推断执行位置，也不会因为 MCP 家族路由存在而调用当前工具列表中未暴露
+的工具。清单不序列化 executable、argv、cwd、env、路径或凭据。
+
+Windows 最终候选重载后在 `3,212 ms` 内恢复 `ready`，活动 Shim 为
+`0.3.61-e1d2510f6172b034`，启动审计记录 23 条路由：CodeGraph 为远端
+`route-configured`，两个本机 MCP provider 名称按审计脱敏策略保留，Bridge 动态工具绑定
+远端主根。真实验收 thread `019fbefd-5320-7593-91d6-2037178dc660` 同时读取到文本和 JSON
+清单，没有调用未暴露的 MCP 工具；省略 `target/rootId` 的 `remote_exec(["pwd"])` 返回
+`/root/work/train/MimicLite`，最终回复 `ROUTE_SEMANTICS_0361_OK`。功能目标限定范围通过；
+该样本 Bridge 端到端耗时 `119,489 ms`、远端命令自身 `11 ms`，另有一次冷连接
+`initialize` 在 `30,016 ms` 超时后重试 `1 ms` 成功，性能分段诊断已保留为 README 活动
+TODO。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.61-windows-tool-route-inventory.md`。
+
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

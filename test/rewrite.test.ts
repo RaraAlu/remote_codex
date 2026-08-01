@@ -4,6 +4,7 @@ import { parseBridgeConfig } from "../src/core/config.js";
 import { REMOTE_DYNAMIC_TOOLS } from "../src/shim/dynamic-tools.js";
 import { REMOTE_PERMISSION_PROFILE_ID } from "../src/shim/local-core-policy.js";
 import { isUnknownServerRequest } from "../src/shim/proxy.js";
+import { createToolRouteInventory } from "../src/shim/tool-routing.js";
 import {
   rewriteClientMessage,
   scopeThreadListToWorkspace,
@@ -28,6 +29,9 @@ const config = parseBridgeConfig({
       displayName: "Reference",
     },
   ],
+});
+const remoteCodegraphRoutes = createToolRouteInventory(config, {
+  remoteMcpServers: ["codegraph"],
 });
 
 describe("app-server request rewriting", () => {
@@ -94,7 +98,7 @@ describe("app-server request rewriting", () => {
       config,
       "/local/control",
       null,
-      ["codegraph"],
+      remoteCodegraphRoutes,
     ) as { params: Record<string, unknown> };
     expect(rewritten.params.cwd).toBe("/local/control");
     expect(rewritten.params.runtimeWorkspaceRoots).toEqual([
@@ -108,16 +112,16 @@ describe("app-server request rewriting", () => {
       "Never fall back to unapproved local execution",
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
-      "Local MCP, app, and connector tools may be used",
+      "Local MCP, app, connector, and web tools may be used",
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
-      "Remote-routed servers: codegraph",
+      "mcp:codegraph/*: provider=mcp; location=remote",
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
-      "do not reject them for omitting target or rootId",
+      "Never infer a tool's execution location from the presence or absence of target or rootId",
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
-      "Prefer the remote-routed Codegraph MCP",
+      "When a Codegraph MCP tool is present in the current turn's tool list",
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
       "Root id: remote-primary",
@@ -190,7 +194,6 @@ describe("app-server request rewriting", () => {
       config,
       "/local/control",
       null,
-      [],
     ) as { params: Record<string, unknown> };
 
     expect(rewritten.params.permissions).toBe(REMOTE_PERMISSION_PROFILE_ID);
@@ -249,6 +252,10 @@ describe("app-server request rewriting", () => {
               kind: "application",
               value: "stale editor content",
             },
+            "codex-remote-bridge-tool-routes": {
+              kind: "application",
+              value: "stale routes",
+            },
           },
         },
       },
@@ -280,7 +287,7 @@ describe("app-server request rewriting", () => {
     expect(bridgeContext.value).toContain(
       "Use remote_exec for all project commands",
     );
-    expect(bridgeContext.value).toContain("Remote-routed servers: none");
+    expect(bridgeContext.value).not.toContain("mcp:codegraph/*");
     expect(bridgeContext.value).toContain(
       "first use remote_exec to probe codegraph --version",
     );
@@ -288,6 +295,13 @@ describe("app-server request rewriting", () => {
     expect(additionalContext).not.toHaveProperty(
       "codex-remote-bridge-editor-context",
     );
+    const toolRoutes = JSON.parse(
+      additionalContext["codex-remote-bridge-tool-routes"]!.value,
+    ) as { primaryRootId: string; schemaVersion: number };
+    expect(toolRoutes).toMatchObject({
+      primaryRootId: "remote-primary",
+      schemaVersion: 1,
+    });
     expect(rewritten.params).not.toHaveProperty("sandboxPolicy");
   });
 

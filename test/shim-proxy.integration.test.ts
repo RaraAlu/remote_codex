@@ -12,6 +12,7 @@ import {
 } from "../src/shim/local-core-policy.js";
 import { ShimProxy } from "../src/shim/proxy.js";
 import { isRecord, type RpcMessage } from "../src/shim/rpc.js";
+import { createToolRouteInventory } from "../src/shim/tool-routing.js";
 
 function fakeAppServer(): ChildProcessWithoutNullStreams {
   const source = `
@@ -205,16 +206,20 @@ describe("ShimProxy JSONL integration", () => {
   it("identifies remote-routed MCP tools in the forwarded thread policy", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-remote-mcp-policy-"));
     const forwarded: RpcMessage[] = [];
+    const proxyConfig = parseBridgeConfig({
+      host: "training-gpu",
+      workspaceRoot: "/remote/workspace",
+    });
     const proxy = new ShimProxy({
       appServerArgs: ["app-server", "--stdio"],
       auditPath: join(directory, "audit.jsonl"),
       codexExecutable: "fake-codex",
-      config: parseBridgeConfig({
-        host: "training-gpu",
-        workspaceRoot: "/remote/workspace",
-      }),
+      config: proxyConfig,
       controlDir: join(directory, "control"),
-      remoteMcpServers: ["codegraph"],
+      toolRouteInventory: createToolRouteInventory(
+        proxyConfig,
+        { remoteMcpServers: ["codegraph"] },
+      ),
     });
 
     await proxy.handleClientMessage(
@@ -231,10 +236,10 @@ describe("ShimProxy JSONL integration", () => {
     expect(forwarded).toHaveLength(1);
     const message = forwarded[0] as { params: Record<string, unknown> };
     expect(String(message.params.developerInstructions)).toContain(
-      "Remote-routed servers: codegraph",
+      "mcp:codegraph/*: provider=mcp; location=remote",
     );
     expect(String(message.params.developerInstructions)).toContain(
-      "do not reject them for omitting target or rootId",
+      "Never infer a tool's execution location from the presence or absence of target or rootId",
     );
   });
 
