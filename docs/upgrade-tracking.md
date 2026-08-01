@@ -159,3 +159,5 @@ transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
 `docs/acceptance/2026-08-02-release-0.3.63-windows-cold-initialize.md`；Windows 普通更新
 稳定 launcher、单次重载、活动进程链和真实远端 Git 操作见
 `docs/acceptance/2026-08-02-release-0.3.65-windows-single-reload.md`。
+Windows Remote SSH 冷启动就绪阶段、Executor 能力探测耗时和慢启动诊断候选见
+`docs/acceptance/2026-08-02-release-0.3.66-windows-readiness-observability.md`。

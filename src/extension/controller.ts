@@ -56,6 +56,7 @@ import {
   planRemoteExecutorInstall,
   shouldRefreshRemoteExecutor,
 } from "./remote-executor-install.js";
+import { waitForRemoteExecutorReadiness } from "./remote-executor-readiness.js";
 import {
   installOfficialShimLauncher,
   installShimExecutable,
@@ -99,6 +100,13 @@ interface DiagnosticReport {
     state: BridgeState;
     configPath: string;
     controlDir: string;
+    startup: {
+      phase: ConnectionPhase;
+      phaseStartedAt: string | null;
+      remoteExecutorAttempts: number | null;
+      remoteExecutorWaitMs: number | null;
+      remoteExecutorWaitSlow: boolean;
+    };
     workspaceSemantics: {
       controlDirectory: {
         path: string;
@@ -136,6 +144,25 @@ interface DiagnosticReport {
   };
   effectiveConfig: BridgeConfig | null;
 }
+
+type ConnectionPhase =
+  | "idle"
+  | "waiting-remote-extension-host"
+  | "probing-remote-workspace"
+  | "waiting-codex-app-server";
+
+interface RemoteExecutorReadinessMetrics {
+  attempts: number;
+  elapsedMs: number;
+  slow: boolean;
+}
+
+const CONNECTION_PHASE_LABELS: Record<ConnectionPhase, string> = {
+  idle: "",
+  "waiting-remote-extension-host": "waiting for Remote Extension Host",
+  "probing-remote-workspace": "probing remote workspace",
+  "waiting-codex-app-server": "waiting for Codex app-server",
+};
 
 function stateIcon(state: BridgeState): string {
   switch (state) {
@@ -211,6 +238,9 @@ export class BridgeController implements vscode.Disposable {
   #shimRuntimeMonitor: NodeJS.Timeout | null = null;
   #shimRuntimeMonitorGeneration = 0;
   #officialExtensionCompatibility: OfficialExtensionCompatibilityResult | null = null;
+  #connectionPhase: ConnectionPhase = "idle";
+  #connectionPhaseStartedAtMs: number | null = null;
+  #remoteExecutorReadiness: RemoteExecutorReadinessMetrics | null = null;
 
   constructor(context: vscode.ExtensionContext) {
     this.#context = context;
@@ -544,6 +574,8 @@ export class BridgeController implements vscode.Disposable {
   async #configureCurrentRemote(interactive: boolean): Promise<void> {
     this.#stopShimRuntimeMonitor();
     this.#shimRuntimeHealth = { ...EMPTY_SHIM_RUNTIME_HEALTH };
+    this.#setConnectionPhase("idle");
+    this.#remoteExecutorReadiness = null;
     if (this.#state.state !== "disabled") {
       this.#executor?.close();
       this.#executor = null;
@@ -657,6 +689,7 @@ export class BridgeController implements vscode.Disposable {
     this.#autoSuppressed = true;
     this.#stopShimRuntimeMonitor();
     this.#shimRuntimeHealth = { ...EMPTY_SHIM_RUNTIME_HEALTH };
+    this.#setConnectionPhase("idle");
     await this.#clearWindowSession();
     const executor = this.#executor;
     let remoteStop:
@@ -967,8 +1000,10 @@ export class BridgeController implements vscode.Disposable {
     }
     this.#stopShimRuntimeMonitor();
     if (this.#config.connectionMode === "vscode-remote") {
+      this.#setConnectionPhase("waiting-remote-extension-host");
       await this.#ensureRemoteExecutor();
     }
+    this.#setConnectionPhase("probing-remote-workspace");
     this.#executor?.close();
     const sessionConfig = this.#sessionConfig ?? (await this.#prepareSessionConfig(this.#config));
     this.#sessionConfig = sessionConfig;
@@ -993,6 +1028,9 @@ export class BridgeController implements vscode.Disposable {
     const connectedState = this.#shimRuntimeHealth.appServerInitialized
       ? "ready"
       : "degraded";
+    this.#setConnectionPhase(
+      connectedState === "ready" ? "idle" : "waiting-codex-app-server",
+    );
     this.#state.transition(connectedState);
     this.#startShimRuntimeMonitor();
     await this.#audit.write({
@@ -1055,12 +1093,14 @@ export class BridgeController implements vscode.Disposable {
         this.#shimRuntimeHealth.appServerInitialized &&
         currentState === "degraded"
       ) {
+        this.#setConnectionPhase("idle");
         this.#state.transition("ready");
         this.#log("official Codex Shim and app-server initialization confirmed");
       } else if (
         !this.#shimRuntimeHealth.appServerInitialized &&
         currentState === "ready"
       ) {
+        this.#setConnectionPhase("waiting-codex-app-server");
         this.#state.transition("degraded");
         this.#log("official Codex Shim or app-server heartbeat was lost");
       } else if (
@@ -1091,13 +1131,14 @@ export class BridgeController implements vscode.Disposable {
 
   async #ensureRemoteExecutor(): Promise<void> {
     const markerKey = `codexRemoteBridge.executorInstall.${this.#config?.host ?? "remote"}`;
-    const existing = await this.#waitForRemoteExecutorCommand();
+    const readiness = await this.#waitForRemoteExecutorCommand();
+    const existing = readiness.response;
     const refreshCompatibleExecutor =
       existing !== null &&
       shouldRefreshRemoteExecutor(existing.packageVersion, REMOTE_EXECUTOR_VERSION);
     if (existing) {
       this.#log(
-        `detected compatible Remote Executor package ${existing.packageVersion ?? "unreported"} (runtime ${existing.executorVersion ?? "unreported"})`,
+        `detected compatible Remote Executor package ${existing.packageVersion ?? "unreported"} (runtime ${existing.executorVersion ?? "unreported"}) after ${readiness.elapsedMs} ms and ${readiness.attempts} capability probe${readiness.attempts === 1 ? "" : "s"}`,
       );
     }
     if (existing && !refreshCompatibleExecutor) {
@@ -1174,10 +1215,13 @@ export class BridgeController implements vscode.Disposable {
     }
     this.#log("installed the Remote Executor through the active VS Code Remote connection");
     if (!refreshCompatibleExecutor) {
-      const installed = await this.#waitForRemoteExecutorCommand();
+      const installedReadiness = await this.#waitForRemoteExecutorCommand();
+      const installed = installedReadiness.response;
       if (installed) {
         await this.#context.globalState.update(markerKey, undefined);
-        this.#log("Remote Executor command became available without a window reload");
+        this.#log(
+          `Remote Executor command became available without a window reload after ${installedReadiness.elapsedMs} ms and ${installedReadiness.attempts} capability probe${installedReadiness.attempts === 1 ? "" : "s"}`,
+        );
         return;
       }
     }
@@ -1207,20 +1251,40 @@ export class BridgeController implements vscode.Disposable {
     );
   }
 
-  async #waitForRemoteExecutorCommand(timeoutMs = 10_000): Promise<RemoteExecutorPing | null> {
-    const deadline = Date.now() + timeoutMs;
-    do {
-      try {
-        const response = await vscode.commands.executeCommand<unknown>(REMOTE_EXECUTOR_PING_COMMAND);
-        if (isRemoteExecutorPing(response)) {
-          return response;
-        }
-      } catch {
-        // The remote command is absent until the workspace extension is installed and registered.
-      }
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    } while (Date.now() < deadline);
-    return null;
+  async #waitForRemoteExecutorCommand(retryWindowMs = 10_000): Promise<
+    RemoteExecutorReadinessMetrics & { response: RemoteExecutorPing | null }
+  > {
+    const result = await waitForRemoteExecutorReadiness({
+      isReady: isRemoteExecutorPing,
+      onSlow: ({ attempts, elapsedMs }) => {
+        this.#remoteExecutorReadiness = { attempts, elapsedMs, slow: true };
+        this.#log(
+          `waiting for the Remote Extension Host to answer the Executor capability probe (${elapsedMs} ms elapsed)`,
+        );
+        this.#renderStatus();
+      },
+      probe: async () =>
+        await vscode.commands.executeCommand<unknown>(REMOTE_EXECUTOR_PING_COMMAND),
+      retryWindowMs,
+    });
+    this.#remoteExecutorReadiness = {
+      attempts: result.attempts,
+      elapsedMs: result.elapsedMs,
+      slow: result.slow,
+    };
+    await this.#audit.write({
+      operation: "executor.readiness",
+      outcome: result.response ? "succeeded" : "failed",
+      state: this.#state.state,
+      hostId: this.#config?.host,
+      workspaceRoot: this.#config?.workspaceRoot,
+      details: {
+        attempts: result.attempts,
+        durationMs: result.elapsedMs,
+        slow: result.slow,
+      },
+    });
+    return result;
   }
 
   async #diagnostics(): Promise<DiagnosticReport> {
@@ -1289,6 +1353,16 @@ export class BridgeController implements vscode.Disposable {
         state: this.#state.state,
         configPath: bridgeConfigPath(),
         controlDir,
+        startup: {
+          phase: this.#connectionPhase,
+          phaseStartedAt:
+            this.#connectionPhaseStartedAtMs === null
+              ? null
+              : new Date(this.#connectionPhaseStartedAtMs).toISOString(),
+          remoteExecutorAttempts: this.#remoteExecutorReadiness?.attempts ?? null,
+          remoteExecutorWaitMs: this.#remoteExecutorReadiness?.elapsedMs ?? null,
+          remoteExecutorWaitSlow: this.#remoteExecutorReadiness?.slow ?? false,
+        },
         workspaceSemantics: {
           controlDirectory: {
             path: controlDir,
@@ -1453,6 +1527,7 @@ export class BridgeController implements vscode.Disposable {
   }
 
   #transitionFailure(error: BridgeError): void {
+    this.#setConnectionPhase("idle");
     const next = error.code === "PROTOCOL_MISMATCH" ? "incompatible" : "disconnected";
     if (this.#state.state !== next) {
       this.#state.transition(next);
@@ -1462,25 +1537,38 @@ export class BridgeController implements vscode.Disposable {
   #renderStatus(): void {
     const target = this.#config?.host ?? "unconfigured";
     const stateLabel =
-      this.#state.state === "degraded" &&
-      this.#remoteIdentity &&
-      !this.#shimRuntimeHealth.appServerInitialized
-        ? this.#shimRuntimeHealth.appServerLastError
-          ? "remote ready; Codex failed"
-          : this.#shimRuntimeHealth.shimStarted
-            ? "remote ready; Codex starting"
-            : "remote ready; waiting for Codex"
-        : this.#state.state;
+      this.#state.state === "connecting" && this.#connectionPhase !== "idle"
+        ? CONNECTION_PHASE_LABELS[this.#connectionPhase]
+        : this.#state.state === "degraded" &&
+            this.#remoteIdentity &&
+            !this.#shimRuntimeHealth.appServerInitialized
+          ? this.#shimRuntimeHealth.appServerLastError
+            ? "remote ready; Codex failed"
+            : this.#shimRuntimeHealth.shimStarted
+              ? "remote ready; Codex starting"
+              : "remote ready; waiting for Codex"
+          : this.#state.state;
     this.#status.text = `${stateIcon(this.#state.state)} Codex: local -> ${target} (${stateLabel})`;
-    this.#status.tooltip =
-      this.#shimRuntimeHealth.appServerLastError ??
-      "Codex Remote Bridge diagnostics";
+    this.#status.tooltip = this.#shimRuntimeHealth.appServerLastError
+      ? this.#shimRuntimeHealth.appServerLastError
+      : this.#connectionPhase === "waiting-remote-extension-host"
+        ? "The Remote SSH window is open, but its Extension Host has not answered the Executor capability probe yet."
+        : "Codex Remote Bridge diagnostics";
     this.#status.backgroundColor =
       this.#state.state === "incompatible" || this.#state.state === "disconnected"
         ? new vscode.ThemeColor("statusBarItem.errorBackground")
         : this.#state.state === "degraded"
           ? new vscode.ThemeColor("statusBarItem.warningBackground")
           : undefined;
+  }
+
+  #setConnectionPhase(phase: ConnectionPhase): void {
+    if (this.#connectionPhase === phase) {
+      return;
+    }
+    this.#connectionPhase = phase;
+    this.#connectionPhaseStartedAtMs = phase === "idle" ? null : Date.now();
+    this.#renderStatus();
   }
 
   #log(message: string): void {

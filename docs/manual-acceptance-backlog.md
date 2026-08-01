@@ -451,6 +451,12 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
 Executor 保持 `0.2.21`。真实验收任务完成远端 `workspace_git_status`，耗时 `1,195 ms`。
 旧描述符/PID 复用仍是独立活动项；完整 M01-M11 重跑、双平台 stage 收集和量化门禁仍是后续
 `0.4.0` 决策前的活动前置。
+`0.3.66` 已把这次 `10,146 ms` 拆分为 Remote Extension Host / Executor 能力探测、远端
+工作区探测和 Codex app-server 阶段，并在状态栏、日志、审计和诊断中记录阶段与耗时。
+完整 `npm run check` 通过（66 个测试文件、322 项测试通过）；Windows 实机再次复现 Remote
+Extension Host 无响应，2 秒慢启动提示、`executor.readiness` 的 `1 / 9058 / true`、
+`9,550 ms` 恢复 `ready`、单次用户重载和真实远端 Git 操作均通过。该逐目标验收已完成；
+完整 M01-M11、双平台 stage 收集和 `0.4.0` 量化门禁仍待后续执行。
 
 - 在 Windows x64 原生执行依赖安装、类型检查、测试、构建、SEA Shim 冒烟和构包。
 - 在 Windows 执行 `npm run package:stage`，与同版本 Linux stage 一并运行

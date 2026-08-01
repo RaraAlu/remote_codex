@@ -274,6 +274,28 @@ Remote Executor 保持 `0.2.21`，没有安装或升级重载。真实验收任�
 `docs/acceptance/2026-08-02-release-0.3.65-windows-single-reload.md`。旧描述符/PID 复用风险
 仍保留为独立 README 活动 TODO。
 
+`0.3.66` 收口 Windows Remote SSH 冷启动的就绪可观测性。`0.3.65` 实机日志证明
+窗口视觉重载结束后，Remote Extension Host 曾从 `06:02:34.940` 到 `06:02:41.872`
+无响应；Controller 的 Executor 能力探测因此耗时 `9,381 ms`，宿主恢复后 Shim 和
+app-server 只再用 `472 ms` 进入 `ready`。新实现不降低实际能力门槛，也不把窗口打开等同于
+远端可执行：连接阶段现在显式区分等待 Remote Extension Host、探测远端工作区和等待
+Codex app-server，慢探测会立即写入 Controller 日志；每次探测结果把次数、总耗时和慢启动
+标记写入 `executor.readiness` 审计与诊断。Windows 原生 `npm run check` 已通过：66 个
+测试文件通过、5 个跳过，322 项测试通过、25 项跳过；类型检查、构建、稳定 launcher
+真实进程烟测和 Windows 构包均通过。新增自动化覆盖失败重试、悬挂命令期间的慢启动通知
+和重试窗口耗尽。
+
+Windows 安装 `0.3.66` 后只手动重载一次，没有 Executor 安装、升级或第二次窗口重载。
+本次 Remote Extension Host 从 `06:23:16.148` 到 `06:23:22.580` 无响应；Controller 在
+等待满 2 秒时明确写入慢启动日志，最终 `executor.readiness` 记录
+`attempts=1`、`durationMs=9058`、`slow=true`。Executor 恢复后 `492 ms` 内进入 `ready`，
+整个 Controller `connecting -> ready` 为 `9,550 ms`。活动进程链为 Extension Host
+`298908` → 稳定 launcher `291176` → `0.3.66` Shim `292772`，三份 Shim/launcher
+SHA-256 仍一致。真实验收 thread `019fbf6f-ff68-7880-9310-a60d6a136d3b` 完成远端主根
+`workspace_git_status`，远端执行 `1,066 ms`、Shim transport `1,177 ms`，最终回复
+`ACCEPTANCE COMPLETE.`。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.66-windows-readiness-observability.md`。
+
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知
