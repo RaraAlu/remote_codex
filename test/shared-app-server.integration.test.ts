@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -367,6 +368,11 @@ describe("SharedAppServer", () => {
     const descriptor = await waitFor(async () => {
       const current = await readDescriptor(descriptorPath);
       return current?.threadId === "thread-shared" ? current : undefined;
+    });
+    expect(descriptor).toMatchObject({
+      version: 2,
+      executablePath: realpathSync.native(process.execPath),
+      pid: process.pid,
     });
     const token = await readFile(bridgeExternalCliTokenPath(), "utf8");
     const unauthorizedStatus = await new Promise<number>((resolvePromise, reject) => {

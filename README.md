@@ -6,7 +6,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.66`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
+> 当前源码版本为 `0.3.67`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
 > `codex` 自动附着、显式 `codex-vscode.exe` TUI、外部 MCP、历史 thread 同步、无 rollout
 > 冷启动降级、停用恢复和 npm 升级恢复实测；官方 Remote SSH git watcher 的路径误判
 > 与重复告警也已完成可逆兼容修复和远端只读链路实测。Shim 现已把统一工具路由清单
@@ -21,6 +21,8 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 > Remote SSH 冷启动期间会明确区分“窗口已打开”和“Remote Extension Host 已响应”：
 > 状态栏、日志、审计和诊断记录 Executor 能力探测阶段、次数与耗时，不会提前伪报
 > `ready`。
+> 外部会话描述符同时绑定 Shim PID、真实进程启动时间和可执行文件路径；会话发现会清理
+> 已退出或 PID 已被复用的旧描述符，同时保留仍由匹配 Shim 进程拥有的活动会话。
 > 完整双平台
 > 门禁仍待处理。
 > 在双平台门禁完成前不发布 `0.4.0`，也不扩大支持声明。
@@ -251,17 +253,14 @@ Remote SSH 实机验证。完整门禁和量化指标见
   明确；所有工具都有可诊断的有效路由或真实不兼容原因，Linux x64 与 Windows x64
   分别完成发布门禁，不再因参数形状或缺少 `target` / `rootId` 产生模型侧误拒绝。
 
-### Windows 更新与外部会话生命周期
+### Windows Remote SSH 更新环境
 
-- 会话发现不能只按描述符 PID 是否存在判断存活；同时核对进程可执行路径和描述符
-  `startedAtMs`，清理已退出或 PID 被复用的旧描述符。退出条件为多轮窗口重载后不会列出
-  幽灵会话，也不会删除仍由匹配 Shim 进程拥有的活动描述符。
-- Windows Remote SSH 启动环境需消除中文语言包更新循环。当前本机 VS Code `1.129.1`
-  安装了要求 VS Code `^1.131.0` 的语言包 `1.131.2026072717`，远端仍为
-  `1.129.2026071717`；同时远端大小写两组 HTTP/HTTPS/ALL proxy 都指向不可达的
-  `127.0.0.1:32081`，使远端直接安装失败并反复回退下载。退出条件为对齐兼容语言包、
-  修正或取消远端无效代理，并连续三次普通窗口重载均不再出现语言包重复更新、Remote
-  Extension Host 无响应或额外自动重载；远端 socket 建立后的 Executor 能力探测低于 2 秒。
+- 本机 VS Code 与远端中文语言包已对齐到 `1.131.0` / `1.131.2026072717`，`0.3.67`
+  已连续两次普通重载没有再次安装语言包、报告 Remote Extension Host 无响应或触发额外
+  自动重载；但远端大小写两组 HTTP/HTTPS/ALL proxy 仍指向不可达的 `127.0.0.1:32081`，
+  两次 Executor 能力探测分别为 `2,805 ms` 和 `9,112 ms`。退出条件为修正或取消无效代理，
+  并累计连续三次普通窗口重载均无语言包重复更新、Remote Extension Host 无响应或额外
+  自动重载；远端 socket 建立后的 Executor 能力探测低于 2 秒。
 
 ### Codex 原生上下文入口
 

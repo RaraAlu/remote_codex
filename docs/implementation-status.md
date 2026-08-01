@@ -296,6 +296,25 @@ SHA-256 仍一致。真实验收 thread `019fbf6f-ff68-7880-9310-a60d6a136d3b` �
 `ACCEPTANCE COMPLETE.`。完整证据见
 `docs/acceptance/2026-08-02-release-0.3.66-windows-readiness-observability.md`。
 
+`0.3.67` 关闭外部会话旧描述符和 PID 复用风险。Shim 新写入 v2 描述符，记录真实进程
+启动时间与规范化可执行文件路径；Windows 以单次进程表探测读取 PID、启动时间和路径，
+Linux 以 procfs 启动 tick、系统 boot time 与 `/proc/<pid>/exe` 得到相同身份。发现端继续
+兼容 v1 描述符，但不再仅以 `process.kill(pid, 0)` 判定存活：进程已退出或身份不匹配时，
+先把描述符原子移入隔离名，再比较原始内容，避免并发重写的新活动描述符被误删。进程身份
+探测整体不可用时退回既有存活检查；单个活动 PID 暂时无法读取身份时只隐藏、不删除。
+
+完整 `npm run check` 通过：67 个测试文件通过、5 个跳过，333 项测试通过、25 项跳过；
+类型检查、构建、稳定 launcher 真实进程烟测和 Windows 构包均通过。Windows 安装并重载
+`0.3.67` 后，现场 63 个数字描述符中 62 个属于已退出进程；一次真实已安装 launcher 会话
+发现把它们清理到只剩当前活动 v2 描述符。最终候选活动 PID `266552` 的描述符路径与进程
+路径一致，描述符启动时间与系统进程启动时间仅差 `20 ms`；另以仍存活的 Node 进程构造
+早于真实进程启动时间的 v1 PID 复用描述符，最终稳定 launcher 正确删除该描述符和已退出
+的旧 v2 描述符，同时保留唯一活动 v2 描述符。最终新验收任务
+`019fbf9e-34fd-7191-9e79-f9608120b3fb` 经 Shim 在 `112 ms` 创建，远端主根
+`/root/work/train/MimicLite` 的 `workspace_git_status` 在 `1,185 ms` 成功，审计明确记录
+`target=remote`。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.67-windows-session-identity.md`。
+
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

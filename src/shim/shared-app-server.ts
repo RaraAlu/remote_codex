@@ -4,6 +4,7 @@ import {
   type SpawnOptionsWithoutStdio,
 } from "node:child_process";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { isAbsolute } from "node:path";
@@ -30,6 +31,7 @@ import type {
   BridgeConfig,
 } from "../core/types.js";
 import { isVsCodeConversationClientName } from "./external-client-identity.js";
+import { currentProcessStartedAtMs } from "./process-identity.js";
 import {
   RemoteTurnClientTracker,
   RemoteToolCallCoordinator,
@@ -81,8 +83,9 @@ interface ExternalTurnInterruptSummary {
 }
 
 export interface ExternalCliSessionDescriptor {
-  version: 1;
+  version: 1 | 2;
   endpoint: string;
+  executablePath?: string;
   host: string;
   pid: number;
   startedAtMs: number;
@@ -222,7 +225,14 @@ export class SharedAppServer {
   readonly #sessionPath = bridgeExternalCliSessionPath();
   readonly #externalTokenPath = bridgeExternalCliTokenPath();
   readonly #upstreamTokenPath = bridgeUpstreamTokenPath();
-  readonly #startedAtMs = Date.now();
+  readonly #processExecutablePath = (() => {
+    try {
+      return realpathSync.native(process.execPath);
+    } catch {
+      return process.execPath;
+    }
+  })();
+  readonly #startedAtMs = currentProcessStartedAtMs();
   #activeThreadId: string | undefined;
   #activeWorkspaceRoot: string;
   #child: ChildProcessWithoutNullStreams | null = null;
@@ -1083,8 +1093,9 @@ export class SharedAppServer {
 
   async #writeDescriptor(endpoint: string): Promise<void> {
     const descriptor: ExternalCliSessionDescriptor = {
-      version: 1,
+      version: 2,
       endpoint,
+      executablePath: this.#processExecutablePath,
       host: this.#options.config?.host ?? "local",
       pid: process.pid,
       startedAtMs: this.#startedAtMs,
