@@ -322,9 +322,12 @@ Linux 以 procfs 启动 tick、系统 boot time 与 `/proc/<pid>/exe` 得到相�
 `/etc/environment` 与 `/etc/profile.d/bigbear-proxy.sh`，远端无监听，而移除代理后的
 GitHub API 直连返回 HTTP 200。保留两份带时间戳的系统配置备份并停用失效代理后，首轮
 普通重载未再报告 Remote Extension Host 无响应，Executor 能力探测从 `8,096 ms` 降至
-`1,182 ms`，Bridge 从配置开始到 `ready` 为 `1,935 ms`。修复后连续三次门禁当前完成
-1/3；完整证据见
-`docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation.md`。
+`1,182 ms`，Bridge 从配置开始到 `ready` 为 `1,935 ms`。后续两次普通重载再次出现
+`1,009 ms` / `1,474 ms` 无响应和 `4,155 ms` / `5,009 ms` Executor 探测；当前远端
+VS Code Server 早于配置清理启动，仍继承失效代理，普通重载没有刷新其进程环境。连续门禁
+已重置为 0/3，须先一次性重启远端 Server 再重跑。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation.md` 与
+`docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation-rerun.md`。
 
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被

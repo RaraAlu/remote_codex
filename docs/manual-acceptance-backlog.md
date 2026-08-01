@@ -475,8 +475,17 @@ HTTP/HTTPS/ALL proxy 均指向 `127.0.0.1:32081`，远端语言包为
 Host 无响应约 4–5 秒，并把 Executor 激活排队到约 8.9 秒。远端无代理直连 GitHub API
 返回 HTTP 200 后，已备份 `/etc/environment` 和 `/etc/profile.d/bigbear-proxy.sh` 并停用
 其中代理；首轮修复后重载无无响应或额外重载，能力探测为 `1,182 ms`。连续三次门禁当前
-为 1/3；再完成两次稳定重载前，此项保持为 Windows 发布阻塞。完整证据见
+曾为 1/3；再完成两次稳定重载前，此项保持为 Windows 发布阻塞。完整证据见
 `docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation.md`。
+
+随后两次用户手动重载均未出现语言包更新或第三次自动重载，但 Remote Extension Host
+分别无响应 `1,009 ms` 和 `1,474 ms`，Executor 能力探测分别为 `4,155 ms` 和 `5,009 ms`。
+远端日志显示两轮内置 Copilot 激活均先于 Executor，当前复用的 VS Code Server 自
+`06:44:06` 起运行，早于系统代理配置清理，且进程环境仍持有全部 `127.0.0.1:32081`
+代理变量；普通窗口重载只重建 Extension Host，不能刷新 Server 环境。因此连续稳定门禁
+重置为 0/3，下一步须一次性重启远端 VS Code Server、重新连接，再重跑三次普通窗口重载。
+本次失败门禁证据见
+`docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation-rerun.md`。
 
 - 在 Windows x64 原生执行依赖安装、类型检查、测试、构建、SEA Shim 冒烟和构包。
 - 在 Windows 执行 `npm run package:stage`，与同版本 Linux stage 一并运行
