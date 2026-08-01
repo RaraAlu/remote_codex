@@ -457,6 +457,13 @@ Executor 保持 `0.2.21`。真实验收任务完成远端 `workspace_git_status`
 Extension Host 无响应，2 秒慢启动提示、`executor.readiness` 的 `1 / 9058 / true`、
 `9,550 ms` 恢复 `ready`、单次用户重载和真实远端 Git 操作均通过。该逐目标验收已完成；
 完整 M01-M11、双平台 stage 收集和 `0.4.0` 量化门禁仍待后续执行。
+追加只读诊断 thread `019fbf79-c7b2-7560-9a66-ded89dc1898e` 确认远端大小写两组
+HTTP/HTTPS/ALL proxy 均指向 `127.0.0.1:32081`，远端语言包为
+`1.129.2026071717`；本机 VS Code `1.129.1` 却登记了要求 `^1.131.0` 的语言包
+`1.131.2026072717`。第二次重载后的日志在约七分钟内记录 88 次自动更新、87 次远端
+`ECONNREFUSED` 和 87 次回退安装成功，且无响应区间与首轮更新重合。由此确认当前慢启动
+是 VS Code 语言包版本错配和远端无效代理触发的更新循环，不是 Bridge 的等待定时器；
+修复环境并完成连续三次无循环重载前，此项保持为 Windows 发布阻塞。
 
 - 在 Windows x64 原生执行依赖安装、类型检查、测试、构建、SEA Shim 冒烟和构包。
 - 在 Windows 执行 `npm run package:stage`，与同版本 Linux stage 一并运行
