@@ -470,10 +470,13 @@ HTTP/HTTPS/ALL proxy 均指向 `127.0.0.1:32081`，远端语言包为
 `1.131.2026072717`。第二次重载后的日志在约七分钟内记录 88 次自动更新、87 次远端
 `ECONNREFUSED` 和 87 次回退安装成功，且无响应区间与首轮更新重合。由此确认当前慢启动
 是 VS Code 语言包版本错配和远端无效代理触发的更新循环，不是 Bridge 的等待定时器。
-本机 VS Code 更新到 `1.131.0` 后，远端语言包已一次性对齐到 `1.131.2026072717`；
-`0.3.67` 已连续两次重载没有重复安装、无响应或额外自动重载，但 Executor 能力探测分别为
-`2,805 ms` 和 `9,112 ms`。修正无效代理并完成连续三次无循环重载、能力探测低于 2 秒前，
-此项保持为 Windows 发布阻塞。
+本机 VS Code 更新到 `1.131.0` 后，远端语言包已一次性对齐到 `1.131.2026072717`。
+后续日志进一步确认内置 Copilot 受失效 `127.0.0.1:32081` 代理影响，令 Remote Extension
+Host 无响应约 4–5 秒，并把 Executor 激活排队到约 8.9 秒。远端无代理直连 GitHub API
+返回 HTTP 200 后，已备份 `/etc/environment` 和 `/etc/profile.d/bigbear-proxy.sh` 并停用
+其中代理；首轮修复后重载无无响应或额外重载，能力探测为 `1,182 ms`。连续三次门禁当前
+为 1/3；再完成两次稳定重载前，此项保持为 Windows 发布阻塞。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation.md`。
 
 - 在 Windows x64 原生执行依赖安装、类型检查、测试、构建、SEA Shim 冒烟和构包。
 - 在 Windows 执行 `npm run package:stage`，与同版本 Linux stage 一并运行

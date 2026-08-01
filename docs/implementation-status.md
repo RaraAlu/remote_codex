@@ -315,6 +315,17 @@ Linux 以 procfs 启动 tick、系统 boot time 与 `/proc/<pid>/exe` 得到相�
 `target=remote`。完整证据见
 `docs/acceptance/2026-08-02-release-0.3.67-windows-session-identity.md`。
 
+同日继续关闭 Windows Remote SSH 慢加载的环境来源。两次异常重载中，SSH 解析首次
+`15,917 ms` 主要包含 `12,748 ms` 密码输入等待；连接完成后 Remote Extension Host 仍
+分别无响应 `3,837 ms` 和 `4,972 ms`。远端 `remoteexthost.log` 显示内置 Copilot 在
+`127.0.0.1:32081` 上连续连接拒绝，使 Executor 的命令激活排队约 8.9 秒；代理来自
+`/etc/environment` 与 `/etc/profile.d/bigbear-proxy.sh`，远端无监听，而移除代理后的
+GitHub API 直连返回 HTTP 200。保留两份带时间戳的系统配置备份并停用失效代理后，首轮
+普通重载未再报告 Remote Extension Host 无响应，Executor 能力探测从 `8,096 ms` 降至
+`1,182 ms`，Bridge 从配置开始到 `ready` 为 `1,935 ms`。修复后连续三次门禁当前完成
+1/3；完整证据见
+`docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation.md`。
+
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

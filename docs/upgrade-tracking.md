@@ -162,4 +162,6 @@ transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
 Windows Remote SSH 冷启动就绪阶段、Executor 能力探测耗时和慢启动诊断候选见
 `docs/acceptance/2026-08-02-release-0.3.66-windows-readiness-observability.md`；Windows 外部会话
 进程身份、旧描述符清理和活动会话保留见
-`docs/acceptance/2026-08-02-release-0.3.67-windows-session-identity.md`。
+`docs/acceptance/2026-08-02-release-0.3.67-windows-session-identity.md`；远端失效代理定位、
+可逆清理和首轮低于 2 秒的重载结果见
+`docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation.md`。

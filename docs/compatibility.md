@@ -18,7 +18,7 @@ Codex CLI 仅作为可选外部客户端按能力探测，不固定版本，也�
 
 | 组件 | 已探测版本 | 当前策略 | 状态 |
 | --- | --- | --- | --- |
-| VS Code | `1.131.0`（Windows x64）；`1.130.0`（既有 Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | Windows 官方任务和既有 Linux 官方面板/外部 CLI Remote SSH 任务通过；Windows 语言包已对齐，连续三次无循环重载门禁仍待完成 |
+| VS Code | `1.131.0`（Windows x64）；`1.130.0`（既有 Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | Windows 官方任务和既有 Linux 官方面板/外部 CLI Remote SSH 任务通过；Windows 语言包已对齐，远端失效代理已停用，修复后第 1/3 次重载的 Executor 探测为 `1,182 ms`；其余两次稳定重载仍待完成 |
 | 官方 Codex 扩展 | 本次探测 `openai.chatgpt@26.727.40816` | 固定扩展 ID，不固定版本；使用 VS Code 当前实际加载版本 | Windows Remote SSH 官方新任务到达当前 Shim，并完成远端文件、Git 与命令操作；普通本地和既有外部 CLI 链路通过 |
 | Bridge Controller | `0.3.67` Windows x64 候选；`0.3.51` Linux Remote SSH 候选；`0.2.7` Windows 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | `0.3.67` 已安装并实测外部会话 PID、启动时间和可执行路径绑定、旧描述符清理、活动描述符保留及远端 Git；Executor 不变，完整双平台门禁仍待处理 |
 | Remote Executor | `0.2.21`，诊断协议 13，Linux x64 Workspace 候选 | Workspace 扩展；每次初始化比较远端扩展清单实际包版本与 Controller 内嵌配套版本，不一致时通过活动 Remote SSH 通道自动部署并重载；ping 仍按所需能力集合验收，不按包版本或协议号门禁 | 新增 `executeAsyncEvents` 能力；Windows Controller 自动安装 `0.2.21` 并按预期重载一次，扩展上下文随后回报包版本与运行版本均为 `0.2.21`，没有重复升级循环 |
@@ -86,7 +86,9 @@ Windows 外部 CLI/MCP 与无 rollout 冷启动证据见
 Windows Remote SSH 冷启动就绪阶段和 Executor 能力探测耗时候选见
 `docs/acceptance/2026-08-02-release-0.3.66-windows-readiness-observability.md`；Windows 外部会话
 进程身份、旧描述符清理和活动会话保留见
-`docs/acceptance/2026-08-02-release-0.3.67-windows-session-identity.md`。
+`docs/acceptance/2026-08-02-release-0.3.67-windows-session-identity.md`；远端失效代理定位、
+可逆清理和首轮低于 2 秒的重载结果见
+`docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation.md`。
 
 当前协议文件位于 `protocol/0.146.0-alpha.3/`。`ServerRequest.json` 的方法集合由自动化测试与
 Shim 的已知请求白名单逐项比对；出现新请求时测试失败，而不是静默转发潜在副作用。
