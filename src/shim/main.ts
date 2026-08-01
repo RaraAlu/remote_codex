@@ -173,6 +173,10 @@ function parseExternalCliAttachOptions(args: readonly string[]): ExternalCliAtta
   return options;
 }
 
+function externalCliProgress(message: string): void {
+  process.stderr.write(`codex-bridge: ${message}\n`);
+}
+
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
   const attachArgs =
@@ -182,7 +186,10 @@ async function main(): Promise<number> {
         ? args
         : null;
   if (attachArgs) {
-    return await runExternalCliAttach(parseExternalCliAttachOptions(attachArgs));
+    return await runExternalCliAttach({
+      ...parseExternalCliAttachOptions(attachArgs),
+      onProgress: externalCliProgress,
+    });
   }
   if (isManagedAutomaticCliLauncher()) {
     const codexExecutable = await configuredCodexExecutable(true);
@@ -193,6 +200,7 @@ async function main(): Promise<number> {
         return await runExternalCliAttach({
           ...options,
           codexExecutable,
+          onProgress: externalCliProgress,
         });
       }
     }

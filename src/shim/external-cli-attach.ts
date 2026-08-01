@@ -22,6 +22,7 @@ interface ExternalCliIntegrationConfig {
 export interface ExternalCliAttachOptions {
   codexExecutable?: string;
   host?: string;
+  onProgress?: (message: string) => void;
   sessionPid?: number;
   threadId?: string;
   workspaceRoot?: string;
@@ -271,11 +272,24 @@ export async function runExternalCliAttach(
   spawnCodex: SpawnAttachedCodex = spawn,
   probeThread: ProbeExternalCliThread = probeExternalCliThread,
 ): Promise<number> {
+  const report = options.onProgress ?? (() => undefined);
   const prepared = await prepareExternalCliAttach(options);
+  report("Checking Codex CLI remote-attach support...");
   await assertRemoteAttachSupported(prepared.command, runHelp);
+  report(
+    "Connecting to the VS Code Codex session; the first connection may take up to 30 seconds...",
+  );
   const args = await resolveExternalCliAttachArgs(prepared, probeThread);
+  report(
+    args[0] === "resume"
+      ? "Resuming the selected VS Code Codex thread in the CLI TUI..."
+      : "The selected thread has no rollout; starting a synchronized CLI thread...",
+  );
+  const invocation = prepareChildProcessCommand(prepared.command, args, {
+    environment: prepared.environment,
+  });
   return await new Promise<number>((resolvePromise, reject) => {
-    const child = spawnCodex(prepared.command, args, {
+    const child = spawnCodex(invocation.command, invocation.args, {
       env: prepared.environment,
       stdio: "inherit",
       windowsHide: false,

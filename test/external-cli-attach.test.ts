@@ -200,6 +200,7 @@ describe("bidirectional external CLI attach", () => {
   it("feature-detects authenticated remote resume before launching the TUI", async () => {
     const { descriptor } = await prepareState();
     const child = new EventEmitter() as ChildProcess;
+    const onProgress = vi.fn();
     const spawnCodex = vi.fn<SpawnAttachedCodex>(() => {
       queueMicrotask(() => child.emit("close", 0, null));
       return child;
@@ -209,6 +210,7 @@ describe("bidirectional external CLI attach", () => {
       runExternalCliAttach(
         {
           codexExecutable: "codex-test",
+          onProgress,
           sessionPid: descriptor.pid,
         },
         async () => "--remote <ADDR>\n--remote-auth-token-env <ENV_VAR>\n",
@@ -218,6 +220,11 @@ describe("bidirectional external CLI attach", () => {
     ).resolves.toBe(0);
     expect(spawnCodex).toHaveBeenCalledOnce();
     expect(spawnCodex.mock.calls[0]?.[2].stdio).toBe("inherit");
+    expect(onProgress.mock.calls.map(([message]) => message)).toEqual([
+      "Checking Codex CLI remote-attach support...",
+      "Connecting to the VS Code Codex session; the first connection may take up to 30 seconds...",
+      "Resuming the selected VS Code Codex thread in the CLI TUI...",
+    ]);
   });
 
   it("starts a synchronized thread when the selected VS Code thread is not materialized", async () => {
