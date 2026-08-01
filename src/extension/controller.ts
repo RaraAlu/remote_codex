@@ -756,7 +756,10 @@ export class BridgeController implements vscode.Disposable {
     const launcher = await reconcileExternalCliLauncher(
       resolved.executablePath,
       shimPath,
-      { automaticLauncherPath: resolved.automaticLauncherPath },
+      {
+        automaticLauncherPath: resolved.automaticLauncherPath,
+        windowsAutomaticLauncher: resolved.windowsAutomaticLauncher,
+      },
     );
     await this.#audit.write({
       operation: "external_cli.integration",

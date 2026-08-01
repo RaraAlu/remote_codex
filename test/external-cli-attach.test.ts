@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bridgeExternalCliDir } from "../src/core/locations.js";
 import {
+  automaticCliInvocationArgs,
   prepareExternalCliAttach,
   probeExternalCliThread,
   resolveExternalCliAttachArgs,
@@ -67,6 +68,20 @@ async function prepareState(): Promise<{
 }
 
 describe("bidirectional external CLI attach", () => {
+  it("recognizes managed plain launchers and the stable Windows automatic subcommand", () => {
+    expect(automaticCliInvocationArgs([], ["codex.exe"])).toEqual([]);
+    expect(automaticCliInvocationArgs(["--version"], ["codex"])).toEqual([
+      "--version",
+    ]);
+    expect(automaticCliInvocationArgs(["automatic-cli"], ["codex"])).toEqual([
+      "automatic-cli",
+    ]);
+    expect(
+      automaticCliInvocationArgs(["automatic-cli", "--version"], ["codex-vscode.exe"]),
+    ).toEqual(["--version"]);
+    expect(automaticCliInvocationArgs([], ["codex-vscode.exe"])).toBeNull();
+  });
+
   it("automatically selects only an active thread for the current workspace", () => {
     const first = {
       version: 1 as const,

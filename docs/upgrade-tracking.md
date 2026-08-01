@@ -146,4 +146,6 @@ transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
 与内部本地拒绝档案隔离、连续切换和可见权限列表证据见
 `docs/acceptance/2026-07-27-release-0.3.42-permission-mode-presentation.md`。普通
 `codex` 只按当前目录自动附着、跨目录活动 thread 不再拦截官方 CLI 的证据见
-`docs/acceptance/2026-07-27-release-0.3.43-plain-cli-workspace-selection.md`。
+`docs/acceptance/2026-07-27-release-0.3.43-plain-cli-workspace-selection.md`。Windows npm
+三种 wrapper 接管、普通入口自动附着、停用恢复和 npm 覆盖后自动修复见
+`docs/acceptance/2026-08-02-release-0.3.59-windows-automatic-cli.md`。

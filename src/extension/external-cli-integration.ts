@@ -67,9 +67,39 @@ interface ManagedExternalCliLauncherV2 {
   } | null;
 }
 
+type WindowsAutomaticLauncherKind = "cmd" | "powershell" | "shell";
+
+interface ManagedWindowsAutomaticLauncherEntry {
+  backupPath: string;
+  kind: WindowsAutomaticLauncherKind;
+  launcherPath: string;
+}
+
+interface ManagedExternalCliLauncherV3 {
+  version: 3;
+  codexExecutable: string;
+  launcherPath: string;
+  shimPath: string;
+  automaticLauncher: {
+    commandPath: string;
+    entries: ManagedWindowsAutomaticLauncherEntry[];
+    kind: "windows-npm";
+  } | null;
+}
+
 type ManagedExternalCliLauncher =
   | ManagedExternalCliLauncherV1
-  | ManagedExternalCliLauncherV2;
+  | ManagedExternalCliLauncherV2
+  | ManagedExternalCliLauncherV3;
+
+export interface WindowsAutomaticCliLauncher {
+  commandPath: string;
+  entries: Array<{
+    kind: WindowsAutomaticLauncherKind;
+    launcherPath: string;
+  }>;
+  kind: "windows-npm";
+}
 
 export interface ExternalCliLauncherOptions {
   automaticLauncherPath?: string;
@@ -78,12 +108,14 @@ export interface ExternalCliLauncherOptions {
   hostPlatform?: NodeJS.Platform;
   integrationPath?: string;
   launcherPath?: string;
+  windowsAutomaticLauncher?: WindowsAutomaticCliLauncher;
 }
 
 export interface ResolvedExternalCliExecutable {
   automaticLauncherPath?: string;
   commandPath: string;
   executablePath: string;
+  windowsAutomaticLauncher?: WindowsAutomaticCliLauncher;
 }
 
 function parseMcpConfig(raw: string): CodexMcpConfig | null {
@@ -181,6 +213,50 @@ function parseManagedLauncher(value: unknown): ManagedExternalCliLauncher | null
     typeof value.shimPath === "string";
   if (value.version === 1 && commonFieldsAreValid) {
     return value as unknown as ManagedExternalCliLauncherV1;
+  }
+  if (value.version === 3 && commonFieldsAreValid) {
+    const automatic = value.automaticLauncher;
+    if (automatic === null) {
+      return value as unknown as ManagedExternalCliLauncherV3;
+    }
+    if (
+      !isRecord(automatic) ||
+      automatic.kind !== "windows-npm" ||
+      typeof automatic.commandPath !== "string" ||
+      !Array.isArray(automatic.entries) ||
+      automatic.entries.length !== 3 ||
+      !automatic.entries.every(
+        (entry) =>
+          isRecord(entry) &&
+          typeof entry.launcherPath === "string" &&
+          typeof entry.backupPath === "string" &&
+          ["cmd", "powershell", "shell"].includes(String(entry.kind)),
+      ) ||
+      new Set(automatic.entries.map((entry) => entry.launcherPath)).size !== 3 ||
+      new Set(automatic.entries.map((entry) => entry.kind)).size !== 3
+    ) {
+      return null;
+    }
+    const entries = automatic.entries as unknown as ManagedWindowsAutomaticLauncherEntry[];
+    const expectedEntries = windowsAutomaticLauncherEntries(automatic.commandPath);
+    if (
+      !isAbsolute(value.codexExecutable as string) ||
+      !isAbsolute(value.launcherPath as string) ||
+      !isAbsolute(value.shimPath as string) ||
+      !isAbsolute(automatic.commandPath) ||
+      !entries.every((entry) => {
+        const expected = expectedEntries.find((candidate) => candidate.kind === entry.kind);
+        return (
+          expected !== undefined &&
+          resolve(entry.launcherPath) === resolve(expected.launcherPath) &&
+          resolve(entry.backupPath) ===
+            resolve(windowsAutomaticLauncherBackupPath(expected))
+        );
+      })
+    ) {
+      return null;
+    }
+    return value as unknown as ManagedExternalCliLauncherV3;
   }
   if (
     value.version !== 2 ||
@@ -281,6 +357,139 @@ async function symbolicLinkTarget(path: string): Promise<{
   }
 }
 
+function windowsAutomaticLauncherEntries(
+  commandPath: string,
+): WindowsAutomaticCliLauncher["entries"] {
+  const directory = dirname(commandPath);
+  return [
+    { kind: "shell", launcherPath: join(directory, "codex") },
+    { kind: "cmd", launcherPath: join(directory, "codex.cmd") },
+    { kind: "powershell", launcherPath: join(directory, "codex.ps1") },
+  ];
+}
+
+function windowsAutomaticLauncherBackupPath(
+  entry: WindowsAutomaticCliLauncher["entries"][number],
+): string {
+  const suffix =
+    entry.kind === "cmd" ? ".cmd" : entry.kind === "powershell" ? ".ps1" : "";
+  return join(dirname(entry.launcherPath), `.codex-remote-bridge-original${suffix}`);
+}
+
+async function isRegularFile(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isFile();
+  } catch (error) {
+    if (isRecord(error) && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function detectWindowsAutomaticLauncher(
+  commandPath: string,
+): Promise<WindowsAutomaticCliLauncher | undefined> {
+  if (basename(commandPath).toLowerCase() !== "codex.cmd") {
+    return undefined;
+  }
+  const entries = windowsAutomaticLauncherEntries(commandPath);
+  if (!(await Promise.all(entries.map((entry) => isRegularFile(entry.launcherPath)))).every(Boolean)) {
+    return undefined;
+  }
+  return { commandPath, entries, kind: "windows-npm" };
+}
+
+function managedWindowsAutomaticLauncher(
+  managed: ManagedExternalCliLauncher | null,
+): ManagedExternalCliLauncherV3["automaticLauncher"] {
+  return managed?.version === 3 ? managed.automaticLauncher : null;
+}
+
+function windowsAutomaticCandidateFromManaged(
+  automatic: NonNullable<ManagedExternalCliLauncherV3["automaticLauncher"]>,
+): WindowsAutomaticCliLauncher {
+  return {
+    commandPath: automatic.commandPath,
+    entries: automatic.entries.map(({ kind, launcherPath }) => ({ kind, launcherPath })),
+    kind: "windows-npm",
+  };
+}
+
+function quotePowerShellLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+function quoteShellLiteral(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function windowsAutomaticLauncherContent(
+  kind: WindowsAutomaticLauncherKind,
+  launcherPath: string,
+): string {
+  const marker = "Codex Remote Bridge managed automatic launcher v1";
+  if (kind === "cmd") {
+    if (/[\0\r\n"%]/.test(launcherPath)) {
+      throw new BridgeError(
+        "INVALID_CONFIG",
+        "Windows automatic CLI launcher path contains unsupported cmd characters",
+      );
+    }
+    return [
+      "@ECHO off",
+      `REM ${marker}`,
+      `"${launcherPath}" automatic-cli %*`,
+      "EXIT /b %ERRORLEVEL%",
+      "",
+    ].join("\r\n");
+  }
+  if (kind === "powershell") {
+    const quoted = quotePowerShellLiteral(launcherPath);
+    return [
+      "#!/usr/bin/env pwsh",
+      `# ${marker}`,
+      `$bridge = ${quoted}`,
+      "if ($MyInvocation.ExpectingInput) {",
+      "  $input | & $bridge 'automatic-cli' @args",
+      "} else {",
+      "  & $bridge 'automatic-cli' @args",
+      "}",
+      "exit $LASTEXITCODE",
+      "",
+    ].join("\r\n");
+  }
+  const executable = launcherPath.replaceAll("\\", "/");
+  return [
+    "#!/bin/sh",
+    `# ${marker}`,
+    `exec ${quoteShellLiteral(executable)} automatic-cli "$@"`,
+    "",
+  ].join("\n");
+}
+
+async function readTextIfPresent(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (isRecord(error) && error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function writeManagedWindowsLauncher(
+  path: string,
+  content: string,
+): Promise<void> {
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, content, { encoding: "utf8", mode: 0o755 });
+  await chmodIfSupported(temporary, 0o755);
+  await copyFile(temporary, path);
+  await rm(temporary, { force: true });
+}
+
 async function restoreAutomaticLauncher(
   automatic: NonNullable<ManagedExternalCliLauncherV2["automaticLauncher"]>,
   shimPath: string,
@@ -298,6 +507,189 @@ async function restoreAutomaticLauncher(
     return true;
   }
   return false;
+}
+
+async function restoreWindowsAutomaticLauncher(
+  automatic: NonNullable<ManagedExternalCliLauncherV3["automaticLauncher"]>,
+  launcherPath: string,
+): Promise<boolean> {
+  let restored = false;
+  for (const entry of automatic.entries) {
+    const expected = windowsAutomaticLauncherContent(entry.kind, launcherPath);
+    const current = await readTextIfPresent(entry.launcherPath);
+    const backupExists = await isRegularFile(entry.backupPath);
+    if (current === expected) {
+      if (!backupExists) {
+        throw new BridgeError(
+          "INVALID_CONFIG",
+          `Cannot restore managed Windows Codex launcher without its backup: ${entry.launcherPath}`,
+        );
+      }
+      await copyFile(entry.backupPath, entry.launcherPath);
+      await rm(entry.backupPath, { force: true });
+      restored = true;
+      continue;
+    }
+    if (current === null && backupExists) {
+      await rename(entry.backupPath, entry.launcherPath);
+      restored = true;
+      continue;
+    }
+    if (backupExists) {
+      await rm(entry.backupPath, { force: true });
+    }
+  }
+  return restored;
+}
+
+function windowsAutomaticLauncherMatches(
+  automatic: NonNullable<ManagedExternalCliLauncherV3["automaticLauncher"]>,
+  candidate: WindowsAutomaticCliLauncher,
+): boolean {
+  return (
+    resolve(automatic.commandPath) === resolve(candidate.commandPath) &&
+    automatic.entries.every((entry) =>
+      candidate.entries.some(
+        (candidateEntry) =>
+          candidateEntry.kind === entry.kind &&
+          resolve(candidateEntry.launcherPath) === resolve(entry.launcherPath),
+      ),
+    )
+  );
+}
+
+async function validateWindowsAutomaticLauncherInstall(
+  candidate: WindowsAutomaticCliLauncher,
+): Promise<void> {
+  for (const entry of candidate.entries) {
+    if (!(await isRegularFile(entry.launcherPath))) {
+      throw new BridgeError(
+        "INVALID_CONFIG",
+        `Windows npm Codex launcher is missing or not a regular file: ${entry.launcherPath}`,
+      );
+    }
+    const backupPath = windowsAutomaticLauncherBackupPath(entry);
+    if (await pathExists(backupPath)) {
+      throw new BridgeError(
+        "INVALID_CONFIG",
+        `Refusing to replace an unmanaged Windows Codex launcher backup: ${backupPath}`,
+      );
+    }
+  }
+}
+
+async function installWindowsAutomaticLauncher(
+  candidate: WindowsAutomaticCliLauncher,
+  launcherPath: string,
+): Promise<NonNullable<ManagedExternalCliLauncherV3["automaticLauncher"]>> {
+  const entries: ManagedWindowsAutomaticLauncherEntry[] = candidate.entries.map(
+    (entry) => ({
+      ...entry,
+      backupPath: windowsAutomaticLauncherBackupPath(entry),
+    }),
+  );
+  await validateWindowsAutomaticLauncherInstall(candidate);
+
+  const installed: ManagedWindowsAutomaticLauncherEntry[] = [];
+  try {
+    for (const entry of entries) {
+      await rename(entry.launcherPath, entry.backupPath);
+      installed.push(entry);
+      await writeManagedWindowsLauncher(
+        entry.launcherPath,
+        windowsAutomaticLauncherContent(entry.kind, launcherPath),
+      );
+    }
+  } catch (error) {
+    for (const entry of installed.reverse()) {
+      const current = await readTextIfPresent(entry.launcherPath);
+      if (current === windowsAutomaticLauncherContent(entry.kind, launcherPath)) {
+        await rm(entry.launcherPath, { force: true });
+      }
+      if (await pathExists(entry.backupPath)) {
+        await rename(entry.backupPath, entry.launcherPath);
+      }
+    }
+    throw error;
+  }
+
+  return {
+    commandPath: candidate.commandPath,
+    entries,
+    kind: "windows-npm",
+  };
+}
+
+async function reconcileWindowsAutomaticLauncher(
+  candidate: WindowsAutomaticCliLauncher,
+  previous: ManagedExternalCliLauncherV3 | null,
+  launcherPath: string,
+): Promise<{
+  automatic: NonNullable<ManagedExternalCliLauncherV3["automaticLauncher"]>;
+  result: ExternalCliLauncherReconcileResult;
+}> {
+  const previousAutomatic = previous?.automaticLauncher ?? null;
+  if (!previous || !previousAutomatic) {
+    return {
+      automatic: await installWindowsAutomaticLauncher(candidate, launcherPath),
+      result: "installed",
+    };
+  }
+  if (!windowsAutomaticLauncherMatches(previousAutomatic, candidate)) {
+    await restoreWindowsAutomaticLauncher(previousAutomatic, previous!.launcherPath);
+    return {
+      automatic: await installWindowsAutomaticLauncher(candidate, launcherPath),
+      result: "updated",
+    };
+  }
+
+  let changed = previous.launcherPath !== launcherPath;
+  for (const entry of previousAutomatic.entries) {
+    const current = await readTextIfPresent(entry.launcherPath);
+    const previousContent = windowsAutomaticLauncherContent(
+      entry.kind,
+      previous.launcherPath,
+    );
+    const nextContent = windowsAutomaticLauncherContent(entry.kind, launcherPath);
+    const backupExists = await isRegularFile(entry.backupPath);
+    if (current === previousContent) {
+      if (!backupExists) {
+        throw new BridgeError(
+          "INVALID_CONFIG",
+          `Managed Windows Codex launcher backup is missing: ${entry.backupPath}`,
+        );
+      }
+      if (current !== nextContent) {
+        await writeManagedWindowsLauncher(entry.launcherPath, nextContent);
+        changed = true;
+      }
+      continue;
+    }
+    if (current === null) {
+      if (!backupExists) {
+        throw new BridgeError(
+          "INVALID_CONFIG",
+          `Windows Codex launcher and backup are both missing: ${entry.launcherPath}`,
+        );
+      }
+      await writeManagedWindowsLauncher(entry.launcherPath, nextContent);
+      changed = true;
+      continue;
+    }
+    if (!(await isRegularFile(entry.launcherPath))) {
+      throw new BridgeError(
+        "INVALID_CONFIG",
+        `Refusing to replace a non-file Windows Codex launcher: ${entry.launcherPath}`,
+      );
+    }
+    await copyFile(entry.launcherPath, entry.backupPath);
+    await writeManagedWindowsLauncher(entry.launcherPath, nextContent);
+    changed = true;
+  }
+  return {
+    automatic: previousAutomatic,
+    result: changed ? "updated" : "unchanged",
+  };
 }
 
 export async function resolveExternalCliExecutable(
@@ -325,6 +717,39 @@ export async function resolveExternalCliExecutable(
       executablePath: managed!.codexExecutable,
     };
   }
+  const previousWindowsAutomatic = managedWindowsAutomaticLauncher(managed);
+  const windowsAutomaticLauncher =
+    hostPlatform === "win32"
+      ? previousWindowsAutomatic &&
+        previousWindowsAutomatic.entries.some(
+          (entry) => resolve(entry.launcherPath) === resolve(commandPath),
+        )
+        ? windowsAutomaticCandidateFromManaged(previousWindowsAutomatic)
+        : await detectWindowsAutomaticLauncher(commandPath)
+      : undefined;
+  if (previousWindowsAutomatic && windowsAutomaticLauncher) {
+    const commandEntry = previousWindowsAutomatic.entries.find(
+      (entry) => entry.kind === "cmd",
+    );
+    if (
+      commandEntry &&
+      resolve(commandEntry.launcherPath) === resolve(commandPath) &&
+      (await readTextIfPresent(commandPath)) ===
+        windowsAutomaticLauncherContent(commandEntry.kind, managed!.launcherPath)
+    ) {
+      if (!(await isRegularFile(commandEntry.backupPath))) {
+        throw new BridgeError(
+          "INVALID_CONFIG",
+          `Managed Windows Codex launcher backup is missing: ${commandEntry.backupPath}`,
+        );
+      }
+      return {
+        commandPath,
+        executablePath: commandEntry.backupPath,
+        windowsAutomaticLauncher,
+      };
+    }
+  }
   const executablePath = await realpath(commandPath);
   if (managed && resolve(executablePath) === resolve(managed.shimPath)) {
     throw new BridgeError(
@@ -338,6 +763,7 @@ export async function resolveExternalCliExecutable(
       : {}),
     commandPath,
     executablePath,
+    ...(windowsAutomaticLauncher ? { windowsAutomaticLauncher } : {}),
   };
 }
 
@@ -396,7 +822,9 @@ export async function reconcileExternalCliLauncher(
   const previous = await readManagedLauncher(integrationPath);
   const previousAutomatic =
     previous?.version === 2 ? previous.automaticLauncher : null;
+  const previousWindows = previous?.version === 3 ? previous : null;
   const automaticLauncherPath = options.automaticLauncherPath;
+  const windowsAutomaticLauncher = options.windowsAutomaticLauncher;
   let automaticCandidate: {
     launcherPath: string;
     needsUpdate: boolean;
@@ -455,6 +883,18 @@ export async function reconcileExternalCliLauncher(
           : "installed",
     };
   }
+  if (
+    windowsAutomaticLauncher &&
+    !(
+      previousWindows?.automaticLauncher &&
+      windowsAutomaticLauncherMatches(
+        previousWindows.automaticLauncher,
+        windowsAutomaticLauncher,
+      )
+    )
+  ) {
+    await validateWindowsAutomaticLauncherInstall(windowsAutomaticLauncher);
+  }
   await mkdir(dirname(launcherPath), { recursive: true });
   const exists = await pathExists(launcherPath);
   let result: ExternalCliLauncherReconcileResult = exists ? "updated" : "installed";
@@ -512,6 +952,8 @@ export async function reconcileExternalCliLauncher(
     result: ExternalCliLauncherReconcileResult;
   } | null = null;
   let managedAutomatic: ManagedExternalCliLauncherV2["automaticLauncher"] = null;
+  let managedWindowsAutomatic: ManagedExternalCliLauncherV3["automaticLauncher"] = null;
+  let managedCodexExecutable = codexExecutable;
   if (
     previousAutomatic &&
     previousAutomatic.launcherPath !== automaticLauncherPath
@@ -535,13 +977,53 @@ export async function reconcileExternalCliLauncher(
     };
   }
 
-  await writeManagedLauncher(integrationPath, {
-    version: 2,
-    codexExecutable,
-    launcherPath,
-    shimPath,
-    automaticLauncher: managedAutomatic,
-  });
+  if (previousWindows?.automaticLauncher && !windowsAutomaticLauncher) {
+    await restoreWindowsAutomaticLauncher(
+      previousWindows.automaticLauncher,
+      previousWindows.launcherPath,
+    );
+  }
+  if (windowsAutomaticLauncher) {
+    const reconciled = await reconcileWindowsAutomaticLauncher(
+      windowsAutomaticLauncher,
+      previousWindows,
+      launcherPath,
+    );
+    managedWindowsAutomatic = reconciled.automatic;
+    const commandEntry = managedWindowsAutomatic.entries.find(
+      (entry) => entry.kind === "cmd",
+    );
+    if (!commandEntry) {
+      throw new BridgeError(
+        "INVALID_CONFIG",
+        "Managed Windows automatic CLI launcher has no command wrapper",
+      );
+    }
+    managedCodexExecutable = commandEntry.backupPath;
+    automaticLauncher = {
+      launcherPath: managedWindowsAutomatic.commandPath,
+      result: reconciled.result,
+    };
+  }
+
+  await writeManagedLauncher(
+    integrationPath,
+    managedWindowsAutomatic
+      ? {
+          version: 3,
+          codexExecutable: managedCodexExecutable,
+          launcherPath,
+          shimPath,
+          automaticLauncher: managedWindowsAutomatic,
+        }
+      : {
+          version: 2,
+          codexExecutable,
+          launcherPath,
+          shimPath,
+          automaticLauncher: managedAutomatic,
+        },
+  );
   return { automaticLauncher, launcherPath, result };
 }
 
@@ -562,6 +1044,13 @@ export async function removeExternalCliLauncher(
       (await restoreAutomaticLauncher(
         managed.automaticLauncher,
         managed.shimPath,
+       )) || removed;
+  }
+  if (managed.version === 3 && managed.automaticLauncher) {
+    removed =
+      (await restoreWindowsAutomaticLauncher(
+        managed.automaticLauncher,
+        managed.launcherPath,
       )) || removed;
   }
   try {

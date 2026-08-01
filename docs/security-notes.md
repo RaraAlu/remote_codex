@@ -16,10 +16,13 @@
   位于当前用户状态目录并限制为 `0600`，目录限制为 `0700`；令牌不进入 MCP 配置、
   进程参数、审计、远端环境或仓库。
 - Controller 激活时自动维护自有 `codex_vscode_remote_bridge` 注册、显式
-  `codex-vscode` 启动器和 POSIX 普通 `codex` 启动器，并随 Shim 内容地址变化刷新。
-  普通入口只接管当前配置解析到的符号链接，记录官方 CLI 的绝对路径和原始链接目标；
-  不接管普通文件或不匹配的链接。显式停用会原样恢复官方链接、删除其他托管文件并
-  持久阻止后续自动重建，重新启用后才恢复。MCP 不读取或复制 CLI 的 OpenAI 登录材料。
+  `codex-vscode` 启动器和平台普通 `codex` 启动器，并随 Shim 内容地址变化刷新。
+  POSIX 只接管当前配置解析到的符号链接，记录官方 CLI 的绝对路径和原始链接目标；
+  Windows 只在 npm 的 extensionless、CMD、PowerShell 三种 wrapper 同目录且均为普通
+  文件时成组接管，并把原始字节保存到相邻备份。备份冲突、不完整集合、非普通文件或
+  元数据形状异常均失败关闭。显式停用只恢复仍匹配 Bridge 内容的文件，外部修改不会被
+  覆盖；npm 覆盖后下一次初始化刷新备份并恢复接管。MCP 不读取或复制 CLI 的 OpenAI
+  登录材料。
 - 双向实时 CLI 只连接当前用户的 loopback 网关并恢复已有 VS Code thread。托管附着
   入口在启动子进程时读取短期能力令牌，通过描述符指定的环境变量传递给 Codex，绝不
   把令牌放入 argv、终端命令、日志、审计或持久 CLI 配置；网关退出后令牌立即失效。
@@ -66,8 +69,9 @@
 - Linux 本地配置和审计日志权限为 `0600`，控制目录权限为 `0500`。Windows 不模拟
   POSIX mode，文件位于当前用户的 `%APPDATA%`/`%LOCALAPPDATA%` 下并继承用户配置目录
   ACL；高安全场景仍应显式审计该目录 ACL。
-- Codex 和 SSH 可执行文件按本地平台发现；Windows 只接受原生 `codex.exe`/`ssh.exe`
-  候选，不会执行遗留的 Linux 绝对路径。显式配置仍应指向受信任文件。
+- Codex 和 SSH 可执行文件按本地平台发现；Windows Codex 接受原生 `.exe`，或通过安全
+  `ComSpec` 调用 PATH/PATHEXT 解析到的 `.cmd` / `.bat`，SSH 仍只接受原生 `ssh.exe`。
+  遗留 Linux 绝对路径不会在 Windows 执行；显式配置仍应指向受信任文件。
 - 未知 app-server 服务端请求默认返回 `-32601`。
 - Remote SSH 会话的本地 Core 客户端请求按风险命名空间阻断，而不只依赖当前协议中的
   已知方法枚举。唯一的 `fs/` 例外是官方 VS Code 客户端创建粘贴文本附件：只接受本机

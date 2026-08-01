@@ -147,7 +147,9 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
   Windows `0.3.58` 又完成显式 `codex-vscode.exe` 历史 thread 恢复和无 rollout
   冷启动降级。冷样本首个 initialize 在 `30,011 ms` 超时后立即关闭，重试为 `1 ms`，
   resume 明确失败为 `73 ms`，随后同步新 thread 为 `94 ms`；单次命令进入 TUI，退出
-  清理完成。Windows 普通 `codex` 同名自动入口仍未实现。
+  清理完成。Windows `0.3.59` 随后完成普通 `codex` 同名入口：唯一同目录任务自动进入
+  TUI，无匹配目录透传官方 CLI；PowerShell/CMD 参数透传、歧义失败关闭自动化、停用后
+  三个 npm wrapper 精确恢复、重新启用，以及真实 npm 同版本重装后的自动修复均通过。
 - M11：活动 Token 对审计、Code 日志、Git 跟踪文件和本地进程参数的精确泄漏扫描为
   0，私钥/Bearer/`sk-` 形式命中为 0；远端 Codex/app-server 和测试探针进程均为 0，
   成功本地项目操作为 0。`0.3.26 -> 0.3.28` 迁移中 Executor 按能力自动升级到
@@ -433,7 +435,9 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
 
 ### M13 Windows 原生构建与运行
 
-当前状态：等待用户准备 Windows x64 环境；这是后续 `0.4.0` 决策前唯一活动实机前置。
+当前状态：Windows x64 环境已投入逐目标实测，Executor 同步、官方新任务、远端项目操作、
+显式/普通 CLI、外部 MCP、停用恢复和 npm 升级恢复已分别形成证据；完整 M01-M11 重跑、
+双平台 stage 收集和量化门禁仍是后续 `0.4.0` 决策前的活动前置。
 
 - 在 Windows x64 原生执行依赖安装、类型检查、测试、构建、SEA Shim 冒烟和构包。
 - 在 Windows 执行 `npm run package:stage`，与同版本 Linux stage 一并运行

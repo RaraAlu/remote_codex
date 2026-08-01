@@ -144,6 +144,203 @@ describe("persistent current Codex CLI integration", () => {
     });
   });
 
+  it("manages, refreshes, and restores the complete Windows npm launcher set", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-cli-windows-automatic-"));
+    const binDirectory = join(directory, "npm");
+    const integrationPath = join(directory, "state", "integration.json");
+    const launcherPath = join(directory, "bridge", "codex-vscode.exe");
+    const shimPath = join(directory, "shim.exe");
+    const shellPath = join(binDirectory, "codex");
+    const commandPath = join(binDirectory, "codex.cmd");
+    const powershellPath = join(binDirectory, "codex.ps1");
+    const original = {
+      cmd: "@echo original cmd\r\n",
+      powershell: "# original powershell\r\n",
+      shell: "#!/bin/sh\n# original shell\n",
+    };
+    await mkdir(binDirectory, { recursive: true });
+    await writeFile(shellPath, original.shell);
+    await writeFile(commandPath, original.cmd);
+    await writeFile(powershellPath, original.powershell);
+    await writeFile(shimPath, "bridge-shim");
+    const options = {
+      environment: { PATH: binDirectory, PATHEXT: ".CMD" },
+      hostPlatform: "win32" as const,
+      integrationPath,
+      launcherPath,
+    };
+
+    const resolved = await resolveExternalCliExecutable("codex", options);
+    expect(resolved).toMatchObject({
+      commandPath,
+      executablePath: commandPath,
+      windowsAutomaticLauncher: {
+        commandPath,
+        kind: "windows-npm",
+      },
+    });
+    await expect(
+      reconcileExternalCliLauncher(resolved.executablePath, shimPath, {
+        ...options,
+        windowsAutomaticLauncher: resolved.windowsAutomaticLauncher,
+      }),
+    ).resolves.toMatchObject({
+      automaticLauncher: { launcherPath: commandPath, result: "installed" },
+      launcherPath,
+      result: "installed",
+    });
+
+    const backupShell = join(binDirectory, ".codex-remote-bridge-original");
+    const backupCommand = join(binDirectory, ".codex-remote-bridge-original.cmd");
+    const backupPowerShell = join(binDirectory, ".codex-remote-bridge-original.ps1");
+    await expect(readFile(backupShell, "utf8")).resolves.toBe(original.shell);
+    await expect(readFile(backupCommand, "utf8")).resolves.toBe(original.cmd);
+    await expect(readFile(backupPowerShell, "utf8")).resolves.toBe(
+      original.powershell,
+    );
+    await expect(
+      readFile(integrationPath, "utf8").then((value) => JSON.parse(value)),
+    ).resolves.toMatchObject({
+      version: 3,
+      codexExecutable: backupCommand,
+      automaticLauncher: {
+        commandPath,
+        kind: "windows-npm",
+      },
+    });
+    await expect(readFile(commandPath, "utf8")).resolves.toContain(
+      "codex-vscode.exe\" automatic-cli %*",
+    );
+    await expect(readFile(powershellPath, "utf8")).resolves.toContain(
+      "& $bridge 'automatic-cli' @args",
+    );
+    await expect(readFile(shellPath, "utf8")).resolves.toContain(
+      "automatic-cli \"$@\"",
+    );
+
+    const managed = await resolveExternalCliExecutable("codex", options);
+    expect(managed.executablePath).toBe(backupCommand);
+    await expect(
+      reconcileExternalCliLauncher(managed.executablePath, shimPath, {
+        ...options,
+        windowsAutomaticLauncher: managed.windowsAutomaticLauncher,
+      }),
+    ).resolves.toMatchObject({
+      automaticLauncher: { result: "unchanged" },
+      result: "unchanged",
+    });
+
+    const upgraded = {
+      cmd: "@echo upgraded cmd\r\n",
+      powershell: "# upgraded powershell\r\n",
+      shell: "#!/bin/sh\n# upgraded shell\n",
+    };
+    await writeFile(shellPath, upgraded.shell);
+    await writeFile(commandPath, upgraded.cmd);
+    await writeFile(powershellPath, upgraded.powershell);
+    const afterUpgrade = await resolveExternalCliExecutable("codex", options);
+    expect(afterUpgrade.executablePath).toBe(commandPath);
+    await expect(
+      reconcileExternalCliLauncher(afterUpgrade.executablePath, shimPath, {
+        ...options,
+        windowsAutomaticLauncher: afterUpgrade.windowsAutomaticLauncher,
+      }),
+    ).resolves.toMatchObject({
+      automaticLauncher: { result: "updated" },
+      result: "updated",
+    });
+    await expect(readFile(backupCommand, "utf8")).resolves.toBe(upgraded.cmd);
+
+    await expect(removeExternalCliLauncher(options)).resolves.toBe(true);
+    await expect(readFile(shellPath, "utf8")).resolves.toBe(upgraded.shell);
+    await expect(readFile(commandPath, "utf8")).resolves.toBe(upgraded.cmd);
+    await expect(readFile(powershellPath, "utf8")).resolves.toBe(
+      upgraded.powershell,
+    );
+    await expect(stat(backupShell)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(backupCommand)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(backupPowerShell)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(launcherPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("refuses a colliding Windows npm launcher backup before changing files", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-cli-windows-collision-"));
+    const binDirectory = join(directory, "npm");
+    const integrationPath = join(directory, "state", "integration.json");
+    const launcherPath = join(directory, "bridge", "codex-vscode.exe");
+    const shimPath = join(directory, "shim.exe");
+    const shellPath = join(binDirectory, "codex");
+    const commandPath = join(binDirectory, "codex.cmd");
+    const powershellPath = join(binDirectory, "codex.ps1");
+    await mkdir(binDirectory, { recursive: true });
+    await writeFile(shellPath, "shell-original");
+    await writeFile(commandPath, "cmd-original");
+    await writeFile(powershellPath, "powershell-original");
+    await writeFile(join(binDirectory, ".codex-remote-bridge-original.cmd"), "owned");
+    await writeFile(shimPath, "bridge-shim");
+    const options = {
+      environment: { PATH: binDirectory, PATHEXT: ".CMD" },
+      hostPlatform: "win32" as const,
+      integrationPath,
+      launcherPath,
+    };
+    const resolved = await resolveExternalCliExecutable("codex", options);
+
+    await expect(
+      reconcileExternalCliLauncher(resolved.executablePath, shimPath, {
+        ...options,
+        windowsAutomaticLauncher: resolved.windowsAutomaticLauncher,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_CONFIG" });
+    await expect(readFile(shellPath, "utf8")).resolves.toBe("shell-original");
+    await expect(readFile(commandPath, "utf8")).resolves.toBe("cmd-original");
+    await expect(readFile(powershellPath, "utf8")).resolves.toBe(
+      "powershell-original",
+    );
+    await expect(stat(launcherPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(integrationPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not overwrite a Windows npm launcher that changed before disable", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-cli-windows-disable-"));
+    const binDirectory = join(directory, "npm");
+    const integrationPath = join(directory, "state", "integration.json");
+    const launcherPath = join(directory, "bridge", "codex-vscode.exe");
+    const shimPath = join(directory, "shim.exe");
+    const shellPath = join(binDirectory, "codex");
+    const commandPath = join(binDirectory, "codex.cmd");
+    const powershellPath = join(binDirectory, "codex.ps1");
+    await mkdir(binDirectory, { recursive: true });
+    await writeFile(shellPath, "shell-original");
+    await writeFile(commandPath, "cmd-original");
+    await writeFile(powershellPath, "powershell-original");
+    await writeFile(shimPath, "bridge-shim");
+    const options = {
+      environment: { PATH: binDirectory, PATHEXT: ".CMD" },
+      hostPlatform: "win32" as const,
+      integrationPath,
+      launcherPath,
+    };
+    const resolved = await resolveExternalCliExecutable("codex", options);
+    await reconcileExternalCliLauncher(resolved.executablePath, shimPath, {
+      ...options,
+      windowsAutomaticLauncher: resolved.windowsAutomaticLauncher,
+    });
+
+    await writeFile(commandPath, "npm-upgraded-current");
+    await expect(removeExternalCliLauncher(options)).resolves.toBe(true);
+    await expect(readFile(commandPath, "utf8")).resolves.toBe(
+      "npm-upgraded-current",
+    );
+    await expect(readFile(shellPath, "utf8")).resolves.toBe("shell-original");
+    await expect(readFile(powershellPath, "utf8")).resolves.toBe(
+      "powershell-original",
+    );
+    await expect(
+      stat(join(binDirectory, ".codex-remote-bridge-original.cmd")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("does not replace an unmanaged launcher", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-cli-launcher-collision-"));
     const launcherPath = join(directory, "codex-vscode");

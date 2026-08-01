@@ -20,6 +20,7 @@ import {
 } from "../core/locations.js";
 import type { BridgeConfig } from "../core/types.js";
 import {
+  automaticCliInvocationArgs,
   automaticExternalCliAttachOptions,
   configuredCodexExecutable,
   runExternalCliAttach,
@@ -129,12 +130,6 @@ function isManagedExternalCliLauncher(): boolean {
   );
 }
 
-function isManagedAutomaticCliLauncher(): boolean {
-  return invocationNames().some(
-    (name) => name === "codex" || name === "codex.exe",
-  );
-}
-
 function parseExternalCliAttachOptions(args: readonly string[]): ExternalCliAttachOptions {
   const options: ExternalCliAttachOptions = {};
   for (let index = 0; index < args.length; index += 1) {
@@ -179,22 +174,19 @@ function externalCliProgress(message: string): void {
 
 async function main(): Promise<number> {
   const args = process.argv.slice(2);
+  const automaticArgs = automaticCliInvocationArgs(args, invocationNames());
   const attachArgs =
-    args[0] === "attach-cli"
+    automaticArgs !== null
+      ? null
+      : args[0] === "attach-cli"
       ? args.slice(1)
       : isManagedExternalCliLauncher()
         ? args
         : null;
-  if (attachArgs) {
-    return await runExternalCliAttach({
-      ...parseExternalCliAttachOptions(attachArgs),
-      onProgress: externalCliProgress,
-    });
-  }
-  if (isManagedAutomaticCliLauncher()) {
+  if (automaticArgs !== null) {
     const codexExecutable = await configuredCodexExecutable(true);
     assertExecutableIsNotShim(codexExecutable);
-    if (args.length === 0) {
+    if (automaticArgs.length === 0) {
       const options = await automaticExternalCliAttachOptions();
       if (options) {
         return await runExternalCliAttach({
@@ -204,7 +196,13 @@ async function main(): Promise<number> {
         });
       }
     }
-    return await passthrough(codexExecutable, args);
+    return await passthrough(codexExecutable, automaticArgs);
+  }
+  if (attachArgs) {
+    return await runExternalCliAttach({
+      ...parseExternalCliAttachOptions(attachArgs),
+      onProgress: externalCliProgress,
+    });
   }
   if (args[0] === "external-mcp") {
     return await runExternalMcpServer();

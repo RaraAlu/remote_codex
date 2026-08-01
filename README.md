@@ -6,10 +6,10 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.58`。Windows 已完成 npm `codex.cmd` 解析、显式
-> `codex-vscode.exe` TUI、外部 MCP、历史 thread 同步、无 rollout 冷启动降级和退出
-> 清理实测。Windows 普通 `codex` 同名自动入口、官方 Remote SSH git watcher 噪声及
-> 完整双平台门禁仍待处理。
+> 当前源码版本为 `0.3.59`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
+> `codex` 自动附着、显式 `codex-vscode.exe` TUI、外部 MCP、历史 thread 同步、无 rollout
+> 冷启动降级、停用恢复和 npm 升级恢复实测。官方 Remote SSH git watcher 噪声及完整
+> 双平台门禁仍待处理。
 > 在双平台门禁完成前不发布 `0.4.0`，也不扩大支持声明。
 
 ## 工作原理
@@ -122,7 +122,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 
 ## CLI 介入
 
-在 POSIX 上启用自动 CLI 集成后，无参数 `codex` 只会自动附着工作目录与当前目录完全一致的活动
+启用自动 CLI 集成后，无参数 `codex` 只会自动附着工作目录与当前目录完全一致的活动
 VS Code thread。当前目录没有匹配会话时透传官方 Codex CLI，不会被其他工作区的活动
 会话拦截；同一目录存在多个匹配会话时失败关闭，可使用：
 
@@ -130,8 +130,11 @@ VS Code thread。当前目录没有匹配会话时透传官方 Codex CLI，不�
 codex-vscode --session-pid <pid>
 ```
 
-Windows 不替换 npm 管理的 `codex`、`codex.cmd` 或 `codex.ps1`；当前使用安装在
-`%LOCALAPPDATA%\codex-remote-bridge\bin\codex-vscode.exe` 的显式入口。
+Windows 只在 PATH 解析到同一 npm 目录中的 `codex`、`codex.cmd` 和 `codex.ps1` 三个普通
+文件时接管完整 wrapper 集合。原始文件以相邻隐藏备份保存；npm 覆盖 wrapper 后，下一次
+扩展初始化会刷新备份并恢复接管。停用集成会原样恢复仍由 Bridge 管理的 wrapper；若文件
+已被其他程序修改，则保留现状而不覆盖。显式入口保持为
+`%LOCALAPPDATA%\codex-remote-bridge\bin\codex-vscode.exe`。
 
 介入能力包括列出对话、读取完整 turn、发起新 turn 或 steer，以及中断运行中的 turn。
 已经启动的旧 CLI 进程不能热切换 app-server，需要退出后重新启动。停用集成后也应
@@ -254,10 +257,6 @@ Remote SSH 实机验证。完整门禁和量化指标见
 
 ### Windows x64 与 0.4.0
 
-- 为 Windows 设计可回滚且不破坏 npm 升级的普通 `codex` 同名自动入口，同时管理
-  `codex`、`codex.cmd` 与 `codex.ps1`，验证唯一同目录会话自动附着、无匹配会话透传、
-  歧义失败关闭、停用恢复和 npm 升级恢复；当前已验证的显式入口保持
-  `codex-vscode.exe`。
 - 处理官方扩展 `26.727.40816` 在 Windows UI Extension Host 中每 5 秒把 Remote SSH
   POSIX 根当作 `\\root\\...` 本机路径监视并产生 `git-init-watcher ENOENT` 的问题；
   不得通过伪造工作区 URI 规避，退出条件是重复警告消失且远端 Git/文件/命令链路不退化。

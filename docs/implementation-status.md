@@ -166,6 +166,17 @@ Windows 使用真实本机控制目录作为 app-server runtime root，远端 PO
 initialize 为 `1 ms`，resume 在 `73 ms` 内明确失败，随后 TUI `thread/start` 为
 `94 ms` 并正常进入；退出后相关外部进程为 0。完整证据见
 `docs/acceptance/2026-08-02-release-0.3.58-windows-external-cli.md`。
+
+`0.3.59` 将同一自动附着能力扩展到 Windows npm 普通入口。Controller 仅在无扩展
+`codex`、`codex.cmd` 与 `codex.ps1` 同时是同目录普通文件时接管完整集合，把原始 wrapper
+原样移动到相邻隐藏备份，并通过稳定的 `codex-vscode.exe automatic-cli` 内部入口区分
+普通自动附着与显式 TUI。无参数启动按当前目录选择唯一活动会话，无匹配时透传备份的
+官方 CLI，歧义仍失败关闭；带参数调用始终透传。停用时只恢复仍匹配 Bridge 内容的文件，
+外部修改优先保留；npm 覆盖 wrapper 后，下一次初始化会把新文件刷新为备份并重新接管。
+Windows 实机已完成唯一同目录会话附着、无匹配透传、PowerShell/CMD 参数透传、精确
+停用恢复、重新启用，以及真实 `npm install -g @openai/codex@0.146.0` 覆盖后的重载恢复。
+完整证据见
+`docs/acceptance/2026-08-02-release-0.3.59-windows-automatic-cli.md`。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知
@@ -328,6 +339,11 @@ app-server 的官方接口，首次附着需要重启；Bridge 不通过修改 r
 附着唯一 VS Code thread，子命令和无活动 thread 时透传官方 CLI，歧义时失败关闭并要求
 使用 `codex-vscode --session-pid`。停用集成会原样恢复链接，避免递归调用或永久覆盖
 用户入口。
+
+Windows `0.3.59` 使用同样的选择语义，但不伪造 symlink：它成组管理 npm 生成的 shell、
+CMD 与 PowerShell wrapper，并保存各自原始字节。自动化覆盖不完整集合、备份冲突、元数据
+篡改、npm 覆盖刷新、外部修改保护和歧义选择；真实 Windows 窗口已完成自动附着、停用
+恢复和 npm 重装后的自动修复。
 
 定向测试已增加“上游仅向原连接发通知”和“上游同时向多连接广播”两类服务器，分别
 证明双向补发和去重。完整 `npm run check` 为 37 个测试文件通过、1 个真实远端条件

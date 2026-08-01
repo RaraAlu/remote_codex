@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
 const TOKEN_ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 interface ExternalCliIntegrationConfig {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   codexExecutable: string;
   launcherPath: string;
   shimPath: string;
@@ -60,10 +60,20 @@ export type ConnectExternalCliProbeClient = (
   descriptor: ExternalCliSessionDescriptor,
 ) => Promise<Pick<VsCodeConversationClient, "close" | "request">>;
 
+export function automaticCliInvocationArgs(
+  args: readonly string[],
+  invocationNames: readonly string[],
+): string[] | null {
+  if (invocationNames.some((name) => name === "codex" || name === "codex.exe")) {
+    return [...args];
+  }
+  return args[0] === "automatic-cli" ? [...args.slice(1)] : null;
+}
+
 function parseIntegrationConfig(value: unknown): ExternalCliIntegrationConfig {
   if (
     !isRecord(value) ||
-    (value.version !== 1 && value.version !== 2) ||
+    (value.version !== 1 && value.version !== 2 && value.version !== 3) ||
     typeof value.codexExecutable !== "string" ||
     value.codexExecutable.length === 0 ||
     typeof value.launcherPath !== "string" ||
