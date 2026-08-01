@@ -215,6 +215,25 @@ Windows 最终候选重载后在 `3,212 ms` 内恢复 `ready`，活动 Shim 为
 TODO。完整证据见
 `docs/acceptance/2026-08-02-release-0.3.61-windows-tool-route-inventory.md`。
 
+`0.3.62` 修复 Windows Remote SSH 前台命令跨 Extension Host 的重入等待。此前 Controller
+调用远端执行命令后等待完整结果，Remote Executor 又在该命令返回前同步反向调用
+Controller 回传 stdout/stderr，两个 Extension Host 因此互相等待，直到约 120 秒的上层
+超时打破循环。新链路先返回 `{accepted:true}`，Remote Executor 在下一事件循环开始按序
+发送输出与终态，Controller 保持调用 socket 到 `executionComplete` 后再关闭；能力集合新增
+`executeAsyncEvents`，Executor 升至 `0.2.21`、诊断协议升至 13。审计新增命令确认、首段
+输出、完成、输出事件数和 Shim 总传输耗时，取消、幂等和 socket 关闭语义保持不变。
+
+Windows 原生 `npm run check` 通过：63 个测试文件通过、5 个跳过，309 项测试通过、25 项
+跳过，类型检查、构建、SEA Shim 冒烟和构包均通过。安装 `0.3.62` 后，Controller 先因托管
+Shim 迁移重载一次，再因自动安装 Executor `0.2.21` 重载一次；随后回报包版本和运行版本
+均为 `0.2.21` 并保持 `ready`，没有第三次 Bridge 重载。真实 thread
+`019fbf1e-e070-7733-bdbc-07fc23c46548` 连续执行五次带分段输出的 `remote_exec`，端到端分别
+为 `181 / 179 / 177 / 212 / 299 ms`，每次收到 2 个输出事件、远端命令耗时 `65–66 ms`，
+全部完成且无超时，原 `119,489 ms` 性能项关闭。外部 MCP 冷初始化仍存在独立身份兼容项：
+中性名称在 `5–6 ms` 内完成，`codex_vscode_bridge_mcp` 连续两次约 30 秒超时且原始探针
+超过 40 秒无响应，已保留为 README 活动 TODO。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.62-windows-async-execute.md`。
+
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

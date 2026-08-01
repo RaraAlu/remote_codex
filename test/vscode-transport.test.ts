@@ -50,6 +50,16 @@ describe("VS Code remote transport protocol", () => {
     expect(
       isRemoteExecutorPing({
         capabilities: REMOTE_EXECUTOR_CAPABILITIES.filter(
+          (capability) => capability !== "executeAsyncEvents",
+        ),
+        executorVersion: REMOTE_EXECUTOR_VERSION,
+        protocolVersion: 12,
+        remoteName: "ssh-remote",
+      }),
+    ).toBe(false);
+    expect(
+      isRemoteExecutorPing({
+        capabilities: REMOTE_EXECUTOR_CAPABILITIES.filter(
           (capability) => capability !== "executeStdinExactLength",
         ),
         executorVersion: REMOTE_EXECUTOR_VERSION,

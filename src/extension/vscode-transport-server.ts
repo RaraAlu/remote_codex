@@ -10,6 +10,8 @@ import { bridgeStateDir } from "../core/locations.js";
 import type { BridgeConfig, VsCodeTransportDescriptor } from "../core/types.js";
 import {
   isControllerWorkspaceOperation,
+  isRemoteExecutionAccepted,
+  isRemoteExecutionCompletedEvent,
   isRemoteOutputEvent,
   isRemoteStdioEvent,
   isTransportStdioInput,
@@ -19,6 +21,7 @@ import {
   type ControllerWorkspaceRequest,
   type RemoteExecutorCommandRequest,
   type RemoteExecutorCommandResponse,
+  type RemoteExecutionCompletedEvent,
   type RemoteOutputEvent,
   type RemoteStdioEvent,
   type TransportMessage,
@@ -34,8 +37,12 @@ interface StdioSocket {
 }
 
 interface ActiveRemoteRequest {
+  commandAckMs: number | null;
+  firstOutputMs?: number;
+  outputEvents: number;
   request: RemoteExecutorCommandRequest;
   socket: Socket;
+  startedAt: number;
 }
 
 function transportEndpoint(sessionId: string): string {
@@ -100,12 +107,21 @@ export class VsCodeTransportServer implements vscode.Disposable {
       this.#handleStdioOutput(value);
       return;
     }
+    if (isRemoteExecutionCompletedEvent(value)) {
+      this.#handleExecutionCompleted(value);
+      return;
+    }
     if (!isRemoteOutputEvent(value)) {
       return;
     }
     const socket = this.#pending.get(value.id);
     if (!socket || socket.destroyed) {
       return;
+    }
+    const active = this.#activeRemoteRequests.get(value.id);
+    if (active) {
+      active.outputEvents += 1;
+      active.firstOutputMs ??= Math.round(performance.now() - active.startedAt);
     }
     writeMessage(socket, { ...value, type: "output" });
   }
@@ -207,9 +223,9 @@ export class VsCodeTransportServer implements vscode.Disposable {
       if (!initialRequestHandled) {
         initialRequestHandled = true;
         void this.#handleLine(line, socket, descriptor).then((request) => {
-          if (request) {
+          if (request?.operation === "stdioStart") {
             stdioRequest = request;
-          } else {
+          } else if (!request) {
             socket.end();
           }
         });
@@ -238,6 +254,7 @@ export class VsCodeTransportServer implements vscode.Disposable {
     descriptor: VsCodeTransportDescriptor,
   ): Promise<RemoteExecutorCommandRequest | null> {
     let id = "unknown";
+    let keepOpen = false;
     try {
       const parsed = JSON.parse(line) as unknown;
       if (!isTransportRequest(parsed)) {
@@ -298,7 +315,13 @@ export class VsCodeTransportServer implements vscode.Disposable {
         this.#stdioSockets.set(id, { request, socket });
       }
       if (request.operation === "execute") {
-        this.#activeRemoteRequests.set(id, { request, socket });
+        this.#activeRemoteRequests.set(id, {
+          commandAckMs: null,
+          outputEvents: 0,
+          request,
+          socket,
+          startedAt: performance.now(),
+        });
       }
       const response = await vscode.commands.executeCommand<RemoteExecutorCommandResponse>(
         REMOTE_EXECUTOR_COMMAND,
@@ -309,6 +332,20 @@ export class VsCodeTransportServer implements vscode.Disposable {
           "REMOTE_TRANSPORT_DISCONNECTED",
           "Remote Executor extension is unavailable in the current Remote SSH window",
         );
+      }
+      if (request.operation === "execute" && response.ok) {
+        const active = this.#activeRemoteRequests.get(id);
+        if (active) {
+          active.commandAckMs = Math.round(performance.now() - active.startedAt);
+        }
+        if (!isRemoteExecutionAccepted(response.result)) {
+          throw new BridgeError(
+            "PROTOCOL_MISMATCH",
+            "Remote Executor did not acknowledge the asynchronous execute protocol",
+          );
+        }
+        keepOpen = true;
+        return request;
       }
       if (response.ok) {
         if (request.operation === "stdioStart") {
@@ -326,8 +363,10 @@ export class VsCodeTransportServer implements vscode.Disposable {
         type: "response",
       });
     } finally {
-      this.#activeRemoteRequests.delete(id);
-      this.#pending.delete(id);
+      if (!keepOpen) {
+        this.#activeRemoteRequests.delete(id);
+        this.#pending.delete(id);
+      }
     }
     this.#stdioSockets.delete(id);
     return null;
@@ -415,5 +454,48 @@ export class VsCodeTransportServer implements vscode.Disposable {
       type: "stdioExit",
     });
     session.socket.end();
+  }
+
+  #handleExecutionCompleted(event: RemoteExecutionCompletedEvent): void {
+    const active = this.#activeRemoteRequests.get(event.id);
+    if (!active || active.socket.destroyed) {
+      return;
+    }
+    const timing = {
+      controllerCommandAckMs: active.commandAckMs,
+      controllerCompletionMs: Math.round(performance.now() - active.startedAt),
+      ...(active.firstOutputMs === undefined
+        ? {}
+        : { controllerFirstOutputMs: active.firstOutputMs }),
+      controllerOutputEvents: active.outputEvents,
+    };
+    const response = event.response.ok
+      ? {
+          ...event.response,
+          result:
+            event.response.result &&
+            typeof event.response.result === "object" &&
+            !Array.isArray(event.response.result)
+              ? { ...event.response.result, transportTiming: timing }
+              : event.response.result,
+        }
+      : {
+          ...event.response,
+          error: event.response.error
+            ? {
+                ...event.response.error,
+                details: { ...event.response.error.details, transportTiming: timing },
+              }
+            : event.response.error,
+        };
+    this.#activeRemoteRequests.delete(event.id);
+    this.#pending.delete(event.id);
+    writeMessage(active.socket, {
+      ...(response.error ? { error: response.error } : {}),
+      id: event.id,
+      ...(response.result === undefined ? {} : { result: response.result }),
+      type: "response",
+    });
+    active.socket.end();
   }
 }

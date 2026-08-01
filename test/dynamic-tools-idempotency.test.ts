@@ -30,6 +30,12 @@ describe("remote_exec idempotency context", () => {
       signal: null,
       stderr: "",
       stdout: "done",
+      transportTiming: {
+        controllerCommandAckMs: 2,
+        controllerCompletionMs: 6,
+        controllerOutputEvents: 1,
+        shimTransportTotalMs: 8,
+      },
       truncated: false,
     }));
     const executor = {
@@ -53,7 +59,7 @@ describe("remote_exec idempotency context", () => {
           callId: "call-1",
           tool: "remote_exec",
         },
-        { idempotencyKey: "stable-key" },
+        { coordinationWaitMs: 25, idempotencyKey: "stable-key" },
       ),
     ).resolves.toMatchObject({ success: true });
     expect(execute).toHaveBeenCalledWith(
@@ -69,7 +75,12 @@ describe("remote_exec idempotency context", () => {
       .map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(audit).toContainEqual(
       expect.objectContaining({
-        details: { idempotencyOutcome: "replayed" },
+        details: expect.objectContaining({
+          coordinationWaitMs: 25,
+          idempotencyOutcome: "replayed",
+          remoteDurationMs: 3,
+          transportTiming: expect.objectContaining({ shimTransportTotalMs: 8 }),
+        }),
         operation: "remote_exec",
         outcome: "succeeded",
       }),

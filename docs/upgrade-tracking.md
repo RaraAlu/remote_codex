@@ -152,4 +152,6 @@ transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
 初始化 watcher 可逆兼容、重载和远端只读链路见
 `docs/acceptance/2026-08-02-release-0.3.60-windows-git-init-watcher.md`；Windows 统一工具
 路由清单、模型位置透明和默认远端路由证据见
-`docs/acceptance/2026-08-02-release-0.3.61-windows-tool-route-inventory.md`。
+`docs/acceptance/2026-08-02-release-0.3.61-windows-tool-route-inventory.md`；Windows 前台命令
+异步事件回传、五次真实调用和分段耗时见
+`docs/acceptance/2026-08-02-release-0.3.62-windows-async-execute.md`。

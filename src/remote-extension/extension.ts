@@ -20,8 +20,8 @@ import {
   REMOTE_STDIO_MAX_FRAME_BYTES,
   type RemoteExecutorCommandRequest,
   type RemoteExecutorCommandResponse,
-  type RemoteOutputEvent,
 } from "../core/vscode-transport.js";
+import { DeferredExecutionEvents } from "./deferred-execution-events.js";
 import { matchesRemoteWorkspaceRoot } from "./workspace.js";
 import {
   BACKGROUND_TASK_MAX_LOG_READ_BYTES,
@@ -200,6 +200,7 @@ async function dispatch(
   request: RemoteExecutorCommandRequest,
   executor: LocalProcessExecutor,
   signal?: AbortSignal,
+  executionEvents?: DeferredExecutionEvents,
 ): Promise<unknown> {
   const params = record(request.params, "params");
   switch (request.operation) {
@@ -282,16 +283,12 @@ async function dispatch(
           : decodeWorkspaceContent(
               stringValue(rawOptions.stdinBase64, "params.options.stdinBase64"),
             );
-      let outputQueue = Promise.resolve();
-      const emit = (channel: RemoteOutputEvent["channel"], chunk: string): void => {
-        outputQueue = outputQueue.then(async () => {
-          await vscode.commands.executeCommand(request.outputCommand, {
-            channel,
-            chunk,
-            id: request.id,
-          } satisfies RemoteOutputEvent);
-        });
-      };
+      if (!executionEvents) {
+        throw new BridgeError(
+          "PROTOCOL_MISMATCH",
+          "Foreground execution requires an asynchronous event channel",
+        );
+      }
       const options: ExecuteOptions = {
         ...(typeof rawOptions.cwd === "string" ? { cwd: rawOptions.cwd } : {}),
         ...(rawOptions.env && typeof rawOptions.env === "object" && !Array.isArray(rawOptions.env)
@@ -301,12 +298,10 @@ async function dispatch(
         sideEffect: rawOptions.sideEffect === true,
         signal,
         ...(stdin ? { stdin } : {}),
-        onStdout: (chunk) => emit("stdout", chunk),
-        onStderr: (chunk) => emit("stderr", chunk),
+        onStdout: (chunk) => executionEvents.output("stdout", chunk),
+        onStderr: (chunk) => executionEvents.output("stderr", chunk),
       };
-      const result = await executor.execute(argv, options);
-      await outputQueue;
-      return result;
+      return await executor.execute(argv, options);
     }
     case "stdioStart": {
       await stdioSessions.start({
@@ -422,26 +417,32 @@ async function executeRequest(
     const idempotencyKey = idempotencyKeyValue(
       record(request.params, "params").idempotencyKey,
     );
+    const executionEvents = new DeferredExecutionEvents(
+      request.id,
+      async (event) =>
+        await vscode.commands.executeCommand(request.outputCommand, event),
+    );
     const operation = operationLedger.start(
       operationKey(request, idempotencyKey),
       operationKey(request, request.id),
       operationFingerprint(request),
-      async (signal) => await dispatch(request, executor, signal),
+      async (signal) => await dispatch(request, executor, signal, executionEvents),
     );
-    try {
-      return {
-        ok: true,
-        result: resultWithIdempotencyOutcome(
-          await operation.result,
-          operation.outcome,
-        ),
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        error: errorWithIdempotencyOutcome(error, operation.outcome),
-      };
-    }
+    void operation.result
+      .then(
+        async (result) =>
+          await executionEvents.complete({
+            ok: true,
+            result: resultWithIdempotencyOutcome(result, operation.outcome),
+          }),
+        async (error) =>
+          await executionEvents.complete({
+            ok: false,
+            error: errorWithIdempotencyOutcome(error, operation.outcome),
+          }),
+      )
+      .catch(() => undefined);
+    return { ok: true, result: { accepted: true } };
   } catch (error) {
     return {
       ok: false,

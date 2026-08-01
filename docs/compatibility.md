@@ -4,7 +4,8 @@
 
 当前源码是“官方扩展内置运行时”候选，本次实测来源为
 `openai.chatgpt@26.727.40816` 及其内置 Codex `0.146.0-alpha.9.2`。Windows x64 已完成
-Executor 配套版本自动同步、官方新任务、当前 Shim、远端项目操作，以及 `0.3.61`
+Executor 配套版本自动同步、官方新任务、当前 Shim、远端项目操作，以及 `0.3.62`
+异步前台执行、`0.3.61`
 统一工具路由清单、`0.3.60` Windows Git 初始化 watcher 可逆兼容、npm 普通入口、显式外部 CLI/MCP、历史 thread
 恢复、无 rollout 冷启动降级、停用恢复和 npm 覆盖恢复实测；既有 Linux x64
 候选包、普通本地外部 `full-access`、Remote SSH 外部 CLI、固定远端工具和 CodeGraph
@@ -17,8 +18,8 @@ Codex CLI 仅作为可选外部客户端按能力探测，不固定版本，也�
 | --- | --- | --- | --- |
 | VS Code | `1.129.1`（Windows x64）；`1.130.0`（既有 Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | Windows 官方任务和既有 Linux 官方面板/外部 CLI Remote SSH 任务通过 |
 | 官方 Codex 扩展 | 本次探测 `openai.chatgpt@26.727.40816` | 固定扩展 ID，不固定版本；使用 VS Code 当前实际加载版本 | Windows Remote SSH 官方新任务到达当前 Shim，并完成远端文件、Git 与命令操作；普通本地和既有外部 CLI 链路通过 |
-| Bridge Controller | `0.3.61` Windows x64 候选；`0.3.51` Linux Remote SSH 候选；`0.2.7` Windows 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | `0.3.61` 已安装在 Windows x64；thread 和每轮上下文包含统一路由清单，MCP 家族以 `route-configured` 区分路由配置与具体工具可用性，无参数形状推断；真实远端 `pwd` 通过，性能分段与完整双平台门禁待补测 |
-| Remote Executor | `0.2.20`，诊断协议 12，Linux x64 Workspace 候选 | Workspace 扩展；每次初始化比较远端扩展清单实际包版本与 Controller 内嵌配套版本，不一致时通过活动 Remote SSH 通道自动部署并重载；ping 仍按所需能力集合验收，不按包版本或协议号门禁 | Windows Controller 实机将未上报包版本、运行版本 `0.2.19` 的兼容 Executor 自动替换为 `0.2.20`；重载后扩展上下文回报包版本与运行版本均为 `0.2.20`，未形成重复升级循环 |
+| Bridge Controller | `0.3.62` Windows x64 候选；`0.3.51` Linux Remote SSH 候选；`0.2.7` Windows 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | `0.3.62` 已安装在 Windows x64；跨 Extension Host 前台执行采用快速确认和异步有序事件，五次真实远端调用为 `177–299 ms`、无超时；外部 MCP 特定客户端名称的冷初始化仍待修复，完整双平台门禁待补测 |
+| Remote Executor | `0.2.21`，诊断协议 13，Linux x64 Workspace 候选 | Workspace 扩展；每次初始化比较远端扩展清单实际包版本与 Controller 内嵌配套版本，不一致时通过活动 Remote SSH 通道自动部署并重载；ping 仍按所需能力集合验收，不按包版本或协议号门禁 | 新增 `executeAsyncEvents` 能力；Windows Controller 自动安装 `0.2.21` 并按预期重载一次，扩展上下文随后回报包版本与运行版本均为 `0.2.21`，没有重复升级循环 |
 | 官方扩展内置 Codex/app-server | 本次探测 `0.146.0-alpha.9.2` | 只从当前官方扩展安装目录启动；版本仅作诊断和协议快照索引 | Windows 直接参数探针复现并修复 `AbsolutePathBuf` 错误；真实官方 Remote SSH task、普通本地和既有外部 CLI thread 通过 |
 | 系统 Codex CLI | 本次 Windows 探针 `0.146.0`，不固定 | 仅用于 MCP 和外部客户端；POSIX 接管实际 symlink，Windows 仅成组接管同一 npm 目录中的三种普通 wrapper；运行时探测所需参数，官方扩展内置 app-server 仍是唯一服务端 | Windows 普通 `codex` 自动附着、无匹配透传、PowerShell/CMD 参数透传、停用恢复和真实 npm 覆盖恢复通过；Git Bash 未安装，extensionless wrapper 仅完成内容与自动化验证 |
 | Remote SSH | `0.124.0` | 使用 `remote.extensionKind` 探针设置 | 活动 transport、远程主根和 Bridge 动态工具已通过；CodeGraph 远端 server 路由已配置，具体工具仍以当前 app-server 工具快照为准 |
@@ -73,7 +74,9 @@ Windows 外部 CLI/MCP 与无 rollout 冷启动证据见
 初始化 watcher 兼容、重载和远端只读链路见
 `docs/acceptance/2026-08-02-release-0.3.60-windows-git-init-watcher.md`；Windows 统一工具
 路由清单、状态语义和真实远端默认路由见
-`docs/acceptance/2026-08-02-release-0.3.61-windows-tool-route-inventory.md`。
+`docs/acceptance/2026-08-02-release-0.3.61-windows-tool-route-inventory.md`；Windows 前台命令
+异步事件回传、五次真实调用和分段耗时见
+`docs/acceptance/2026-08-02-release-0.3.62-windows-async-execute.md`。
 
 当前协议文件位于 `protocol/0.146.0-alpha.3/`。`ServerRequest.json` 的方法集合由自动化测试与
 Shim 的已知请求白名单逐项比对；出现新请求时测试失败，而不是静默转发潜在副作用。

@@ -4,8 +4,8 @@ import type { OperationSnapshot } from "./operation-ledger.js";
 export const REMOTE_EXECUTOR_COMMAND = "codexRemoteBridge.executor.execute";
 export const REMOTE_EXECUTOR_EXTENSION_ID = "zkbot.codex-remote-bridge-executor";
 export const REMOTE_EXECUTOR_PING_COMMAND = "codexRemoteBridge.executor.ping";
-export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 12;
-export const REMOTE_EXECUTOR_VERSION = "0.2.20";
+export const REMOTE_EXECUTOR_PROTOCOL_VERSION = 13;
+export const REMOTE_EXECUTOR_VERSION = "0.2.21";
 export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
@@ -65,6 +65,7 @@ export const REMOTE_EXECUTOR_CAPABILITIES = [
   "canonicalPath",
   "cancel",
   "execute",
+  "executeAsyncEvents",
   "executeStdin",
   "executeStdinExactLength",
   "listDirectory",
@@ -136,6 +137,16 @@ export interface RemoteExecutorCommandResponse {
   error?: BridgeErrorPayload;
   ok: boolean;
   result?: unknown;
+}
+
+export interface RemoteExecutionAccepted {
+  accepted: true;
+}
+
+export interface RemoteExecutionCompletedEvent {
+  event: "executionComplete";
+  id: string;
+  response: RemoteExecutorCommandResponse;
 }
 
 export type RemoteOperationSnapshot<T = unknown> = OperationSnapshot<T>;
@@ -225,6 +236,32 @@ export function isRemoteOutputEvent(value: unknown): value is RemoteOutputEvent 
     typeof event.chunk === "string" &&
     (event.channel === "stdout" || event.channel === "stderr")
   );
+}
+
+export function isRemoteExecutionAccepted(
+  value: unknown,
+): value is RemoteExecutionAccepted {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value) &&
+    (value as Record<string, unknown>).accepted === true;
+}
+
+export function isRemoteExecutionCompletedEvent(
+  value: unknown,
+): value is RemoteExecutionCompletedEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const event = value as Record<string, unknown>;
+  if (
+    event.event !== "executionComplete" ||
+    typeof event.id !== "string" ||
+    !event.response ||
+    typeof event.response !== "object" ||
+    Array.isArray(event.response)
+  ) {
+    return false;
+  }
+  return typeof (event.response as Record<string, unknown>).ok === "boolean";
 }
 
 export function isRemoteStdioEvent(value: unknown): value is RemoteStdioEvent {

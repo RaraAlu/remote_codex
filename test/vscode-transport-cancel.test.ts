@@ -4,7 +4,6 @@ import { parseBridgeConfig } from "../src/core/config.js";
 import {
   REMOTE_EXECUTOR_COMMAND,
   type RemoteExecutorCommandRequest,
-  type RemoteExecutorCommandResponse,
 } from "../src/core/vscode-transport.js";
 
 const mock = vi.hoisted(() => ({
@@ -39,28 +38,17 @@ describe("VS Code Controller cancellation transport", () => {
       });
       transport = new VsCodeTransportServer(() => config);
       const descriptor = await transport.start();
-      let finishExecute: ((response: RemoteExecutorCommandResponse) => void) | undefined;
       const requests: RemoteExecutorCommandRequest[] = [];
       mock.executeCommand.mockImplementation(
         async (command: string, request: RemoteExecutorCommandRequest) => {
           expect(command).toBe(REMOTE_EXECUTOR_COMMAND);
           requests.push(request);
           if (request.operation === "execute") {
-            return await new Promise<RemoteExecutorCommandResponse>((resolve) => {
-              finishExecute = resolve;
-            });
+            return { ok: true, result: { accepted: true } };
           }
           expect(request).toMatchObject({
             operation: "cancel",
             params: { operationId: "execute-1" },
-          });
-          finishExecute?.({
-            error: {
-              code: "CANCELLED",
-              message: "Remote command and its process tree were cancelled",
-              retryable: false,
-            },
-            ok: false,
           });
           return {
             ok: true,

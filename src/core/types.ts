@@ -110,7 +110,16 @@ export interface RemoteCommandResult {
   signal: NodeJS.Signals | null;
   stderr: string;
   stdout: string;
+  transportTiming?: RemoteTransportTiming;
   truncated: boolean;
+}
+
+export interface RemoteTransportTiming {
+  controllerCommandAckMs: number | null;
+  controllerCompletionMs: number;
+  controllerFirstOutputMs?: number;
+  controllerOutputEvents: number;
+  shimTransportTotalMs?: number;
 }
 
 export interface RemoteFileMetadata {

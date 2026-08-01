@@ -20,6 +20,7 @@ import {
   type RemoteCommandResult,
   type RemoteFileRead,
   type RemoteIdentity,
+  type RemoteTransportTiming,
 } from "./types.js";
 import {
   REMOTE_OUTPUT_COMMAND,
@@ -86,8 +87,10 @@ export class VsCodeRemoteExecutor
     options: ExecuteOptions = {},
   ): Promise<RemoteCommandResult> {
     const idempotencyKey = options.idempotencyKey ?? `exec_${randomUUID()}`;
+    const startedAt = performance.now();
+    let result: RemoteCommandResult;
     try {
-      return await this.#request<RemoteCommandResult>(
+      result = await this.#request<RemoteCommandResult>(
         "execute",
         {
           argv: [...argv],
@@ -109,8 +112,22 @@ export class VsCodeRemoteExecutor
       if (!options.sideEffect || bridgeError.code !== "RESULT_UNKNOWN") {
         throw bridgeError;
       }
-      return await this.#recoverExecuteResult(idempotencyKey, bridgeError);
+      result = await this.#recoverExecuteResult(idempotencyKey, bridgeError);
     }
+    const timedResult = result as RemoteCommandResult & {
+      transportTiming?: RemoteTransportTiming;
+    };
+    return {
+      ...result,
+      transportTiming: {
+        ...(timedResult.transportTiming ?? {
+          controllerCommandAckMs: null,
+          controllerCompletionMs: Math.round(performance.now() - startedAt),
+          controllerOutputEvents: 0,
+        }),
+        shimTransportTotalMs: Math.round(performance.now() - startedAt),
+      },
+    };
   }
 
   override async startBackgroundTask(

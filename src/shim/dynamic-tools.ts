@@ -497,6 +497,7 @@ interface DynamicToolCall {
 
 export interface DynamicToolObserver {
   clientIdentity?: BridgeClientIdentity;
+  coordinationWaitMs?: number;
   idempotencyKey?: string;
   onOutput?: (chunk: string) => void;
   operationId?: string;
@@ -638,6 +639,15 @@ export class DynamicToolRouter {
         ...(isRecord(data)
           ? {
               details: {
+                ...(observer.coordinationWaitMs === undefined
+                  ? {}
+                  : { coordinationWaitMs: observer.coordinationWaitMs }),
+                ...(typeof data.durationMs === "number"
+                  ? { remoteDurationMs: data.durationMs }
+                  : {}),
+                ...(isRecord(data.transportTiming)
+                  ? { transportTiming: data.transportTiming }
+                  : {}),
                 ...(typeof data.bytesWritten === "number"
                   ? { bytesWritten: data.bytesWritten }
                   : {}),

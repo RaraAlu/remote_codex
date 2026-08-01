@@ -775,6 +775,7 @@ export class ShimProxy {
         return;
       }
       try {
+        const coordinationStartedAt = performance.now();
         const clientIdentity = this.#remoteToolClientIdentity(message);
         const result = await this.#remoteToolCalls.run(
           message,
@@ -917,6 +918,7 @@ export class ShimProxy {
 
             return await this.#router!.handle(message.id, message.params, {
               clientIdentity,
+              coordinationWaitMs: Math.round(performance.now() - coordinationStartedAt),
               idempotencyKey,
               operationId:
                 isRecord(message.params) && typeof message.params.callId === "string"

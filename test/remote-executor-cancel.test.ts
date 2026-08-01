@@ -5,18 +5,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   REMOTE_EXECUTOR_COMMAND,
   REMOTE_OUTPUT_COMMAND,
+  type RemoteExecutionCompletedEvent,
   type RemoteExecutorCommandRequest,
-  type RemoteExecutorCommandResponse,
 } from "../src/core/vscode-transport.js";
 
 const mock = vi.hoisted(() => ({
   commands: new Map<string, (request: RemoteExecutorCommandRequest) => unknown>(),
+  executeCommand: vi.fn(async (_command: string, _event: unknown) => undefined),
   workspaceRoot: "",
 }));
 
 vi.mock("vscode", () => ({
   commands: {
-    executeCommand: vi.fn(async () => undefined),
+    executeCommand: mock.executeCommand,
     registerCommand: (
       command: string,
       callback: (request: RemoteExecutorCommandRequest) => unknown,
@@ -42,6 +43,7 @@ let workspace = "";
 afterEach(async () => {
   deactivate();
   mock.commands.clear();
+  mock.executeCommand.mockClear();
   if (workspace) {
     await rm(workspace, { force: true, recursive: true });
   }
@@ -68,6 +70,24 @@ function request(
   };
 }
 
+async function completion(id: string): Promise<RemoteExecutionCompletedEvent> {
+  let found: RemoteExecutionCompletedEvent | undefined;
+  await vi.waitFor(() => {
+    found = mock.executeCommand.mock.calls
+      .filter(([command]) => command === REMOTE_OUTPUT_COMMAND)
+      .map(([, event]) => event)
+      .find(
+        (event): event is RemoteExecutionCompletedEvent =>
+          Boolean(event) &&
+          typeof event === "object" &&
+          (event as RemoteExecutionCompletedEvent).event === "executionComplete" &&
+          (event as RemoteExecutionCompletedEvent).id === id,
+      );
+    expect(found).toBeDefined();
+  });
+  return found as RemoteExecutionCompletedEvent;
+}
+
 describe.skipIf(process.platform === "win32")("Remote Executor operation ledger", () => {
   it("binds cancel to the active execute request and returns CANCELLED", async () => {
     workspace = await realpath(await mkdtemp(join(tmpdir(), "codex-remote-cancel-")));
@@ -76,13 +96,15 @@ describe.skipIf(process.platform === "win32")("Remote Executor operation ledger"
     const execute = mock.commands.get(REMOTE_EXECUTOR_COMMAND);
     expect(execute).toBeTypeOf("function");
 
-    const running = execute?.(
-      request("operation-1", "execute", {
-        argv: ["sleep", "30"],
-        idempotencyKey: "cancel-key",
-        options: { sideEffect: true },
-      }),
-    ) as Promise<RemoteExecutorCommandResponse>;
+    await expect(
+      execute?.(
+        request("operation-1", "execute", {
+          argv: ["sleep", "30"],
+          idempotencyKey: "cancel-key",
+          options: { sideEffect: true },
+        }),
+      ),
+    ).resolves.toEqual({ ok: true, result: { accepted: true } });
     await new Promise((resolve) => setTimeout(resolve, 25));
 
     await expect(
@@ -98,12 +120,15 @@ describe.skipIf(process.platform === "win32")("Remote Executor operation ledger"
         operationId: "operation-1",
       },
     });
-    await expect(running).resolves.toMatchObject({
-      error: {
-        code: "CANCELLED",
-        details: { sideEffectMayHaveOccurred: true },
+    await expect(completion("operation-1")).resolves.toMatchObject({
+      event: "executionComplete",
+      response: {
+        error: {
+          code: "CANCELLED",
+          details: { sideEffectMayHaveOccurred: true },
+        },
+        ok: false,
       },
-      ok: false,
     });
     await expect(
       execute?.(
@@ -127,13 +152,15 @@ describe.skipIf(process.platform === "win32")("Remote Executor operation ledger"
     const execute = mock.commands.get(REMOTE_EXECUTOR_COMMAND);
     expect(execute).toBeTypeOf("function");
 
-    const running = execute?.(
-      request("foreground-stop", "execute", {
-        argv: ["sleep", "30"],
-        idempotencyKey: "foreground-stop-key",
-        options: { sideEffect: false },
-      }),
-    ) as Promise<RemoteExecutorCommandResponse>;
+    await expect(
+      execute?.(
+        request("foreground-stop", "execute", {
+          argv: ["sleep", "30"],
+          idempotencyKey: "foreground-stop-key",
+          options: { sideEffect: false },
+        }),
+      ),
+    ).resolves.toEqual({ ok: true, result: { accepted: true } });
     await expect(
       execute?.(
         request("background-stop", "backgroundStart", {
@@ -157,9 +184,11 @@ describe.skipIf(process.platform === "win32")("Remote Executor operation ledger"
         stdioSessions: 0,
       },
     });
-    await expect(running).resolves.toMatchObject({
-      error: { code: "CANCELLED" },
-      ok: false,
+    await expect(completion("foreground-stop")).resolves.toMatchObject({
+      response: {
+        error: { code: "CANCELLED" },
+        ok: false,
+      },
     });
     await expect(
       execute?.(
@@ -189,9 +218,9 @@ describe.skipIf(process.platform === "win32")("Remote Executor operation ledger"
           options: { sideEffect: false },
         }),
       ),
-    ).resolves.toMatchObject({
-      ok: true,
-      result: { exitCode: 0, stdout: "ready" },
+    ).resolves.toEqual({ ok: true, result: { accepted: true } });
+    await expect(completion("after-stop")).resolves.toMatchObject({
+      response: { ok: true, result: { exitCode: 0, stdout: "ready" } },
     });
   });
 
@@ -208,13 +237,19 @@ describe.skipIf(process.platform === "win32")("Remote Executor operation ledger"
       options: { sideEffect: true },
     };
 
-    await expect(execute?.(request("operation-1", "execute", params))).resolves.toMatchObject({
+    await expect(execute?.(request("operation-1", "execute", params))).resolves.toEqual({
       ok: true,
-      result: { idempotencyOutcome: "executed" },
+      result: { accepted: true },
     });
-    await expect(execute?.(request("operation-2", "execute", params))).resolves.toMatchObject({
+    await expect(completion("operation-1")).resolves.toMatchObject({
+      response: { ok: true, result: { idempotencyOutcome: "executed" } },
+    });
+    await expect(execute?.(request("operation-2", "execute", params))).resolves.toEqual({
       ok: true,
-      result: { idempotencyOutcome: "replayed" },
+      result: { accepted: true },
+    });
+    await expect(completion("operation-2")).resolves.toMatchObject({
+      response: { ok: true, result: { idempotencyOutcome: "replayed" } },
     });
     await expect(readFile(effectsPath, "utf8")).resolves.toBe("x");
     await expect(
