@@ -55,6 +55,10 @@ export type ProbeExternalCliThread = (
   threadId: string,
 ) => Promise<boolean>;
 
+export type ConnectExternalCliProbeClient = (
+  descriptor: ExternalCliSessionDescriptor,
+) => Promise<Pick<VsCodeConversationClient, "close" | "request">>;
+
 function parseIntegrationConfig(value: unknown): ExternalCliIntegrationConfig {
   if (
     !isRecord(value) ||
@@ -210,30 +214,41 @@ export async function assertRemoteAttachSupported(
   }
 }
 
-const probeExternalCliThread: ProbeExternalCliThread = async (
-  descriptor,
-  threadId,
-) => {
-  let client: VsCodeConversationClient | null = null;
-  try {
-    client = await VsCodeConversationClient.connect(descriptor);
-    await client.request("thread/turns/list", {
-      threadId,
-      limit: 1,
-      itemsView: "summary",
-      sortDirection: "desc",
-    });
-    return true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return !(
-      message.includes("not materialized yet") ||
-      message.includes("no rollout found")
-    );
-  } finally {
-    client?.close();
+export async function probeExternalCliThread(
+  descriptor: ExternalCliSessionDescriptor,
+  threadId: string,
+  connect: ConnectExternalCliProbeClient = VsCodeConversationClient.connect,
+): Promise<boolean> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let client: Pick<VsCodeConversationClient, "close" | "request"> | null = null;
+    try {
+      client = await connect(descriptor);
+      await client.request("thread/resume", {
+        threadId,
+        excludeTurns: true,
+      });
+      return true;
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message.includes("not materialized yet") ||
+        message.includes("no rollout found") ||
+        message.includes("No saved session found")
+      ) {
+        return false;
+      }
+      if (attempt === 0 && message.includes("request timed out: initialize")) {
+        continue;
+      }
+      throw error;
+    } finally {
+      client?.close();
+    }
   }
-};
+  throw lastError;
+}
 
 export async function resolveExternalCliAttachArgs(
   prepared: PreparedExternalCliAttach,

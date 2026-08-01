@@ -7,9 +7,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { bridgeExternalCliDir } from "../src/core/locations.js";
 import {
   prepareExternalCliAttach,
+  probeExternalCliThread,
   resolveExternalCliAttachArgs,
   runExternalCliAttach,
   selectAutomaticExternalCliSession,
+  type ConnectExternalCliProbeClient,
   type SpawnAttachedCodex,
 } from "../src/shim/external-cli-attach.js";
 import type { ExternalCliSessionDescriptor } from "../src/shim/shared-app-server.js";
@@ -231,5 +233,53 @@ describe("bidirectional external CLI attach", () => {
       "--remote-auth-token-env",
       descriptor.tokenEnv,
     ]);
+  });
+
+  it("probes thread resume instead of treating ephemeral turn history as resumable", async () => {
+    const { descriptor } = await prepareState();
+    const request = vi.fn(async () => {
+      throw new Error(`no rollout found for thread id ${descriptor.threadId}`);
+    });
+    const close = vi.fn();
+
+    await expect(
+      probeExternalCliThread(
+        descriptor,
+        descriptor.threadId!,
+        async () => ({ close, request }),
+      ),
+    ).resolves.toBe(false);
+    expect(request).toHaveBeenCalledWith("thread/resume", {
+      threadId: descriptor.threadId,
+      excludeTurns: true,
+    });
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("retries a cold initialize timeout and never treats it as resumable", async () => {
+    const { descriptor } = await prepareState();
+    const close = vi.fn();
+    const request = vi.fn(async () => {
+      throw new Error(`no rollout found for thread id ${descriptor.threadId}`);
+    });
+    const connect = vi
+      .fn<ConnectExternalCliProbeClient>()
+      .mockRejectedValueOnce(new Error("VS Code Codex request timed out: initialize"))
+      .mockResolvedValueOnce({ close, request });
+
+    await expect(
+      probeExternalCliThread(descriptor, descriptor.threadId!, connect),
+    ).resolves.toBe(false);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces an inconclusive probe error instead of attempting resume", async () => {
+    const { descriptor } = await prepareState();
+    await expect(
+      probeExternalCliThread(descriptor, descriptor.threadId!, async () => {
+        throw new Error("gateway authentication failed");
+      }),
+    ).rejects.toThrow("gateway authentication failed");
   });
 });
