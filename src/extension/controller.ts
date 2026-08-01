@@ -23,6 +23,7 @@ import {
   bridgeSessionConfigPath,
   bridgeShimRuntimeStatusPath,
   officialCodexRuntimePath,
+  officialExtensionCompatibilityDir,
 } from "../core/locations.js";
 import {
   OFFICIAL_CODEX_EXTENSION_ID,
@@ -68,6 +69,11 @@ import {
   OfficialSettingsManager,
   type OfficialSettingsStatus,
 } from "./settings-manager.js";
+import {
+  reconcileOfficialExtensionCompatibility,
+  restoreOfficialExtensionCompatibility,
+  type OfficialExtensionCompatibilityResult,
+} from "./official-extension-compatibility.js";
 import {
   LocalRootAuthority,
   type LocalRootDiagnostic,
@@ -117,6 +123,7 @@ interface DiagnosticReport {
     appServerInitialized: boolean;
     appServerLastError: string | null;
     officialSettings: OfficialSettingsStatus;
+    officialExtensionCompatibility: OfficialExtensionCompatibilityResult | null;
     authorizedRoots: LocalRootDiagnostic[];
   };
   remote: {
@@ -200,6 +207,7 @@ export class BridgeController implements vscode.Disposable {
   #shimRuntimeHealth: ShimRuntimeHealth = { ...EMPTY_SHIM_RUNTIME_HEALTH };
   #shimRuntimeMonitor: NodeJS.Timeout | null = null;
   #shimRuntimeMonitorGeneration = 0;
+  #officialExtensionCompatibility: OfficialExtensionCompatibilityResult | null = null;
 
   constructor(context: vscode.ExtensionContext) {
     this.#context = context;
@@ -360,6 +368,13 @@ export class BridgeController implements vscode.Disposable {
         this.#log(`official Codex runtime validation failed: ${bridgeError.message}`);
         void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
         return;
+      }
+      try {
+        if (await this.#reconcileOfficialExtensionCompatibility()) {
+          return;
+        }
+      } catch (error) {
+        this.#log(`official Codex compatibility reconciliation skipped: ${String(error)}`);
       }
     }
 
@@ -734,10 +749,42 @@ export class BridgeController implements vscode.Disposable {
     await vscode.workspace
       .getConfiguration("codexRemoteBridge")
       .update("autoInitialize", false, vscode.ConfigurationTarget.Global);
+    let compatibility: OfficialExtensionCompatibilityResult | null = null;
+    try {
+      const installation = this.#officialCodexInstallation();
+      compatibility = await restoreOfficialExtensionCompatibility({
+        extensionPath: installation.extensionPath,
+        extensionVersion: installation.extensionVersion,
+        stateDirectory: officialExtensionCompatibilityDir(),
+        hostPlatform: process.platform,
+      });
+      this.#officialExtensionCompatibility = compatibility;
+      if (compatibility.changed || compatibility.status === "conflict") {
+        await this.#audit.write({
+          operation: "official_extension.compatibility_restore",
+          outcome: compatibility.status === "conflict" ? "failed" : "succeeded",
+          details: { ...compatibility },
+        });
+      }
+    } catch (error) {
+      this.#log(`official Codex compatibility restoration skipped: ${String(error)}`);
+    }
     const restored = await this.#settings.restore();
-    if (restored) {
+    if (compatibility?.status === "conflict") {
+      void vscode.window.showErrorMessage(
+        `Codex Bridge restored its saved settings but did not overwrite the changed official extension asset: ${compatibility.detail ?? "compatibility state conflict"}`,
+      );
+    } else if (restored && compatibility?.changed) {
+      void vscode.window.showInformationMessage(
+        "Codex Bridge restored the previous official Codex settings and managed compatibility files. Reload VS Code.",
+      );
+    } else if (restored) {
       void vscode.window.showInformationMessage(
         "Codex Bridge restored the previous official Codex and Remote SSH settings. Reload VS Code.",
+      );
+    } else if (compatibility?.changed) {
+      void vscode.window.showInformationMessage(
+        "Codex Bridge restored the managed official Codex compatibility file. Reload VS Code.",
       );
     } else {
       void vscode.window.showInformationMessage("Codex Bridge has no saved settings to restore.");
@@ -1265,6 +1312,7 @@ export class BridgeController implements vscode.Disposable {
         appServerInitialized: shimHealth.appServerInitialized,
         appServerLastError: shimHealth.appServerLastError,
         officialSettings: this.#settings.status(shimPath),
+        officialExtensionCompatibility: this.#officialExtensionCompatibility,
         authorizedRoots: await this.#localRootDiagnostics(config),
       },
       remote: {
@@ -1310,6 +1358,7 @@ export class BridgeController implements vscode.Disposable {
 
   #officialCodexInstallation(): {
     executable: string;
+    extensionPath: string;
     extensionVersion: string | null;
   } {
     const extension = vscode.extensions.getExtension(OFFICIAL_CODEX_EXTENSION_ID);
@@ -1322,6 +1371,7 @@ export class BridgeController implements vscode.Disposable {
     const extensionVersion = extension.packageJSON.version;
     return {
       executable: resolveOfficialCodexExecutable(extension.extensionPath),
+      extensionPath: extension.extensionPath,
       extensionVersion:
         typeof extensionVersion === "string" && extensionVersion ? extensionVersion : null,
     };
@@ -1346,6 +1396,39 @@ export class BridgeController implements vscode.Disposable {
     };
     await saveOfficialCodexRuntime(officialCodexRuntimePath(), runtime);
     return runtime;
+  }
+
+  async #reconcileOfficialExtensionCompatibility(): Promise<boolean> {
+    const installation = this.#officialCodexInstallation();
+    const result = await reconcileOfficialExtensionCompatibility({
+      extensionPath: installation.extensionPath,
+      extensionVersion: installation.extensionVersion,
+      stateDirectory: officialExtensionCompatibilityDir(),
+      hostPlatform: process.platform,
+      remoteName: vscode.env.remoteName,
+    });
+    this.#officialExtensionCompatibility = result;
+    if (result.status !== "not-applicable") {
+      this.#log(
+        `official Codex git-init watcher compatibility: ${result.status}${result.detail ? ` (${result.detail})` : ""}`,
+      );
+    }
+    if (result.changed || result.status === "conflict" || result.status === "unsupported") {
+      await this.#audit.write({
+        operation: "official_extension.compatibility",
+        outcome:
+          result.status === "conflict" || result.status === "unsupported"
+            ? "failed"
+            : "succeeded",
+        details: { ...result },
+      });
+    }
+    if (!result.changed) {
+      return false;
+    }
+    this.#log("official Codex git-init watcher compatibility applied; reloading the window once");
+    await this.#reloadWindow();
+    return true;
   }
 
   async #readCodexVersion(executable: string): Promise<string | null> {

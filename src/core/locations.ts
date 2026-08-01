@@ -68,6 +68,18 @@ export function officialCodexRuntimePath(environment: NodeJS.ProcessEnv = proces
   return join(bridgeStateDir(environment), "official-codex-runtime.json");
 }
 
+export function officialExtensionCompatibilityDir(
+  environment: NodeJS.ProcessEnv = process.env,
+  hostPlatform: NodeJS.Platform = process.platform,
+  homeDirectory = homedir(),
+): string {
+  const pathApi = hostPlatform === "win32" ? win32 : posix;
+  return pathApi.join(
+    bridgeStateDir(environment, hostPlatform, homeDirectory),
+    "official-extension-compatibility",
+  );
+}
+
 export function bridgeControlDir(
   environment: NodeJS.ProcessEnv = process.env,
   hostPlatform: NodeJS.Platform = process.platform,

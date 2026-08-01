@@ -6,6 +6,7 @@ import {
   bridgeSessionConfigPath,
   bridgeShimRuntimeStatusPath,
   bridgeStateDir,
+  officialExtensionCompatibilityDir,
 } from "../src/core/locations.js";
 
 describe("bridge window session locations", () => {
@@ -82,6 +83,11 @@ describe("bridge window session locations", () => {
     );
     expect(bridgeSessionConfigPath(4242, environment, "win32", "C:\\Users\\tester")).toBe(
       "C:\\Users\\tester\\AppData\\Local\\codex-remote-bridge\\sessions\\4242.json",
+    );
+    expect(
+      officialExtensionCompatibilityDir(environment, "win32", "C:\\Users\\tester"),
+    ).toBe(
+      "C:\\Users\\tester\\AppData\\Local\\codex-remote-bridge\\official-extension-compatibility",
     );
     expect(
       bridgeRemoteControlDir(

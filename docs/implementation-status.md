@@ -177,6 +177,23 @@ Windows 实机已完成唯一同目录会话附着、无匹配透传、PowerShel
 停用恢复、重新启用，以及真实 `npm install -g @openai/codex@0.146.0` 覆盖后的重载恢复。
 完整证据见
 `docs/acceptance/2026-08-02-release-0.3.59-windows-automatic-cli.md`。
+
+`0.3.60` 修复官方扩展在 Windows UI Extension Host 中把 Remote SSH POSIX 根转换为
+`\\root\\...` 本机路径，并由 `git-init-watcher` 每五秒重试 `fs.watch` 的问题。兼容层不
+改写 VS Code 工作区 URI，而是按当前官方扩展资产的实际代码形状定位 Git 初始化监视器，
+让它复用官方包内已经用于 working tree 的 `vscode.workspace.createFileSystemWatcher`
+适配器；找不到唯一监视器、适配器或 `vscode-remote` URI 映射时失败关闭，Bridge 核心
+链路继续工作。原资产按 SHA-256 原样备份，补丁和备份均记录哈希；重复初始化幂等，官方
+扩展升级时只处理同一扩展目录下的安全相邻安装，外部修改、备份篡改和元数据路径篡改均
+拒绝覆盖。`Codex Bridge: Restore Official Codex Settings` 同时恢复托管资产。
+
+Windows 实机安装 `0.3.60` 后，官方扩展 `26.727.40816` 的直接 watcher 调用从 1 处变为
+0 处、官方远程 watcher 调用变为 1 处；历史日志最后一条告警停在 `03:24:07.027`，补丁
+生效并安装最终候选再次重载后日志持续写到 `03:42:28`，新增告警为 0。Bridge 恢复
+`ready`，当前 Shim/App Server 新建的只读验收 thread 成功执行 `workspace_git_status`、
+`workspace_read_file(README.md)` 和 `remote_exec(["pwd"])`，三项均审计为远端主根
+`/root/work/train/MimicLite`，没有伪造 URI 或本地项目回退。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.60-windows-git-init-watcher.md`。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

@@ -4,9 +4,9 @@
 
 当前源码是“官方扩展内置运行时”候选，本次实测来源为
 `openai.chatgpt@26.727.40816` 及其内置 Codex `0.146.0-alpha.9.2`。Windows x64 已完成
-Executor 配套版本自动同步、官方新任务、当前 Shim、远端项目操作，以及 `0.3.59`
-Windows npm 普通入口、显式外部 CLI/MCP、历史 thread 恢复、无 rollout 冷启动降级、
-停用恢复和 npm 覆盖恢复实测；既有 Linux x64
+Executor 配套版本自动同步、官方新任务、当前 Shim、远端项目操作，以及 `0.3.60`
+Windows Git 初始化 watcher 可逆兼容、npm 普通入口、显式外部 CLI/MCP、历史 thread
+恢复、无 rollout 冷启动降级、停用恢复和 npm 覆盖恢复实测；既有 Linux x64
 候选包、普通本地外部 `full-access`、Remote SSH 外部 CLI、固定远端工具和 CodeGraph
 链路证据继续有效。完整双平台发布门禁仍待补测。Bridge 不固定官方扩展版本号；系统
 Codex CLI 仅作为可选外部客户端按能力探测，不固定版本，也不替代官方扩展内置运行时。
@@ -17,7 +17,7 @@ Codex CLI 仅作为可选外部客户端按能力探测，不固定版本，也�
 | --- | --- | --- | --- |
 | VS Code | `1.129.1`（Windows x64）；`1.130.0`（既有 Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | Windows 官方任务和既有 Linux 官方面板/外部 CLI Remote SSH 任务通过 |
 | 官方 Codex 扩展 | 本次探测 `openai.chatgpt@26.727.40816` | 固定扩展 ID，不固定版本；使用 VS Code 当前实际加载版本 | Windows Remote SSH 官方新任务到达当前 Shim，并完成远端文件、Git 与命令操作；普通本地和既有外部 CLI 链路通过 |
-| Bridge Controller | `0.3.59` Windows x64 候选；`0.3.51` Linux Remote SSH 候选；`0.2.7` Windows 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | `0.3.59` 已安装在 Windows x64；在 `0.3.58` 显式外部 CLI 基础上完成 npm 三种 wrapper 的普通入口接管、停用恢复和真实 npm 覆盖恢复；完整双平台门禁待补测 |
+| Bridge Controller | `0.3.60` Windows x64 候选；`0.3.51` Linux Remote SSH 候选；`0.2.7` Windows 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | `0.3.60` 已安装在 Windows x64；按官方资产实际代码形状把 Git 初始化监视器接到官方已有 `vscode-remote` watcher，重复 ENOENT 消失且远端 Git/文件/命令通过；完整双平台门禁待补测 |
 | Remote Executor | `0.2.20`，诊断协议 12，Linux x64 Workspace 候选 | Workspace 扩展；每次初始化比较远端扩展清单实际包版本与 Controller 内嵌配套版本，不一致时通过活动 Remote SSH 通道自动部署并重载；ping 仍按所需能力集合验收，不按包版本或协议号门禁 | Windows Controller 实机将未上报包版本、运行版本 `0.2.19` 的兼容 Executor 自动替换为 `0.2.20`；重载后扩展上下文回报包版本与运行版本均为 `0.2.20`，未形成重复升级循环 |
 | 官方扩展内置 Codex/app-server | 本次探测 `0.146.0-alpha.9.2` | 只从当前官方扩展安装目录启动；版本仅作诊断和协议快照索引 | Windows 直接参数探针复现并修复 `AbsolutePathBuf` 错误；真实官方 Remote SSH task、普通本地和既有外部 CLI thread 通过 |
 | 系统 Codex CLI | 本次 Windows 探针 `0.146.0`，不固定 | 仅用于 MCP 和外部客户端；POSIX 接管实际 symlink，Windows 仅成组接管同一 npm 目录中的三种普通 wrapper；运行时探测所需参数，官方扩展内置 app-server 仍是唯一服务端 | Windows 普通 `codex` 自动附着、无匹配透传、PowerShell/CMD 参数透传、停用恢复和真实 npm 覆盖恢复通过；Git Bash 未安装，extensionless wrapper 仅完成内容与自动化验证 |
@@ -69,7 +69,9 @@ Executor 同步、任务创建和稳定性证据见
 Windows 外部 CLI/MCP 与无 rollout 冷启动证据见
 `docs/acceptance/2026-08-02-release-0.3.58-windows-external-cli.md`；Windows npm 普通入口、
 停用恢复与 npm 覆盖恢复见
-`docs/acceptance/2026-08-02-release-0.3.59-windows-automatic-cli.md`。
+`docs/acceptance/2026-08-02-release-0.3.59-windows-automatic-cli.md`；Windows 官方 Git
+初始化 watcher 兼容、重载和远端只读链路见
+`docs/acceptance/2026-08-02-release-0.3.60-windows-git-init-watcher.md`。
 
 当前协议文件位于 `protocol/0.146.0-alpha.3/`。`ServerRequest.json` 的方法集合由自动化测试与
 Shim 的已知请求白名单逐项比对；出现新请求时测试失败，而不是静默转发潜在副作用。

@@ -6,10 +6,10 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.59`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
+> 当前源码版本为 `0.3.60`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
 > `codex` 自动附着、显式 `codex-vscode.exe` TUI、外部 MCP、历史 thread 同步、无 rollout
-> 冷启动降级、停用恢复和 npm 升级恢复实测。官方 Remote SSH git watcher 噪声及完整
-> 双平台门禁仍待处理。
+> 冷启动降级、停用恢复和 npm 升级恢复实测；官方 Remote SSH git watcher 的路径误判
+> 与重复告警也已完成可逆兼容修复和远端只读链路实测。完整双平台门禁仍待处理。
 > 在双平台门禁完成前不发布 `0.4.0`，也不扩大支持声明。
 
 ## 工作原理
@@ -257,9 +257,6 @@ Remote SSH 实机验证。完整门禁和量化指标见
 
 ### Windows x64 与 0.4.0
 
-- 处理官方扩展 `26.727.40816` 在 Windows UI Extension Host 中每 5 秒把 Remote SSH
-  POSIX 根当作 `\\root\\...` 本机路径监视并产生 `git-init-watcher ENOENT` 的问题；
-  不得通过伪造工作区 URI 规避，退出条件是重复警告消失且远端 Git/文件/命令链路不退化。
 - 在 Windows x64 原生环境完成 Extension Host、Shim、官方任务、本地窗口与 Remote SSH
   主链路验证，独立记录 Windows 日志、审计和量化结果，不以跨平台构包替代实机证据。
 - Windows 验证通过并完成统一发布门禁前不发布 `0.4.0`。
