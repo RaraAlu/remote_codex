@@ -97,7 +97,7 @@ function fakeWebSocketAppServer(
         if (message.method === "thread/read") {
           socket.send(JSON.stringify({
             id: message.id,
-            result: { thread: { id: "thread-shared" } },
+            result: {},
           }));
           return;
         }
@@ -1008,6 +1008,22 @@ describe("SharedAppServer", () => {
     input.write(
       `${JSON.stringify({
         id: 2,
+        method: "thread/read",
+        params: { threadId: "thread-shared", includeTurns: false },
+      })}\n`,
+    );
+    const restoredDescriptor = await waitFor(async () => {
+      const current = await readDescriptor(bridgeExternalCliSessionPath());
+      return current?.threadId === "thread-shared" ? current : undefined;
+    });
+    expect(restoredDescriptor).toMatchObject({
+      host: "local",
+      workspaceRoot: directory,
+      threadId: "thread-shared",
+    });
+    input.write(
+      `${JSON.stringify({
+        id: 3,
         method: "thread/start",
         params: {
           cwd: workspaceRoot,
@@ -1017,7 +1033,7 @@ describe("SharedAppServer", () => {
       })}\n`,
     );
     const response = await waitFor(() =>
-      vscodeMessages.find((message) => message.id === 2),
+      vscodeMessages.find((message) => message.id === 3),
     );
     expect(response).toMatchObject({
       result: {

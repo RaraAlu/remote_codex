@@ -891,6 +891,7 @@ export class SharedAppServer {
     if (
       message.method === "initialize" ||
       message.method === "thread/start" ||
+      message.method === "thread/read" ||
       message.method === "thread/resume" ||
       message.method === "turn/start" ||
       message.method === "turn/steer"
@@ -939,6 +940,16 @@ export class SharedAppServer {
         const thread = result.thread;
         if (isRecord(thread) && typeof thread.id === "string") {
           this.#setActiveThread(thread.id);
+        }
+        if (
+          !message.error &&
+          pending.threadId &&
+          (pending.method === "thread/read" ||
+            pending.method === "thread/resume" ||
+            pending.method === "turn/start" ||
+            pending.method === "turn/steer")
+        ) {
+          this.#setActiveThread(pending.threadId);
         }
         const turn = result.turn;
         if (
