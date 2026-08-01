@@ -8,6 +8,7 @@ import {
   installShimExecutable,
   isBridgeShimPath,
   packagedShimName,
+  renameReplacingFileWithRetry,
 } from "../src/extension/shim-executable.js";
 
 describe("platform Shim installation", () => {
@@ -105,6 +106,45 @@ describe("platform Shim installation", () => {
     expect(secondPointer.shimPath).toContain("0.3.66-");
     expect(await readFile(secondPointer.shimPath, "utf8")).toBe("new-shim-behavior");
     expect(isBridgeShimPath(launcher)).toBe(true);
+  });
+
+  it("retries transient Windows contention while replacing the current Shim target", async () => {
+    const waits: number[] = [];
+    let attempts = 0;
+    await renameReplacingFileWithRetry("temporary", "current.json", {
+      hostPlatform: "win32",
+      renameFile: async () => {
+        attempts += 1;
+        if (attempts < 3) {
+          throw Object.assign(new Error("busy"), {
+            code: attempts === 1 ? "EPERM" : "EBUSY",
+          });
+        }
+      },
+      retryDelaysMs: [10, 25],
+      wait: async (delayMs) => {
+        waits.push(delayMs);
+      },
+    });
+
+    expect(attempts).toBe(3);
+    expect(waits).toEqual([10, 25]);
+  });
+
+  it("does not hide a permanent Windows pointer replacement failure", async () => {
+    let attempts = 0;
+    await expect(
+      renameReplacingFileWithRetry("temporary", "current.json", {
+        hostPlatform: "win32",
+        renameFile: async () => {
+          attempts += 1;
+          throw Object.assign(new Error("denied"), { code: "EPERM" });
+        },
+        retryDelaysMs: [10],
+        wait: async () => undefined,
+      }),
+    ).rejects.toThrow("denied");
+    expect(attempts).toBe(2);
   });
 
   it("fails closed when the stable official launcher was modified", async () => {

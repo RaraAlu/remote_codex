@@ -20,6 +20,15 @@ interface OfficialShimLauncherMetadata {
   sha256: string;
 }
 
+interface RenameReplacingFileOptions {
+  hostPlatform?: NodeJS.Platform;
+  renameFile?: (source: string, destination: string) => Promise<void>;
+  retryDelaysMs?: readonly number[];
+  wait?: (delayMs: number) => Promise<void>;
+}
+
+const WINDOWS_RENAME_RETRY_DELAYS_MS = [10, 25, 50, 100, 200, 400, 800, 1_000];
+
 export function packagedShimName(
   hostPlatform: NodeJS.Platform = process.platform,
 ): string {
@@ -131,11 +140,19 @@ export async function installOfficialShimLauncher(
         { launcherPath },
       );
     }
-    await writeAtomicJson(metadataPath, { version: 1, sha256: installedSha256 });
+    await writeAtomicJson(
+      metadataPath,
+      { version: 1, sha256: installedSha256 },
+      hostPlatform,
+    );
   } else {
     await installImmutableLauncher(launcherPath, shimContent, hostPlatform);
     const installedSha256 = await sha256File(launcherPath);
-    await writeAtomicJson(metadataPath, { version: 1, sha256: installedSha256 });
+    await writeAtomicJson(
+      metadataPath,
+      { version: 1, sha256: installedSha256 },
+      hostPlatform,
+    );
   }
   await chmodIfSupported(launcherPath, 0o700, hostPlatform);
   await chmodIfSupported(metadataPath, 0o600, hostPlatform);
@@ -147,7 +164,7 @@ export async function installOfficialShimLauncher(
     shimPath,
     updatedAtMs: Date.now(),
   };
-  await writeAtomicJson(pointerPath, pointer);
+  await writeAtomicJson(pointerPath, pointer, hostPlatform);
   await chmodIfSupported(pointerPath, 0o600, hostPlatform);
   return launcherPath;
 }
@@ -206,11 +223,51 @@ async function installImmutableLauncher(
   }
 }
 
-async function writeAtomicJson(path: string, value: unknown): Promise<void> {
+export async function renameReplacingFileWithRetry(
+  source: string,
+  destination: string,
+  options: RenameReplacingFileOptions = {},
+): Promise<void> {
+  const hostPlatform = options.hostPlatform ?? process.platform;
+  const renameFile = options.renameFile ?? rename;
+  const retryDelaysMs = options.retryDelaysMs ?? WINDOWS_RENAME_RETRY_DELAYS_MS;
+  const wait =
+    options.wait ??
+    (async (delayMs: number) => {
+      await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, delayMs));
+    });
+
+  let retries = 0;
+  while (true) {
+    try {
+      await renameFile(source, destination);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const retryDelayMs = retryDelaysMs[retries];
+      if (
+        hostPlatform !== "win32" ||
+        !code ||
+        !["EACCES", "EBUSY", "EPERM"].includes(code) ||
+        retryDelayMs === undefined
+      ) {
+        throw error;
+      }
+      retries += 1;
+      await wait(retryDelayMs);
+    }
+  }
+}
+
+async function writeAtomicJson(
+  path: string,
+  value: unknown,
+  hostPlatform: NodeJS.Platform,
+): Promise<void> {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-    await rename(temporary, path);
+    await renameReplacingFileWithRetry(temporary, path, { hostPlatform });
   } finally {
     await rm(temporary, { force: true });
   }

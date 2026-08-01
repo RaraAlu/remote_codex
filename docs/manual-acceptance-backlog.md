@@ -487,6 +487,14 @@ Host 无响应约 4–5 秒，并把 Executor 激活排队到约 8.9 秒。远�
 本次失败门禁证据见
 `docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation-rerun.md`。
 
+`0.3.68` 修复稳定官方 launcher 更新 `current.json` 时的 Windows 短暂占用。现场首次
+`EPERM` 会弹错并延迟启动；新实现只重试 `EPERM`、`EACCES` 和 `EBUSY`，最多等待
+`2,585 ms`，其他或永久错误仍失败。完整检查通过 67 个测试文件、335 项测试，安装后的
+一次真实重载没有新增 managed launcher repair 错误，指针匹配当前存活 Extension Host
+`PID 304964` 和 `0.3.68` Shim，临时文件为 0。该目标已关闭；远端 Server 仍继承失效
+代理并使本轮 Executor 探测耗时 `9,515 ms`，继续由 Windows 更新环境门禁跟踪。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.68-windows-atomic-pointer.md`。
+
 - 在 Windows x64 原生执行依赖安装、类型检查、测试、构建、SEA Shim 冒烟和构包。
 - 在 Windows 执行 `npm run package:stage`，与同版本 Linux stage 一并运行
   `npm run package:collect -- <linux-stage-dir> <windows-stage-dir>` 和

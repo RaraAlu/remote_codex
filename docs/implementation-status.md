@@ -329,6 +329,18 @@ VS Code Server 早于配置清理启动，仍继承失效代理，普通重载�
 `docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation.md` 与
 `docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation-rerun.md`。
 
+`0.3.68` 关闭 Windows 稳定官方 launcher 指针的短暂文件占用故障。现场在新 Extension
+Host 启动时复现 `rename(current.json.<pid>.<uuid>.tmp, current.json)` 返回 `EPERM`；同一
+进程稍后重试虽然成功，但首次失败已弹出错误并延迟 Shim 启动。现在 `current.json` 与
+launcher 元数据的原子替换只在 Windows 遇到 `EPERM`、`EACCES` 或 `EBUSY` 时按
+`10/25/50/100/200/400/800/1000 ms` 有界重试，重试耗尽或其他错误仍原样失败，临时文件
+继续由 `finally` 清理。完整检查通过 67 个测试文件、335 项测试，Windows VSIX 安装后一次
+真实重载未再记录 managed launcher repair 错误；指针直接更新到存活 Extension Host
+`PID 304964` 和 `0.3.68-f5130295b34a7448` Shim 目录，临时文件计数为 0。该轮 Executor
+探测仍为 `9,515 ms`，由尚未刷新环境的远端 VS Code Server 继续单独阻塞，不影响本目标
+的指针替换结论。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.68-windows-atomic-pointer.md`。
+
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知
