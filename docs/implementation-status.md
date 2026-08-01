@@ -234,6 +234,24 @@ Shim 迁移重载一次，再因自动安装 Executor `0.2.21` 重载一次；�
 超过 40 秒无响应，已保留为 README 活动 TODO。完整证据见
 `docs/acceptance/2026-08-02-release-0.3.62-windows-async-execute.md`。
 
+`0.3.63` 关闭外部 MCP 冷初始化身份兼容项。客户端不再复用
+`clientInfo.name=codex_vscode_bridge_mcp`，而是为每条网关连接生成带 UUID 的非保留身份；
+共享 app-server 先把 `initialize` 转交官方服务，再把该连接标记为 `external-mcp`，避免身份
+识别干预初始化。外部网关只在主 VS Code 客户端成功初始化后发布；若首条次级连接仍遇到
+一次性冷停滞，客户端在总超时预算内以 1 秒探针关闭旧连接，并用新身份重试一次。
+
+Windows 原生 `npm run check` 通过：64 个测试文件通过、5 个跳过，311 项测试通过、25 项
+跳过，类型检查、构建、SEA Shim 冒烟和 Windows 构包均通过。安装后活动 Shim SHA-256 为
+`61a75903a875da796d7a7bc7417d8340ce0437a5db38ce76bd402fa10bb97bb3`，与最终构建一致；
+同一活动 Remote SSH 网关连续三次初始化为 `10 / 4 / 4 ms`。通过真实 stdio MCP 进程调用
+`vscode_codex_list_conversations`，MCP 初始化为 `82 ms`、工具调用为 `77 ms`、
+`isError=false`。原约 30 秒超时项关闭，完整证据见
+`docs/acceptance/2026-08-02-release-0.3.63-windows-cold-initialize.md`。
+
+本次安装也确认一个独立生命周期问题：普通 Shim 内容变化后，用户手动重载会先迁移
+`chatgpt.cliExecutable` 到新内容寻址路径并再自动重载一次；日志明确没有 Executor 安装。
+该项与旧描述符/PID 复用风险已进入根 README 活动 TODO，不计入本目标的冷初始化结论。
+
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

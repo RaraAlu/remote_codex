@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import WebSocket, { type RawData } from "ws";
+import {
+  VSCODE_CONVERSATION_CLIENT_TITLE,
+  VSCODE_CONVERSATION_CLIENT_VERSION,
+  createVsCodeConversationClientName,
+} from "./external-client-identity.js";
 import { discoverExternalCliSessions } from "./external-session-registry.js";
 import { isRecord, isRpcRequest, isRpcResponse, type RpcId } from "./rpc.js";
 import type { ExternalCliSessionDescriptor } from "./shared-app-server.js";
@@ -15,6 +20,18 @@ interface PendingRequest {
 
 const INTERRUPTED_TURN_CACHE_LIMIT = 64;
 const INTERRUPTED_TURN_ITEM_LIMIT = 32;
+const COLD_INITIALIZE_PROBE_TIMEOUT_MS = 1_000;
+const INITIALIZE_RETRY_DELAY_MS = 50;
+
+class VsCodeRequestTimeoutError extends Error {
+  readonly method: string;
+
+  constructor(method: string) {
+    super(`VS Code Codex request timed out: ${method}`);
+    this.name = "VsCodeRequestTimeoutError";
+    this.method = method;
+  }
+}
 
 function rawMessage(data: RawData): string {
   return typeof data === "string" ? data : data.toString("utf8");
@@ -62,6 +79,48 @@ export class VsCodeConversationClient {
     if (!token || /[\r\n]/.test(token)) {
       throw new Error("VS Code Codex gateway token is invalid");
     }
+    const deadline = Date.now() + Math.max(1, initializeTimeoutMs);
+    let initializeError: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const remainingMs = Math.max(0, deadline - Date.now());
+      if (remainingMs === 0) {
+        break;
+      }
+      const attemptTimeoutMs =
+        attempt === 0
+          ? Math.min(
+              COLD_INITIALIZE_PROBE_TIMEOUT_MS,
+              Math.max(1, Math.floor(remainingMs / 2)),
+            )
+          : remainingMs;
+      try {
+        return await VsCodeConversationClient.#connectOnce(
+          descriptor,
+          token,
+          attemptTimeoutMs,
+        );
+      } catch (error) {
+        initializeError = error;
+        if (
+          attempt > 0 ||
+          !(error instanceof VsCodeRequestTimeoutError) ||
+          error.method !== "initialize"
+        ) {
+          throw error;
+        }
+        await new Promise((resolvePromise) =>
+          setTimeout(resolvePromise, INITIALIZE_RETRY_DELAY_MS),
+        );
+      }
+    }
+    throw initializeError ?? new VsCodeRequestTimeoutError("initialize");
+  }
+
+  static async #connectOnce(
+    descriptor: ExternalCliSessionDescriptor,
+    token: string,
+    initializeTimeoutMs: number,
+  ): Promise<VsCodeConversationClient> {
     const socket = new WebSocket(descriptor.endpoint, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -75,9 +134,9 @@ export class VsCodeConversationClient {
         "initialize",
         {
           clientInfo: {
-            name: "codex_vscode_bridge_mcp",
-            title: "Codex VS Code Bridge MCP",
-            version: "0.1.0",
+            name: createVsCodeConversationClientName(),
+            title: VSCODE_CONVERSATION_CLIENT_TITLE,
+            version: VSCODE_CONVERSATION_CLIENT_VERSION,
           },
           capabilities: { experimentalApi: true },
         },
@@ -100,7 +159,7 @@ export class VsCodeConversationClient {
     const result = new Promise<unknown>((resolvePromise, reject) => {
       const timeout = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`VS Code Codex request timed out: ${method}`));
+        reject(new VsCodeRequestTimeoutError(method));
       }, timeoutMs);
       timeout.unref();
       this.#pending.set(id, {

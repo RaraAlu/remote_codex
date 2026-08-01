@@ -29,6 +29,7 @@ import type {
   BridgeClientIdentity,
   BridgeConfig,
 } from "../core/types.js";
+import { isVsCodeConversationClientName } from "./external-client-identity.js";
 import {
   RemoteTurnClientTracker,
   RemoteToolCallCoordinator,
@@ -237,10 +238,15 @@ export class SharedAppServer {
   readonly #externalRelayCounts = new Map<string, number>();
   readonly #externalCleanupTasks = new Set<Promise<void>>();
   readonly #relayedNotifications = new Map<string, RelayedNotification>();
+  readonly #vscodeInitialized: Promise<void>;
+  #resolveVsCodeInitialized: () => void = () => undefined;
 
   constructor(options: SharedAppServerOptions) {
     this.#options = options;
     this.#audit = new AuditLog(options.auditPath);
+    this.#vscodeInitialized = new Promise<void>((resolvePromise) => {
+      this.#resolveVsCodeInitialized = resolvePromise;
+    });
     this.#activeWorkspaceRoot =
       options.config?.workspaceRoot ??
       options.localWorkspaceRoot ??
@@ -289,6 +295,15 @@ export class SharedAppServer {
     let runtimeError: string | null = null;
     try {
       const upstream = await this.#connectUpstream();
+      const stdioClient = this.#runStdioClient(upstream, input, output, errorOutput);
+      const startup = await Promise.race([
+        this.#vscodeInitialized.then(() => ({ initialized: true as const })),
+        stdioClient.then((code) => ({ code, initialized: false as const })),
+      ]);
+      if (!startup.initialized) {
+        exitCode = startup.code;
+        return exitCode;
+      }
       const externalPort = await this.#startExternalServer(errorOutput);
       await this.#writeDescriptor(`ws://${LOOPBACK_HOST}:${externalPort}`);
       await this.#audit.write({
@@ -298,7 +313,7 @@ export class SharedAppServer {
         workspaceRoot: this.#activeWorkspaceRoot,
         details: { endpoint: `ws://${LOOPBACK_HOST}:${externalPort}` },
       });
-      exitCode = await this.#runStdioClient(upstream, input, output, errorOutput);
+      exitCode = await stdioClient;
       return exitCode;
     } catch (error) {
       runtimeError = error instanceof Error ? error.message : String(error);
@@ -453,13 +468,6 @@ export class SharedAppServer {
         upstream.close();
         return;
       }
-      for (const raw of buffered) {
-        try {
-          this.#observeExternalClientIdentity(parseRpcLine(raw), clientIdentity);
-        } catch {
-          break;
-        }
-      }
       session = this.#createSession(true, 1, clientIdentity);
       const writeUpstream = webSocketWriter(upstream);
       const writeExternalTransport = webSocketWriter(socket);
@@ -488,17 +496,19 @@ export class SharedAppServer {
       const handleClient = (raw: string): void => {
         try {
           const message = parseRpcLine(raw);
-          this.#observeExternalClientIdentity(message, clientIdentity);
+          const externalMcpInitialize = this.#isExternalMcpInitialize(message);
           this.#observeClientMessage(
             message,
             pendingClientRequests,
             clientIdentity,
           );
+          let operationId: string | undefined;
+          let details: Record<string, unknown> | undefined;
           if ("method" in message) {
-            const operationId = isRpcRequest(message)
+            operationId = isRpcRequest(message)
               ? String(message.id)
               : randomUUID();
-            const details = this.#externalRequestAuditDetails(message);
+            details = this.#externalRequestAuditDetails(message);
             if (isRpcRequest(message)) {
               pendingExternalRequests.set(message.id, {
                 details,
@@ -506,6 +516,15 @@ export class SharedAppServer {
                 startedAtMs: Date.now(),
               });
             }
+          }
+          const handling = session?.handleClientMessage(message, writeUpstream, writeClient);
+          if (!handling) {
+            throw new Error("External client session is unavailable");
+          }
+          if (externalMcpInitialize) {
+            clientIdentity.clientSource = "external-mcp";
+          }
+          if (operationId && details) {
             void this.#queueAudit({
               ...clientIdentity,
               operationId,
@@ -516,8 +535,7 @@ export class SharedAppServer {
               details,
             });
           }
-          void session
-            ?.handleClientMessage(message, writeUpstream, writeClient)
+          void handling
             .catch((error) => {
               if (isRpcRequest(message)) {
                 const pending = pendingExternalRequests.get(message.id);
@@ -932,6 +950,7 @@ export class SharedAppServer {
           pending.method === "initialize" &&
           pending.clientIdentity.clientSource === "vscode"
         ) {
+          this.#resolveVsCodeInitialized();
           void this.#updateRuntimeStatus({
             appServerInitializedAtMs: Date.now(),
             appServerLastError: null,
@@ -1000,21 +1019,18 @@ export class SharedAppServer {
     }
   }
 
-  #observeExternalClientIdentity(
+  #isExternalMcpInitialize(
     message: ReturnType<typeof parseRpcLine>,
-    clientIdentity: BridgeClientIdentity,
-  ): void {
+  ): boolean {
     if (
       !("method" in message) ||
       message.method !== "initialize" ||
       !isRecord(message.params) ||
       !isRecord(message.params.clientInfo)
     ) {
-      return;
+      return false;
     }
-    if (message.params.clientInfo.name === "codex_vscode_bridge_mcp") {
-      clientIdentity.clientSource = "external-mcp";
-    }
+    return isVsCodeConversationClientName(message.params.clientInfo.name);
   }
 
   #externalRequestAuditDetails(

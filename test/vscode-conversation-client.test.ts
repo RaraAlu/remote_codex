@@ -67,6 +67,56 @@ describe("VS Code conversation client", () => {
     expect(server.clients.size).toBe(0);
   });
 
+  it("retries a stalled cold initialize once with a fresh client identity", async () => {
+    stateDirectory = await mkdtemp(join(tmpdir(), "codex-bridge-conversation-"));
+    const tokenPath = join(stateDirectory, "token");
+    await writeFile(tokenPath, "test-token", { mode: 0o600 });
+    const clientNames: string[] = [];
+    let connections = 0;
+    server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    server.on("connection", (socket) => {
+      connections += 1;
+      const connection = connections;
+      socket.on("message", (data) => {
+        const message = JSON.parse(data.toString()) as {
+          id?: number;
+          method?: string;
+          params?: { clientInfo?: { name?: string } };
+        };
+        if (message.method !== "initialize" || message.id === undefined) {
+          return;
+        }
+        if (typeof message.params?.clientInfo?.name === "string") {
+          clientNames.push(message.params.clientInfo.name);
+        }
+        if (connection > 1) {
+          socket.send(JSON.stringify({ id: message.id, result: { userAgent: "retry" } }));
+        }
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server?.once("listening", resolve);
+      server?.once("error", reject);
+    });
+    const address = server.address() as AddressInfo;
+    const descriptor: ExternalCliSessionDescriptor = {
+      version: 1,
+      endpoint: `ws://127.0.0.1:${address.port}`,
+      host: "local",
+      pid: process.pid,
+      startedAtMs: Date.now(),
+      tokenEnv: "CODEX_BRIDGE_EXTERNAL_SESSION_TOKEN",
+      tokenPath,
+      workspaceRoot: stateDirectory,
+    };
+
+    const client = await VsCodeConversationClient.connect(descriptor, 500);
+    expect(connections).toBe(2);
+    expect(clientNames).toHaveLength(2);
+    expect(clientNames[0]).not.toBe(clientNames[1]);
+    client.close();
+  });
+
   it("starts a fresh thread before the first turn so current tools can be injected", async () => {
     stateDirectory = await mkdtemp(join(tmpdir(), "codex-bridge-conversation-"));
     process.env.CODEX_BRIDGE_STATE_DIR = stateDirectory;
@@ -133,6 +183,19 @@ describe("VS Code conversation client", () => {
       turn: { turn: { id: "turn-fresh" } },
     });
     expect(requestMethods).toEqual(["initialize", "thread/start", "turn/start"]);
+    expect(requestParams.get("initialize")).toEqual({
+      capabilities: { experimentalApi: true },
+      clientInfo: {
+        name: expect.stringMatching(
+          /^codex_remote_bridge_external_client_[0-9a-f-]{36}$/,
+        ),
+        title: "Codex Remote Bridge External Client",
+        version: "0.1.0",
+      },
+    });
+    expect(JSON.stringify(requestParams.get("initialize"))).not.toContain(
+      "codex_vscode_bridge_mcp",
+    );
     expect(requestParams.get("thread/start")).toEqual({
       approvalPolicy: "never",
       sandbox: "danger-full-access",

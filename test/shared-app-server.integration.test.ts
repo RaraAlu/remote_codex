@@ -332,6 +332,10 @@ describe("SharedAppServer", () => {
     });
     const running = server.run();
 
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+    await expect(readFile(bridgeExternalCliSessionPath(), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
     input.write(
       `${JSON.stringify({ id: 1, method: "initialize", params: { clientInfo: {} } })}\n`,
     );

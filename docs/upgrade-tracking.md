@@ -154,4 +154,6 @@ transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
 路由清单、模型位置透明和默认远端路由证据见
 `docs/acceptance/2026-08-02-release-0.3.61-windows-tool-route-inventory.md`；Windows 前台命令
 异步事件回传、五次真实调用和分段耗时见
-`docs/acceptance/2026-08-02-release-0.3.62-windows-async-execute.md`。
+`docs/acceptance/2026-08-02-release-0.3.62-windows-async-execute.md`；Windows 外部 MCP 冷初始化
+身份、就绪门和真实 stdio 调用见
+`docs/acceptance/2026-08-02-release-0.3.63-windows-cold-initialize.md`。
