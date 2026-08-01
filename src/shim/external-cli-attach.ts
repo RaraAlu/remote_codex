@@ -131,17 +131,16 @@ function selectSession(
 ): ExternalCliSessionDescriptor {
   const eligible = sessions.filter(
     (session) =>
-      session.threadId !== undefined &&
+      (options.threadId !== undefined || session.threadId !== undefined) &&
       (options.host === undefined || session.host === options.host) &&
       (options.workspaceRoot === undefined ||
         session.workspaceRoot === options.workspaceRoot) &&
-      (options.sessionPid === undefined || session.pid === options.sessionPid) &&
-      (options.threadId === undefined || session.threadId === options.threadId),
+      (options.sessionPid === undefined || session.pid === options.sessionPid),
   );
   if (eligible.length === 0) {
     throw new BridgeError(
       "BRIDGE_NOT_READY",
-      "No active VS Code Codex thread matches the requested Bridge session",
+      "No active VS Code Codex Bridge session matches the requested selectors",
     );
   }
   if (eligible.length > 1) {

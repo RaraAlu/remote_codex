@@ -144,6 +144,34 @@ describe("bidirectional external CLI attach", () => {
     expect(prepared.args.join(" ")).not.toContain("private-token");
   });
 
+  it("allows an explicit thread override for the selected Bridge session", async () => {
+    const { descriptor, directory } = await prepareState();
+    const requestedThreadId = "thread-without-rollout";
+
+    await expect(
+      prepareExternalCliAttach({
+        codexExecutable: "codex-test",
+        sessionPid: descriptor.pid,
+        threadId: requestedThreadId,
+      }),
+    ).resolves.toMatchObject({ threadId: requestedThreadId });
+
+    const descriptorWithoutThread = { ...descriptor };
+    delete descriptorWithoutThread.threadId;
+    await writeFile(
+      join(directory, `${descriptor.pid}.json`),
+      `${JSON.stringify(descriptorWithoutThread)}\n`,
+      { mode: 0o600 },
+    );
+    await expect(
+      prepareExternalCliAttach({
+        codexExecutable: "codex-test",
+        sessionPid: descriptor.pid,
+        threadId: requestedThreadId,
+      }),
+    ).resolves.toMatchObject({ threadId: requestedThreadId });
+  });
+
   it("fails closed on an ambiguous session and accepts an explicit session pid", async () => {
     const { descriptor, directory } = await prepareState();
     const second = await writeSession(directory, process.ppid, Date.now() + 1);
