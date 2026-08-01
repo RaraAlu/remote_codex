@@ -156,4 +156,6 @@ transport 关闭终结修复及 Linux Remote SSH 写入中断实机见
 异步事件回传、五次真实调用和分段耗时见
 `docs/acceptance/2026-08-02-release-0.3.62-windows-async-execute.md`；Windows 外部 MCP 冷初始化
 身份、就绪门和真实 stdio 调用见
-`docs/acceptance/2026-08-02-release-0.3.63-windows-cold-initialize.md`。
+`docs/acceptance/2026-08-02-release-0.3.63-windows-cold-initialize.md`；Windows 普通更新
+稳定 launcher、单次重载、活动进程链和真实远端 Git 操作见
+`docs/acceptance/2026-08-02-release-0.3.65-windows-single-reload.md`。

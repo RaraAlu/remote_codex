@@ -316,6 +316,7 @@ describe("SharedAppServer", () => {
         workspaceRoot: "/remote/workspace",
       }),
       controlDir: join(directory, "control"),
+      extensionHostPid: 12_345,
       input,
       output,
       errorOutput,
@@ -354,6 +355,7 @@ describe("SharedAppServer", () => {
       return current?.appServerInitializedAtMs ? current : undefined;
     });
     expect(initializedRuntime).toMatchObject({
+      extensionHostPid: 12_345,
       host: "g1_1",
       workspaceRoot: "/remote/workspace",
       running: true,

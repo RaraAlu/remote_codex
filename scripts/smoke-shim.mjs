@@ -2,15 +2,16 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmod,
+  copyFile,
   mkdtemp,
   mkdir,
+  readdir,
   readFile,
   rm,
   stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import WebSocket from "ws";
 import { findOfficialCodexRuntime } from "./official-codex.mjs";
@@ -183,14 +184,30 @@ async function runHandshake(
   return { messages, stdout };
 }
 
-async function assertExternalCliAttach(stateDir, threadId, shimPid) {
-  const descriptorPath = join(stateDir, "external-cli", `${shimPid}.json`);
+async function assertExternalCliAttach(stateDir, threadId, shimPid = null) {
+  const externalCliDir = join(stateDir, "external-cli");
+  let descriptorPath = shimPid === null
+    ? null
+    : join(externalCliDir, `${shimPid}.json`);
   const descriptorDeadline = Date.now() + 10_000;
   let descriptor;
   while (Date.now() < descriptorDeadline) {
-    descriptor = await readFile(descriptorPath, "utf8")
-      .then((raw) => JSON.parse(raw))
-      .catch(() => null);
+    const candidates = descriptorPath
+      ? [descriptorPath]
+      : await readdir(externalCliDir)
+        .then((names) => names
+          .filter((name) => /^\d+\.json$/.test(name))
+          .map((name) => join(externalCliDir, name)))
+        .catch(() => []);
+    for (const candidate of candidates) {
+      descriptor = await readFile(candidate, "utf8")
+        .then((raw) => JSON.parse(raw))
+        .catch(() => null);
+      if (typeof descriptor?.endpoint === "string" && typeof descriptor?.tokenPath === "string") {
+        descriptorPath = candidate;
+        break;
+      }
+    }
     if (typeof descriptor?.endpoint === "string" && typeof descriptor?.tokenPath === "string") {
       break;
     }
@@ -240,6 +257,9 @@ async function assertExternalCliAttach(stateDir, threadId, shimPid) {
   } finally {
     socket.close();
   }
+  if (!descriptorPath) {
+    throw new Error("Shared app-server descriptor path was not resolved");
+  }
   if (!connected) {
     throw new Error(
       `External CLI gateway did not accept an authenticated connection: ${socketFailure ?? "timed out"}`,
@@ -258,6 +278,41 @@ async function assertExternalCliAttach(stateDir, threadId, shimPid) {
       `Shared app-server did not publish the active VS Code thread: ${JSON.stringify(publishedDescriptor)}`,
     );
   }
+}
+
+async function prepareOfficialLauncher(shim, rootDir) {
+  const binDir = join(rootDir, "official-launcher", "bin");
+  const launcherDir = join(binDir, "official-launcher-v1");
+  const targetDir = join(binDir, "smoke-target");
+  const executableName = process.platform === "win32"
+    ? "codex-bridge-shim.exe"
+    : "codex-bridge-shim";
+  const launcherName = process.platform === "win32"
+    ? "codex-bridge-launcher.exe"
+    : "codex-bridge-launcher";
+  const launcher = join(launcherDir, launcherName);
+  const target = join(targetDir, executableName);
+  await Promise.all([
+    mkdir(launcherDir, { mode: 0o700, recursive: true }),
+    mkdir(targetDir, { mode: 0o700, recursive: true }),
+  ]);
+  await Promise.all([copyFile(shim, launcher), copyFile(shim, target)]);
+  if (process.platform !== "win32") {
+    await Promise.all([chmod(launcher, 0o700), chmod(target, 0o700)]);
+  }
+  const sha256 = createHash("sha256").update(await readFile(target)).digest("hex");
+  await writeFile(
+    join(launcherDir, "current.json"),
+    `${JSON.stringify({
+      version: 1,
+      extensionHostPid: process.pid,
+      sha256,
+      shimPath: target,
+      updatedAtMs: Date.now(),
+    })}\n`,
+    { encoding: "utf8", mode: 0o600 },
+  );
+  return { launcher, target };
 }
 
 async function assertMissingRuntimeFailsClosed(shim, stateDir, codexHome) {
@@ -491,7 +546,7 @@ function assertLocalThreadStarted({ messages, stdout }) {
   }
 }
 
-const rootDir = await mkdtemp(join(tmpdir(), "codex-bridge-smoke-"));
+const rootDir = await mkdtemp(join(process.cwd(), ".codex-bridge-smoke-"));
 const shim = resolve(
   process.platform === "win32"
     ? "dist/codex-bridge-shim.exe"
@@ -574,11 +629,12 @@ try {
     })}\n`,
     { encoding: "utf8", mode: 0o600 },
   );
+  const officialLauncher = await prepareOfficialLauncher(shim, rootDir);
   const remoteHandshake = await runHandshake(
-    shim,
+    officialLauncher.launcher,
     appServerEnvironment(remoteStateDir, remoteCodexHome, sessionConfigPath),
     true,
-    (threadId, shimPid) => assertExternalCliAttach(remoteStateDir, threadId, shimPid),
+    (threadId) => assertExternalCliAttach(remoteStateDir, threadId),
   );
   assertHandshake(remoteHandshake);
   assertThreadStarted(remoteHandshake);
@@ -631,6 +687,8 @@ try {
   if (
     runtimeStatus.running !== false ||
     runtimeStatus.shimLastExitCode !== 0 ||
+    runtimeStatus.extensionHostPid !== process.pid ||
+    resolve(runtimeStatus.shimExecutable) !== resolve(officialLauncher.target) ||
     typeof runtimeStatus.appServerInitializedAtMs !== "number" ||
     runtimeStatus.appServerLastError !== null ||
     runtimeStatus.nodeExecutable !== null
@@ -666,7 +724,7 @@ try {
     }
   }
   process.stdout.write(
-    "Shim smoke test passed: missing metadata fails closed, automatic plain CLI attach, external MCP tools, shared local and remote app-server startup, thread creation and authenticated external gateway connection\n",
+    "Shim smoke test passed: missing metadata fails closed, automatic plain CLI attach, stable official launcher routing, external MCP tools, shared local and remote app-server startup, thread creation and authenticated external gateway connection\n",
   );
 } finally {
   await rm(rootDir, {

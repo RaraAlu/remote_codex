@@ -119,7 +119,10 @@ describe("OfficialSettingsManager", () => {
     });
     const manager = new OfficialSettingsManager(context());
 
-    await expect(manager.repairManagedExecutable(windowsShim)).resolves.toBe(true);
+    await expect(manager.repairManagedExecutable(windowsShim)).resolves.toEqual({
+      changed: true,
+      reloadRequired: false,
+    });
     expect(mock.effective.get("chatgpt.cliExecutable")).toBe(windowsShim);
 
     const laterKinds = {
@@ -133,6 +136,25 @@ describe("OfficialSettingsManager", () => {
     expect(mock.effective.get("remote.extensionKind")).toEqual({
       example: ["workspace"],
       later: ["ui"],
+    });
+  });
+
+  it("requires a reload only when repairing the official extension host placement", async () => {
+    const stale =
+      "C:\\Users\\tester\\AppData\\Local\\codex-remote-bridge\\bin\\0.3.63-old\\codex-bridge-shim.exe";
+    const current =
+      "C:\\Users\\tester\\AppData\\Local\\codex-remote-bridge\\bin\\0.3.64-new\\codex-bridge-shim.exe";
+    mock.effective.set("chatgpt.cliExecutable", stale);
+    mock.global.set("chatgpt.cliExecutable", stale);
+    const manager = new OfficialSettingsManager(context());
+
+    await expect(manager.repairManagedExecutable(current)).resolves.toEqual({
+      changed: true,
+      reloadRequired: true,
+    });
+    expect(mock.effective.get("chatgpt.cliExecutable")).toBe(stale);
+    expect(mock.effective.get("remote.extensionKind")).toEqual({
+      "openai.chatgpt": ["ui"],
     });
   });
 });

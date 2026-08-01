@@ -18,6 +18,7 @@ import {
   bridgeShimRuntimeStatusPath,
   officialCodexRuntimePath,
 } from "../core/locations.js";
+import { takeOfficialExtensionHostPid } from "../core/official-shim-launcher.js";
 import type { BridgeConfig } from "../core/types.js";
 import {
   automaticCliInvocationArgs,
@@ -29,6 +30,10 @@ import {
 import { runExternalMcpServer } from "./external-mcp.js";
 import { parseMcpProxyInvocation } from "./mcp-proxy-invocation.js";
 import { OpenSshMcpRelay } from "./openssh-mcp-relay.js";
+import {
+  isOfficialShimLauncherInvocation,
+  runOfficialShimLauncher,
+} from "./official-shim-launcher.js";
 import { withRemoteCorePolicy } from "./local-core-policy.js";
 import { routeRemoteMcpServers } from "./remote-mcp.js";
 import { SharedAppServer } from "./shared-app-server.js";
@@ -177,6 +182,10 @@ function externalCliProgress(message: string): void {
 }
 
 async function main(): Promise<number> {
+  if (isOfficialShimLauncherInvocation()) {
+    return await runOfficialShimLauncher();
+  }
+  const extensionHostPid = takeOfficialExtensionHostPid();
   const args = process.argv.slice(2);
   const automaticArgs = automaticCliInvocationArgs(args, invocationNames());
   const attachArgs =
@@ -234,7 +243,7 @@ async function main(): Promise<number> {
   const localWorkspaceRoot = config ? undefined : (inheritedLocalWorkspaceRoot ?? undefined);
   const localWorkspaceContextFile = config
     ? undefined
-    : localWorkspaceContextPath(process.ppid);
+    : localWorkspaceContextPath(extensionHostPid);
   const codexExecutable = fallbackExecutable;
   assertExecutableIsNotShim(codexExecutable);
 
@@ -332,6 +341,7 @@ async function main(): Promise<number> {
     codexExecutable,
     config,
     controlDir,
+    extensionHostPid,
     localWorkspaceContextPath: localWorkspaceContextFile,
     localWorkspaceRoot,
     toolRouteInventory,

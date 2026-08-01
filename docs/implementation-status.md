@@ -252,6 +252,28 @@ Windows 原生 `npm run check` 通过：64 个测试文件通过、5 个跳过�
 `chatgpt.cliExecutable` 到新内容寻址路径并再自动重载一次；日志明确没有 Executor 安装。
 该项与旧描述符/PID 复用风险已进入根 README 活动 TODO，不计入本目标的冷初始化结论。
 
+`0.3.65` 关闭普通 Controller/Shim 更新的二次窗口重载项。`0.3.64` 候选曾把纯
+`chatgpt.cliExecutable` 修复改为不中途重载，但实机发现官方扩展会在 Controller 更新设置
+前按旧内容路径启动 Shim；该候选未提交。最终实现把官方扩展设置固定到
+`bin/official-launcher-v1/codex-bridge-launcher(.exe)`：Controller 每次激活安装当前内容
+寻址 Shim，并原子发布带 Extension Host PID、目标路径、完整 SHA-256 和时间戳的
+`current.json`。稳定 launcher 等待当前 Extension Host 代际指针、校验目标位于托管 `bin`
+且内容哈希一致后再启动；目标 Shim 继承原 Extension Host PID，使运行状态和本地上下文
+身份不被中间进程改变。launcher 本体的哈希由独立元数据固定，普通版本升级不会替换。
+
+Windows 原生 `npm run check` 通过：65 个测试文件通过、5 个跳过，319 项测试通过、25 项
+跳过；类型检查、构建、稳定 launcher 真实进程路由烟测和 Windows 构包均通过。最终候选
+手动重载一次后，旧 Extension Host `272444` 只退出一次，没有第二条退出或 Bridge
+`reloadWindow` 请求；新进程链为 Extension Host `295764` → 稳定 launcher `297172` →
+`0.3.65-d49076d74b129d40` Shim `304528`。构建、launcher 与活动目标的 SHA-256 均为
+`d49076d74b129d407ea037e8a11bf76c360ee9f21b2d2819b918d45112883b63`；运行状态保留
+`extensionHostPid=295764`，app-server 已初始化，Bridge 在 `10,146 ms` 内回到 `ready`。
+Remote Executor 保持 `0.2.21`，没有安装或升级重载。真实验收任务
+`019fbf5c-8eba-7f71-957d-fc267cbe7bd0` 经当前 Shim 创建并完成，远端主根上的
+`workspace_git_status` 在 `1,195 ms` 成功，最终回复 `ACCEPTANCE COMPLETE.`。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.65-windows-single-reload.md`。旧描述符/PID 复用风险
+仍保留为独立 README 活动 TODO。
+
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

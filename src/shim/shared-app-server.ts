@@ -104,6 +104,7 @@ export interface SharedAppServerOptions {
   input?: Readable;
   output?: Writable;
   errorOutput?: Writable;
+  extensionHostPid?: number;
   toolRouteInventory?: ToolRouteInventory;
   runtimeStatusPath?: string;
   spawnCodex?: (
@@ -351,7 +352,7 @@ export class SharedAppServer {
       workspaceRoot: this.#options.config.workspaceRoot,
       shimExecutable: scriptRuntime ? scriptEntry : process.execPath,
       nodeExecutable: scriptRuntime ? process.execPath : null,
-      extensionHostPid: process.ppid,
+      extensionHostPid: this.#options.extensionHostPid ?? process.ppid,
       shimPid: process.pid,
       shimStartedAtMs: this.#startedAtMs,
       running: true,

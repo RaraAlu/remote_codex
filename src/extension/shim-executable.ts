@@ -1,24 +1,29 @@
-import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type * as vscode from "vscode";
 import { BridgeError } from "../core/errors.js";
 import { chmodIfSupported } from "../core/file-permissions.js";
 import { bridgeStateDir } from "../core/locations.js";
+import {
+  bridgeShimExecutableName,
+  OFFICIAL_SHIM_LAUNCHER_DIRECTORY,
+  OFFICIAL_SHIM_LAUNCHER_METADATA,
+  OFFICIAL_SHIM_TARGET_POINTER,
+  officialShimLauncherName,
+  sha256File,
+  type OfficialShimTarget,
+} from "../core/official-shim-launcher.js";
+
+interface OfficialShimLauncherMetadata {
+  version: 1;
+  sha256: string;
+}
 
 export function packagedShimName(
   hostPlatform: NodeJS.Platform = process.platform,
 ): string {
-  if (hostPlatform === "win32") {
-    return "codex-bridge-shim.exe";
-  }
-  if (hostPlatform === "linux") {
-    return "codex-bridge-shim";
-  }
-  throw new BridgeError(
-    "INVALID_CONFIG",
-    `Codex Bridge does not support the local ${hostPlatform} extension host`,
-  );
+  return bridgeShimExecutableName(hostPlatform);
 }
 
 export async function installShimExecutable(
@@ -78,6 +83,139 @@ export async function installShimExecutable(
   return target;
 }
 
+export async function installOfficialShimLauncher(
+  context: vscode.ExtensionContext,
+  hostPlatform: NodeJS.Platform = process.platform,
+  stateDirectory = bridgeStateDir(),
+  extensionHostPid = process.pid,
+): Promise<string> {
+  const shimPath = await installShimExecutable(context, hostPlatform, stateDirectory);
+  const shimContent = await readFile(shimPath);
+  const shimSha256 = createHash("sha256").update(shimContent).digest("hex");
+  const launcherDirectory = join(
+    stateDirectory,
+    "bin",
+    OFFICIAL_SHIM_LAUNCHER_DIRECTORY,
+  );
+  const launcherPath = join(launcherDirectory, officialShimLauncherName(hostPlatform));
+  const metadataPath = join(launcherDirectory, OFFICIAL_SHIM_LAUNCHER_METADATA);
+  const pointerPath = join(launcherDirectory, OFFICIAL_SHIM_TARGET_POINTER);
+  await mkdir(launcherDirectory, { mode: 0o700, recursive: true });
+  await chmodIfSupported(launcherDirectory, 0o700, hostPlatform);
+
+  const [launcherContent, metadata] = await Promise.all([
+    readOptionalFile(launcherPath),
+    readOfficialLauncherMetadata(metadataPath),
+  ]);
+  if (launcherContent && metadata) {
+    const installedSha256 = createHash("sha256").update(launcherContent).digest("hex");
+    if (installedSha256 !== metadata.sha256) {
+      throw new BridgeError(
+        "INVALID_CONFIG",
+        "The stable official Codex launcher does not match its trusted content hash",
+        { launcherPath },
+      );
+    }
+  } else if (!launcherContent && metadata) {
+    throw new BridgeError(
+      "INVALID_CONFIG",
+      "The stable official Codex launcher is missing but its metadata remains",
+      { launcherPath },
+    );
+  } else if (launcherContent) {
+    const installedSha256 = createHash("sha256").update(launcherContent).digest("hex");
+    if (installedSha256 !== shimSha256) {
+      throw new BridgeError(
+        "INVALID_CONFIG",
+        "The existing stable official Codex launcher cannot be safely adopted",
+        { launcherPath },
+      );
+    }
+    await writeAtomicJson(metadataPath, { version: 1, sha256: installedSha256 });
+  } else {
+    await installImmutableLauncher(launcherPath, shimContent, hostPlatform);
+    const installedSha256 = await sha256File(launcherPath);
+    await writeAtomicJson(metadataPath, { version: 1, sha256: installedSha256 });
+  }
+  await chmodIfSupported(launcherPath, 0o700, hostPlatform);
+  await chmodIfSupported(metadataPath, 0o600, hostPlatform);
+
+  const pointer: OfficialShimTarget = {
+    version: 1,
+    extensionHostPid,
+    sha256: shimSha256,
+    shimPath,
+    updatedAtMs: Date.now(),
+  };
+  await writeAtomicJson(pointerPath, pointer);
+  await chmodIfSupported(pointerPath, 0o600, hostPlatform);
+  return launcherPath;
+}
+
+async function readOptionalFile(path: string): Promise<Buffer | null> {
+  try {
+    return await readFile(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function readOfficialLauncherMetadata(
+  path: string,
+): Promise<OfficialShimLauncherMetadata | null> {
+  const content = await readOptionalFile(path);
+  if (!content) {
+    return null;
+  }
+  try {
+    const value = JSON.parse(content.toString("utf8")) as Partial<OfficialShimLauncherMetadata>;
+    if (value.version === 1 && /^[0-9a-f]{64}$/.test(value.sha256 ?? "")) {
+      return { version: 1, sha256: value.sha256! };
+    }
+  } catch {
+    // Invalid managed metadata fails closed below.
+  }
+  throw new BridgeError(
+    "INVALID_CONFIG",
+    "The stable official Codex launcher metadata is invalid",
+    { path },
+  );
+}
+
+async function installImmutableLauncher(
+  launcherPath: string,
+  content: Buffer,
+  hostPlatform: NodeJS.Platform,
+): Promise<void> {
+  const temporary = `${launcherPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, content, { mode: 0o700 });
+    await chmodIfSupported(temporary, 0o700, hostPlatform);
+    try {
+      await link(temporary, launcherPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+    }
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+async function writeAtomicJson(path: string, value: unknown): Promise<void> {
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
 export function isBridgeShimPath(value: unknown): value is string {
   if (typeof value !== "string") {
     return false;
@@ -87,7 +225,9 @@ export function isBridgeShimPath(value: unknown): value is string {
   if (
     name !== "codex-bridge-shim" &&
     name !== "codex-bridge-shim.cjs" &&
-    name !== "codex-bridge-shim.exe"
+    name !== "codex-bridge-shim.exe" &&
+    name !== "codex-bridge-launcher" &&
+    name !== "codex-bridge-launcher.exe"
   ) {
     return false;
   }

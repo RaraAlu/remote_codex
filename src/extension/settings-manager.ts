@@ -29,6 +29,11 @@ export interface OfficialSettingsStatus {
   configured: boolean;
 }
 
+export interface ManagedExecutableRepairResult {
+  changed: boolean;
+  reloadRequired: boolean;
+}
+
 function snapshot(section: string, key: string): SettingSnapshot {
   const inspected = vscode.workspace.getConfiguration(section).inspect(key);
   return {
@@ -92,17 +97,19 @@ export class OfficialSettingsManager {
     );
   }
 
-  async repairManagedExecutable(shimPath: string): Promise<boolean> {
+  async repairManagedExecutable(shimPath: string): Promise<ManagedExecutableRepairResult> {
     const current = vscode.workspace.getConfiguration("chatgpt").get<string>("cliExecutable");
     const backup = await this.#loadBackup();
     const owned =
       isBridgeShimPath(current) ||
       Boolean(current && backup?.managedCliExecutable === current);
     if (!owned || this.status(shimPath).configured) {
-      return false;
+      return { changed: false, reloadRequired: false };
     }
+    const reloadRequired = !this.status(shimPath).extensionKind;
     await this.#ensureBackup(current);
-    return await this.#apply(shimPath);
+    const changed = await this.#apply(shimPath);
+    return { changed, reloadRequired: changed && reloadRequired };
   }
 
   async configure(shimPath: string): Promise<boolean> {

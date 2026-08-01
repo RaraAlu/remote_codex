@@ -56,7 +56,10 @@ import {
   planRemoteExecutorInstall,
   shouldRefreshRemoteExecutor,
 } from "./remote-executor-install.js";
-import { installShimExecutable } from "./shim-executable.js";
+import {
+  installOfficialShimLauncher,
+  installShimExecutable,
+} from "./shim-executable.js";
 import {
   reconcileExternalCliLauncher,
   reconcileExternalMcp,
@@ -346,11 +349,17 @@ export class BridgeController implements vscode.Disposable {
 
     if (plan.repairManagedExecutable) {
       try {
-        const shimPath = await installShimExecutable(this.#context);
-        if (await this.#settings.repairManagedExecutable(shimPath)) {
+        const shimPath = await installOfficialShimLauncher(this.#context);
+        const repair = await this.#settings.repairManagedExecutable(shimPath);
+        if (repair.reloadRequired) {
           this.#log(`migrated the managed Codex launcher to ${shimPath}; reloading the window`);
           await this.#reloadWindow();
           return;
+        }
+        if (repair.changed) {
+          this.#log(
+            `migrated the managed Codex launcher to ${shimPath}; continuing without another window reload`,
+          );
         }
       } catch (error) {
         const bridgeError = asBridgeError(error, "INVALID_CONFIG");
@@ -543,7 +552,7 @@ export class BridgeController implements vscode.Disposable {
     this.#state.transition("configuring");
     try {
       const config = this.#currentRemoteConfig();
-      const shimPath = await installShimExecutable(this.#context);
+      const shimPath = await installOfficialShimLauncher(this.#context);
       if (interactive) {
         const confirmation = await vscode.window.showWarningMessage(
           [
@@ -1266,7 +1275,7 @@ export class BridgeController implements vscode.Disposable {
 
     const codexExtension = vscode.extensions.getExtension("openai.chatgpt");
     const ownExtension = vscode.extensions.getExtension("zkbot.codex-vscode-remote-bridge");
-    const shimPath = await installShimExecutable(this.#context);
+    const shimPath = await installOfficialShimLauncher(this.#context);
     const controlDir = config
       ? bridgeRemoteControlDir(config.host, config.workspaceRoot)
       : bridgeControlDir();

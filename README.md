@@ -6,7 +6,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.63`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
+> 当前源码版本为 `0.3.65`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
 > `codex` 自动附着、显式 `codex-vscode.exe` TUI、外部 MCP、历史 thread 同步、无 rollout
 > 冷启动降级、停用恢复和 npm 升级恢复实测；官方 Remote SSH git watcher 的路径误判
 > 与重复告警也已完成可逆兼容修复和远端只读链路实测。Shim 现已把统一工具路由清单
@@ -15,6 +15,9 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 > 异步有序事件回传避免跨 Extension Host 重入等待，连续五次实测均在 `177–299 ms` 完成。
 > 外部 MCP 使用每连接唯一身份、主 app-server 就绪后发布网关，并对一次性冷初始化停滞
 > 进行有界重试；Windows 实机连续初始化为 `10 / 4 / 4 ms`，真实 MCP 调用无错误。
+> 官方扩展现在固定启动稳定的本机 launcher，由 launcher 按当前 Extension Host 代际选择
+> 并校验内容寻址 Shim；普通 Controller/Shim 更新实测只需一次用户重载即可运行新 Shim，
+> 不会再因 `chatgpt.cliExecutable` 内容路径变化触发第二次窗口重载。
 > 完整双平台
 > 门禁仍待处理。
 > 在双平台门禁完成前不发布 `0.4.0`，也不扩大支持声明。
@@ -35,6 +38,8 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 
 - Controller 是本地 `ui` 扩展，负责配置、审批、审计、资源映射和远程 Executor 部署。
 - Shim 代理官方扩展内置 app-server，并为 Remote SSH thread 注入 Bridge 工具和安全策略。
+- 官方扩展只配置稳定 launcher 路径；Controller 原子发布当前 Extension Host 代际、Shim
+  路径和完整 SHA-256，launcher 校验后再启动对应内容寻址 Shim。
 - Remote Executor 是远端 Workspace 扩展，只执行结构化、受根目录约束的操作。
 - 默认 `vscode-remote` 模式复用活动 Remote SSH transport；`openssh` 仅作为显式回退。
 - 官方扩展、内置 Codex、Controller、Shim 和 Executor 组成兼容集合，但版本值只用于
@@ -79,6 +84,8 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
    - Windows x64：`codex-remote-bridge-<version>-win32-x64.vsix`
 2. 使用 VS Code Remote SSH 打开一个远程工作区根目录。
 3. 等待 Bridge 自动配置、部署 Executor，并在必要时完成一次窗口重载。
+   普通 Controller/Shim 更新最多需要这一次用户重载；只有 Remote Executor 首装或升级
+   才保留独立的远端窗口自动重载。
 4. 状态栏可能先显示远端 transport 已就绪但仍在等待 Codex；只有 Shim 进程存活且
    官方 app-server 完成 `initialize` 后才显示 `Codex: local -> <host> (ready)`。
 5. 运行 `Codex Bridge: Run Diagnostics`，确认远端身份、工作区根和
@@ -243,9 +250,6 @@ Remote SSH 实机验证。完整门禁和量化指标见
 
 ### Windows 更新与外部会话生命周期
 
-- 消除普通 Controller/Shim 更新的二次窗口重载：当前内容寻址 Shim 更新会在用户手动
-  重载后再次迁移 `chatgpt.cliExecutable` 并自动重载。退出条件为普通更新只需一次用户
-  重载即可运行新 Shim，且 Remote Executor 首装或升级所需的独立自动重载保持不变。
 - 会话发现不能只按描述符 PID 是否存在判断存活；同时核对进程可执行路径和描述符
   `startedAtMs`，清理已退出或 PID 被复用的旧描述符。退出条件为多轮窗口重载后不会列出
   幽灵会话，也不会删除仍由匹配 Shim 进程拥有的活动描述符。

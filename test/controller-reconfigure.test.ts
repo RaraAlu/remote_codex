@@ -13,6 +13,8 @@ const mock = vi.hoisted(() => ({
   saveConfig: vi.fn(async () => undefined),
   showOpenDialog: vi.fn(async () => undefined),
   settingsConfigure: vi.fn(async () => true),
+  settingsHasManaged: vi.fn(() => false),
+  settingsRepair: vi.fn(async () => ({ changed: false, reloadRequired: false })),
   settingsUpdate: vi.fn(async () => undefined),
   showErrorMessage: vi.fn(),
   transportStart: vi.fn(async () => {
@@ -104,11 +106,13 @@ vi.mock("../src/extension/remote-context.js", () => ({
 vi.mock("../src/extension/settings-manager.js", () => ({
   OfficialSettingsManager: class {
     configure = mock.settingsConfigure;
-    hasManagedExecutable = vi.fn(() => false);
+    hasManagedExecutable = mock.settingsHasManaged;
+    repairManagedExecutable = mock.settingsRepair;
   },
 }));
 
 vi.mock("../src/extension/shim-executable.js", () => ({
+  installOfficialShimLauncher: mock.installShim,
   installShimExecutable: mock.installShim,
 }));
 
@@ -139,6 +143,9 @@ describe("BridgeController restored-state configuration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mock.registeredCommands.clear();
+    mock.settingsConfigure.mockResolvedValue(true);
+    mock.settingsHasManaged.mockReturnValue(false);
+    mock.settingsRepair.mockResolvedValue({ changed: false, reloadRequired: false });
   });
 
   it("restores UI settings and reloads before resolving the official runtime", async () => {
@@ -178,6 +185,29 @@ describe("BridgeController restored-state configuration", () => {
 
     expect(mock.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
     expect(mock.showErrorMessage).not.toHaveBeenCalled();
+    expect(mock.officialExtension).not.toHaveBeenCalled();
+  });
+
+  it("continues startup without another reload after a managed Shim content update", async () => {
+    mock.settingsHasManaged.mockReturnValue(true);
+    mock.settingsRepair.mockResolvedValue({ changed: true, reloadRequired: false });
+    const controller = new BridgeController(context());
+
+    await controller.initialize();
+
+    expect(mock.settingsRepair).toHaveBeenCalledWith("/managed/codex-bridge-shim.cjs");
+    expect(mock.executeCommand).not.toHaveBeenCalled();
+    expect(mock.officialExtension).toHaveBeenCalledTimes(1);
+  });
+
+  it("still reloads before startup when the official extension host placement changes", async () => {
+    mock.settingsHasManaged.mockReturnValue(true);
+    mock.settingsRepair.mockResolvedValue({ changed: true, reloadRequired: true });
+    const controller = new BridgeController(context());
+
+    await controller.initialize();
+
+    expect(mock.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
     expect(mock.officialExtension).not.toHaveBeenCalled();
   });
 
