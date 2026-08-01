@@ -1,6 +1,6 @@
 # 实施状态
 
-更新日期：2026-07-31
+更新日期：2026-08-02
 
 ## 能力边界复核
 
@@ -153,6 +153,19 @@ Windows 使用真实本机控制目录作为 app-server runtime root，远端 PO
 忽略无关事件。最终候选重载后用户确认稳定，连续 20 秒观察期间 Bridge 日志字节数和最后
 写入时间均未变化，没有重复升级或重配置。完整证据见
 `docs/acceptance/2026-07-31-release-0.3.52-executor-package-reconciliation.md`。
+`0.3.53` 至 `0.3.58` 收口 Windows 外部 CLI 显式附着链路。Windows PATH 解析现在优先
+选择 `PATHEXT` 对应的 npm `codex.cmd`，`.cmd` / `.bat` 统一通过安全的 `ComSpec`
+调用；托管 `codex-vscode.exe`、外部 MCP 注册与真实 `tools/list` 已通过。临时 thread
+改用 `thread/resume(excludeTurns=true)` 判定 rollout；官方 UI 在窗口重载后通过
+`thread/read` 或成功 turn 恢复历史任务时，共享网关会用请求内 thread ID 更新活动会话。
+显式 `--thread-id` 不再被描述符中的旧活动 thread 提前过滤。
+
+最终 `0.3.58` 还修复冷启动 initialize 超时被误当成可恢复的问题：超时客户端立即关闭
+并重试一次，只有实际 resume 成功才进入恢复，明确无 rollout 才启动同步新 thread，
+其他错误上抛。真实 Windows 单命令样本首连在 `30,011 ms` 超时后立即清理，重试
+initialize 为 `1 ms`，resume 在 `73 ms` 内明确失败，随后 TUI `thread/start` 为
+`94 ms` 并正常进入；退出后相关外部进程为 0。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.58-windows-external-cli.md`。
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

@@ -6,9 +6,10 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.52` 候选。Windows x64 Controller 已在真实 Remote SSH 窗口完成
-> 配套 Executor 版本检测、自动升级和自动重载验证；官方任务已到达当前 Shim，远端文件、
-> Git 与命令操作均已通过审计。完整双平台门禁仍待补测。
+> 当前源码版本为 `0.3.58`。Windows 已完成 npm `codex.cmd` 解析、显式
+> `codex-vscode.exe` TUI、外部 MCP、历史 thread 同步、无 rollout 冷启动降级和退出
+> 清理实测。Windows 普通 `codex` 同名自动入口、官方 Remote SSH git watcher 噪声及
+> 完整双平台门禁仍待处理。
 > 在双平台门禁完成前不发布 `0.4.0`，也不扩大支持声明。
 
 ## 工作原理
@@ -121,13 +122,16 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 
 ## CLI 介入
 
-启用自动 CLI 集成后，无参数 `codex` 只会自动附着工作目录与当前目录完全一致的活动
+在 POSIX 上启用自动 CLI 集成后，无参数 `codex` 只会自动附着工作目录与当前目录完全一致的活动
 VS Code thread。当前目录没有匹配会话时透传官方 Codex CLI，不会被其他工作区的活动
 会话拦截；同一目录存在多个匹配会话时失败关闭，可使用：
 
 ```bash
 codex-vscode --session-pid <pid>
 ```
+
+Windows 不替换 npm 管理的 `codex`、`codex.cmd` 或 `codex.ps1`；当前使用安装在
+`%LOCALAPPDATA%\codex-remote-bridge\bin\codex-vscode.exe` 的显式入口。
 
 介入能力包括列出对话、读取完整 turn、发起新 turn 或 steer，以及中断运行中的 turn。
 已经启动的旧 CLI 进程不能热切换 app-server，需要退出后重新启动。停用集成后也应
@@ -250,6 +254,28 @@ Remote SSH 实机验证。完整门禁和量化指标见
 
 ### Windows x64 与 0.4.0
 
+- 为 Windows 设计可回滚且不破坏 npm 升级的普通 `codex` 同名自动入口，同时管理
+  `codex`、`codex.cmd` 与 `codex.ps1`，验证唯一同目录会话自动附着、无匹配会话透传、
+  歧义失败关闭、停用恢复和 npm 升级恢复；当前已验证的显式入口保持
+  `codex-vscode.exe`。
+- 处理官方扩展 `26.727.40816` 在 Windows UI Extension Host 中每 5 秒把 Remote SSH
+  POSIX 根当作 `\\root\\...` 本机路径监视并产生 `git-init-watcher ENOENT` 的问题；
+  不得通过伪造工作区 URI 规避，退出条件是重复警告消失且远端 Git/文件/命令链路不退化。
 - 在 Windows x64 原生环境完成 Extension Host、Shim、官方任务、本地窗口与 Remote SSH
   主链路验证，独立记录 Windows 日志、审计和量化结果，不以跨平台构包替代实机证据。
 - Windows 验证通过并完成统一发布门禁前不发布 `0.4.0`。
+
+### 0.4.0 之后：自动安装终端捕获 Skill 与多终端补全
+
+- 优先复用经过安全审计、许可证核验和版本固定的开源终端捕获 Skill；首个候选为 MIT 许可的
+  [`popbones/tmux.skill`](https://github.com/popbones/tmux.skill)，使用其持久 tmux 会话、命令发送
+  和 pane 输出捕获能力，不重复实现已有的 Unix/tmux 工作流。
+- 在用户明确同意后自动安装、升级或卸载相关 Skill，记录来源、固定提交、内容哈希和许可证，
+  提供离线失败降级与回滚；自动 Hook 必须经过 Codex 原生信任审查，不得静默修改全局配置、
+  自动信任第三方脚本或绕过 Hook 信任检查。
+- 在复用 Skill 不能覆盖的范围内补全 PowerShell、`cmd.exe`、Git Bash、WSL/Linux shell 和
+  VS Code 集成终端，统一会话身份、工作目录、命令、标准输出、标准错误、退出码、生命周期及
+  本地/Remote SSH 来源模型，并提供可配置、可关闭、可恢复的自动捕获 Hook。
+- 退出条件：完成 Skill 自动安装、固定版本升级、卸载、回滚和供应链校验测试；各类受支持终端
+  均完成自动捕获、手动触发、禁用与恢复测试，并在本地窗口和 Remote SSH 窗口验证来源标记、
+  输出完整性、退出码、敏感信息脱敏、交互兼容性和失败降级行为。

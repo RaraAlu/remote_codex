@@ -1,10 +1,11 @@
 # 兼容矩阵
 
-更新日期：2026-07-31
+更新日期：2026-08-02
 
 当前源码是“官方扩展内置运行时”候选，本次实测来源为
 `openai.chatgpt@26.727.40816` 及其内置 Codex `0.146.0-alpha.9.2`。Windows x64 已完成
-Executor 配套版本自动同步、官方新任务、当前 Shim 和远端项目操作实测；既有 Linux x64
+Executor 配套版本自动同步、官方新任务、当前 Shim、远端项目操作，以及 `0.3.58`
+显式外部 CLI/MCP、历史 thread 恢复和无 rollout 冷启动降级实测；既有 Linux x64
 候选包、普通本地外部 `full-access`、Remote SSH 外部 CLI、固定远端工具和 CodeGraph
 链路证据继续有效。完整双平台发布门禁仍待补测。Bridge 不固定官方扩展版本号；系统
 Codex CLI 仅作为可选外部客户端按能力探测，不固定版本，也不替代官方扩展内置运行时。
@@ -15,10 +16,10 @@ Codex CLI 仅作为可选外部客户端按能力探测，不固定版本，也�
 | --- | --- | --- | --- |
 | VS Code | `1.129.1`（Windows x64）；`1.130.0`（既有 Linux x64 候选环境） | 扩展引擎最低 `^1.96.2` | Windows 官方任务和既有 Linux 官方面板/外部 CLI Remote SSH 任务通过 |
 | 官方 Codex 扩展 | 本次探测 `openai.chatgpt@26.727.40816` | 固定扩展 ID，不固定版本；使用 VS Code 当前实际加载版本 | Windows Remote SSH 官方新任务到达当前 Shim，并完成远端文件、Git 与命令操作；普通本地和既有外部 CLI 链路通过 |
-| Bridge Controller | `0.3.52` Windows x64 候选；`0.3.51` Linux Remote SSH 候选；`0.2.7` Windows 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | `0.3.52` 已安装在 Windows x64，并在 `xj-member-42028` 完成 Executor 自动升级与重载、Windows app-server 路径适配、官方任务及远端项目操作；完整双平台门禁待补测 |
+| Bridge Controller | `0.3.58` Windows x64 候选；`0.3.51` Linux Remote SSH 候选；`0.2.7` Windows 支持基线 | 同一扩展 ID；Linux/Windows 必须原生构建并以受控 stage 收集，禁止异平台启动器交叉构包 | `0.3.58` 已安装在 Windows x64；在 `0.3.52` 远端主链路基础上完成显式外部 CLI/MCP、历史 thread 恢复、无 rollout 冷启动降级与清理；完整双平台门禁待补测 |
 | Remote Executor | `0.2.20`，诊断协议 12，Linux x64 Workspace 候选 | Workspace 扩展；每次初始化比较远端扩展清单实际包版本与 Controller 内嵌配套版本，不一致时通过活动 Remote SSH 通道自动部署并重载；ping 仍按所需能力集合验收，不按包版本或协议号门禁 | Windows Controller 实机将未上报包版本、运行版本 `0.2.19` 的兼容 Executor 自动替换为 `0.2.20`；重载后扩展上下文回报包版本与运行版本均为 `0.2.20`，未形成重复升级循环 |
 | 官方扩展内置 Codex/app-server | 本次探测 `0.146.0-alpha.9.2` | 只从当前官方扩展安装目录启动；版本仅作诊断和协议快照索引 | Windows 直接参数探针复现并修复 `AbsolutePathBuf` 错误；真实官方 Remote SSH task、普通本地和既有外部 CLI thread 通过 |
-| 系统 Codex CLI | 本次探针 `0.145.0`，不固定 | 仅用于 MCP、远程外部客户端和 POSIX 普通入口；运行时探测所需参数，官方扩展内置 app-server 仍是唯一服务端 | `0.3.43` 普通 `codex` 当前目录无匹配时真实透传；`codex-vscode` Remote SSH 多轮实机通过；Windows 待验证 |
+| 系统 Codex CLI | 本次 Windows 探针 `0.146.0`，不固定 | 仅用于 MCP、外部客户端和 POSIX 普通入口；运行时探测所需参数，官方扩展内置 app-server 仍是唯一服务端 | Windows `codex.cmd` 解析、MCP 与显式 `codex-vscode.exe` 已通过；Windows 不替换 npm 同名 wrapper，普通 `codex` 自动附着仍限 POSIX 托管 symlink |
 | Remote SSH | `0.124.0` | 使用 `remote.extensionKind` 探针设置 | 活动 transport、远程主根、远端工具和 CodeGraph 已通过 |
 | OpenSSH 客户端 | Linux `9.6p1`；Windows 支持基线 `9.5p2` | 严格主机校验、user/port/IdentityFile；ControlMaster 仅 Linux 启用 | 本次未触发 OpenSSH 回退实机链路 |
 
@@ -64,6 +65,8 @@ Codegraph MCP 工具身份和真实 `codegraph_explore` 见
 `docs/acceptance/2026-07-28-release-0.3.46-remote-mcp-tool-guidance.md`；当前 Windows
 Executor 同步、任务创建和稳定性证据见
 `docs/acceptance/2026-07-31-release-0.3.52-executor-package-reconciliation.md`。
+Windows 外部 CLI/MCP 与无 rollout 冷启动证据见
+`docs/acceptance/2026-08-02-release-0.3.58-windows-external-cli.md`。
 
 当前协议文件位于 `protocol/0.146.0-alpha.3/`。`ServerRequest.json` 的方法集合由自动化测试与
 Shim 的已知请求白名单逐项比对；出现新请求时测试失败，而不是静默转发潜在副作用。
