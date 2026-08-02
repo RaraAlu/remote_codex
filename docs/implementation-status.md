@@ -341,6 +341,24 @@ launcher 元数据的原子替换只在 Windows 遇到 `EPERM`、`EACCES` 或 `E
 的指针替换结论。完整证据见
 `docs/acceptance/2026-08-02-release-0.3.68-windows-atomic-pointer.md`。
 
+`0.3.69` 关闭 Windows Remote SSH 中 Copilot Chat 抢占远端 Extension Host 的慢加载项。
+VS Code `1.131.0` 内置的 `GitHub.copilot-chat` 没有声明固定 `extensionKind`，现场因此把
+它放到远端，并由 `copilotcli` 或 `copilot-cloud-agent` 在 Executor 前激活；单纯关闭
+后台 CLI 会话不能阻止另一会话入口再次激活。Bridge 现在把官方 Codex 与 Copilot Chat
+都固定到本机 UI Extension Host，不停用 Copilot；设置备份升级为 v3，分别保存并恢复两项
+原值，同时保留其他扩展后来增加的映射，v1/v2 备份会迁移到新格式。
+
+完整 `npm run check` 通过：67 个测试文件通过、5 个跳过，336 项测试通过、25 项跳过；
+类型检查、构建、稳定 launcher 烟测和 Windows 构包均成功。安装精确 Windows VSIX 后，
+三次普通重载的 Executor 能力探测为 `402 / 367 / 568 ms`，P50 为 `402 ms`、最大值为
+`568 ms`；三轮 `configuring -> ready` 为 `1,074 / 1,260 / 1,691 ms`，均无 Remote
+Extension Host 无响应、额外自动重载或远端 Copilot 文件，活动 Shim 均为 `0.3.69`，
+远端 Extension Host 的 HTTP/HTTPS/ALL proxy 变量计数保持 0。随后官方面板新建任务
+`019fbff0-dc88-75c0-a03a-0a029689f78e` 经当前 Shim 完成 `workspace_git_status`；审计记录
+`clientSource=vscode`、`target=remote`、`rootId=remote-primary`，总耗时 `1,181 ms`，没有
+本地项目回退。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.69-windows-copilot-ui-placement.md`。
+
 阶段 2B 已通过官方 app-server 参数探针，并用新候选 Shim 复用活动 VS Code transport
 完成 `remote_exec(["pwd"])` 回环；线程和 turn 都收到唯一远程主根，原有上下文未被
 覆盖，审计明确区分远程主根和本地控制目录。阶段 2C 已在候选 Shim 阻断 25 个已知

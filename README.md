@@ -6,7 +6,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.68`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
+> 当前源码版本为 `0.3.69`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
 > `codex` 自动附着、显式 `codex-vscode.exe` TUI、外部 MCP、历史 thread 同步、无 rollout
 > 冷启动降级、停用恢复和 npm 升级恢复实测；官方 Remote SSH git watcher 的路径误判
 > 与重复告警也已完成可逆兼容修复和远端只读链路实测。Shim 现已把统一工具路由清单
@@ -21,6 +21,8 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 > Remote SSH 冷启动期间会明确区分“窗口已打开”和“Remote Extension Host 已响应”：
 > 状态栏、日志、审计和诊断记录 Executor 能力探测阶段、次数与耗时，不会提前伪报
 > `ready`。
+> 官方 Codex 与内置 Copilot Chat 固定在本机 UI Extension Host，避免 AI 界面扩展抢占
+> 远端 Extension Host；Bridge 会逐项备份并可恢复原有扩展位置设置。
 > 外部会话描述符同时绑定 Shim PID、真实进程启动时间和可执行文件路径；会话发现会清理
 > 已退出或 PID 已被复用的旧描述符，同时保留仍由匹配 Shim 进程拥有的活动会话。
 > 完整双平台
@@ -101,6 +103,10 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 关闭 `codexRemoteBridge.autoInitialize` 后，可以使用 Configure 和 Start 命令手动
 控制。停用前应执行 `Codex Bridge: Restore Official Codex Settings`，恢复 Bridge
 接管过的官方设置。
+
+Bridge 会把 `openai.chatgpt` 与 VS Code 内置的 `GitHub.copilot-chat` 固定到本机 UI
+Extension Host，避免它们占用远端 Extension Host；两项 `remote.extensionKind` 原值分别
+备份，恢复命令不会覆盖其他扩展后来增加的映射。
 
 ## 常用命令
 
@@ -252,16 +258,6 @@ Remote SSH 实机验证。完整门禁和量化指标见
   工具；工作区、进程和项目文件操作实际落在授权远端根，本机或云端工具保持可用且位置
   明确；所有工具都有可诊断的有效路由或真实不兼容原因，Linux x64 与 Windows x64
   分别完成发布门禁，不再因参数形状或缺少 `target` / `rootId` 产生模型侧误拒绝。
-
-### Windows Remote SSH 更新环境
-
-- 本机 VS Code 与远端中文语言包已对齐到 `1.131.0` / `1.131.2026072717`。远端失效的
-  `127.0.0.1:32081` HTTP/HTTPS/ALL proxy 已在保留系统配置备份后停用；但当前复用的远端
-  VS Code Server 早于配置清理启动，进程环境仍继承该代理。后续两次普通重载没有语言包
-  重复更新或额外自动重载，但 Remote Extension Host 分别无响应 `1,009 ms` / `1,474 ms`，
-  Executor 能力探测为 `4,155 ms` / `5,009 ms`。连续稳定门禁已重置为 0/3；退出条件为一次性
-  重启远端 VS Code Server 以刷新进程环境，再完成三次普通窗口重载，三次均无重复更新、
-  无响应或额外自动重载，且能力探测保持低于 2 秒。
 
 ### Codex 原生上下文入口
 

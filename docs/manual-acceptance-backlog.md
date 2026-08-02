@@ -495,6 +495,16 @@ Host 无响应约 4–5 秒，并把 Executor 激活排队到约 8.9 秒。远�
 代理并使本轮 Executor 探测耗时 `9,515 ms`，继续由 Windows 更新环境门禁跟踪。完整证据见
 `docs/acceptance/2026-08-02-release-0.3.68-windows-atomic-pointer.md`。
 
+`0.3.69` 进一步关闭 Windows 更新环境门禁。现场确认远端代理刷新后剩余的主要阻塞来自
+内置 `GitHub.copilot-chat`：`copilotcli` 和 `copilot-cloud-agent` 都可能令它在远端先于
+Executor 激活。Bridge 现将 Copilot Chat 与官方 Codex 一并固定到本机 UI Extension Host，
+不关闭 Copilot 功能，并以 v3 快照逐项恢复原设置。精确候选连续三次普通重载的 Executor
+能力探测为 `402 / 367 / 568 ms`，三次均无远端 Copilot、Extension Host 无响应、额外自动
+重载或代理变量。精确候选的新官方任务又以 `target=remote`、`rootId=remote-primary` 完成
+`workspace_git_status`，总耗时 `1,181 ms`，没有本地项目回退；该 Windows 慢加载项已完成
+3/3，不再作为独立发布阻塞。完整证据见
+`docs/acceptance/2026-08-02-release-0.3.69-windows-copilot-ui-placement.md`。
+
 - 在 Windows x64 原生执行依赖安装、类型检查、测试、构建、SEA Shim 冒烟和构包。
 - 在 Windows 执行 `npm run package:stage`，与同版本 Linux stage 一并运行
   `npm run package:collect -- <linux-stage-dir> <windows-stage-dir>` 和

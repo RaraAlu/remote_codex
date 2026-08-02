@@ -38,8 +38,9 @@
   `-O exit` 并清理。Windows 不启用 ControlMaster，避免依赖不稳定的本地 socket 语义。
 - 自动初始化只接受当前 Remote SSH 窗口中唯一的远程根目录，不在本地窗口或多根目录
   场景猜测目标；用户打开该单根目录即作为只读访问范围选择。
-- 首次接管官方设置前保存原值；只记录 Bridge 实际管理的 `openai.chatgpt` 映射，恢复
-  时保留其他扩展后来发生的设置变化。恢复命令同时关闭 `autoInitialize`。
+- 首次接管官方设置前保存原值；分别记录 Bridge 实际管理的 `openai.chatgpt` 和
+  `GitHub.copilot-chat` 映射，恢复时保留其他扩展后来发生的设置变化。恢复命令同时关闭
+  `autoInitialize`。
 - 结构化命令参数经过 POSIX 单引号转义；用户输入不能改变远端 Shell 参数边界。
 - Shim 在改写前按线程记录官方权限模式；`full-access` 或 `approvalPolicy=never` 自动
   放行远程命令，其他模式使用绑定单个调用 ID 的官方命令审批。

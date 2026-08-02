@@ -593,6 +593,7 @@ export class BridgeController implements vscode.Disposable {
             `SSH endpoint: ${config.sshUser ? `${config.sshUser}@` : ""}${config.host}${config.sshPort ? `:${config.sshPort}` : ""}`,
             `chatgpt.cliExecutable: ${shimPath}`,
             "remote.extensionKind.openai.chatgpt: [ui]",
+            "remote.extensionKind.GitHub.copilot-chat: [ui]",
             "Previous global values will be backed up for restoration.",
           ].join("\n"),
           { modal: true },

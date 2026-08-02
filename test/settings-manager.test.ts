@@ -61,13 +61,17 @@ describe("OfficialSettingsManager", () => {
 
   it("does not rewrite or back up settings that are already effective", async () => {
     mock.effective.set("chatgpt.cliExecutable", "/extension/shim.cjs");
-    mock.effective.set("remote.extensionKind", { "openai.chatgpt": ["ui"] });
+    mock.effective.set("remote.extensionKind", {
+      "openai.chatgpt": ["ui"],
+      "GitHub.copilot-chat": ["ui"],
+    });
     const manager = new OfficialSettingsManager(context());
 
     await expect(manager.configure("/extension/shim.cjs")).resolves.toBe(false);
     expect(manager.status("/extension/shim.cjs")).toEqual({
       cliExecutable: true,
       extensionKind: true,
+      copilotExtensionKind: true,
       configured: true,
     });
     expect(mock.updates).toEqual([]);
@@ -86,12 +90,14 @@ describe("OfficialSettingsManager", () => {
     expect(mock.effective.get("remote.extensionKind")).toEqual({
       example: ["workspace"],
       "openai.chatgpt": ["ui"],
+      "GitHub.copilot-chat": ["ui"],
     });
     await expect(manager.configure("/extension/shim.cjs")).resolves.toBe(true);
     expect(manager.status("/extension/shim.cjs").configured).toBe(true);
     expect(mock.effective.get("remote.extensionKind")).toEqual({
       example: ["workspace"],
       "openai.chatgpt": ["ui"],
+      "GitHub.copilot-chat": ["ui"],
     });
     await expect(manager.configure("/extension/shim.cjs")).resolves.toBe(false);
     await expect(manager.restore()).resolves.toBe(true);
@@ -112,10 +118,12 @@ describe("OfficialSettingsManager", () => {
     mock.effective.set("remote.extensionKind", {
       example: ["workspace"],
       "openai.chatgpt": ["ui"],
+      "GitHub.copilot-chat": ["ui"],
     });
     mock.global.set("remote.extensionKind", {
       example: ["workspace"],
       "openai.chatgpt": ["ui"],
+      "GitHub.copilot-chat": ["ui"],
     });
     const manager = new OfficialSettingsManager(context());
 
@@ -135,6 +143,7 @@ describe("OfficialSettingsManager", () => {
     expect(mock.effective.has("chatgpt.cliExecutable")).toBe(false);
     expect(mock.effective.get("remote.extensionKind")).toEqual({
       example: ["workspace"],
+      "GitHub.copilot-chat": ["ui"],
       later: ["ui"],
     });
   });
@@ -155,6 +164,47 @@ describe("OfficialSettingsManager", () => {
     expect(mock.effective.get("chatgpt.cliExecutable")).toBe(stale);
     expect(mock.effective.get("remote.extensionKind")).toEqual({
       "openai.chatgpt": ["ui"],
+      "GitHub.copilot-chat": ["ui"],
+    });
+  });
+
+  it("migrates a v2 backup and restores a preexisting Copilot placement", async () => {
+    const managed = "C:\\managed\\codex-bridge-shim.exe";
+    mock.effective.set("chatgpt.cliExecutable", managed);
+    mock.global.set("chatgpt.cliExecutable", managed);
+    mock.effective.set("remote.extensionKind", {
+      example: ["workspace"],
+      "openai.chatgpt": ["ui"],
+      "GitHub.copilot-chat": ["workspace"],
+    });
+    mock.global.set("remote.extensionKind", {
+      example: ["workspace"],
+      "openai.chatgpt": ["ui"],
+      "GitHub.copilot-chat": ["workspace"],
+    });
+    mock.extensionState.set("codexRemoteBridge.officialSettingsBackup.v2", {
+      version: 2,
+      chatgptCliExecutable: { hasGlobalValue: false, value: undefined },
+      remoteExtensionKindHadGlobalValue: true,
+      remoteCodexExtensionKind: { hasGlobalValue: false, value: undefined },
+      managedCliExecutable: managed,
+    });
+    const manager = new OfficialSettingsManager(context());
+
+    await expect(manager.configure(managed)).resolves.toBe(true);
+    expect(mock.effective.get("remote.extensionKind")).toEqual({
+      example: ["workspace"],
+      "openai.chatgpt": ["ui"],
+      "GitHub.copilot-chat": ["ui"],
+    });
+    expect(mock.extensionState.has("codexRemoteBridge.officialSettingsBackup.v2")).toBe(false);
+    expect(mock.extensionState.has("codexRemoteBridge.officialSettingsBackup.v3")).toBe(true);
+
+    await expect(manager.restore()).resolves.toBe(true);
+    expect(mock.effective.has("chatgpt.cliExecutable")).toBe(false);
+    expect(mock.effective.get("remote.extensionKind")).toEqual({
+      example: ["workspace"],
+      "GitHub.copilot-chat": ["workspace"],
     });
   });
 });

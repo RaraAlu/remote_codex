@@ -165,3 +165,5 @@ Windows Remote SSH 冷启动就绪阶段、Executor 能力探测耗时和慢启�
 `docs/acceptance/2026-08-02-release-0.3.67-windows-session-identity.md`；远端失效代理定位、
 可逆清理和首轮低于 2 秒的重载结果见
 `docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation.md`。
+Windows 内置 Copilot Chat 本机 UI 放置、三次稳定重载和低于 2 秒的就绪结果见
+`docs/acceptance/2026-08-02-release-0.3.69-windows-copilot-ui-placement.md`。
