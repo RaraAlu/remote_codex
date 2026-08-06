@@ -38,7 +38,7 @@ function parseWindowsIdentities(raw: string): Map<number, ProcessIdentity> {
       !Number.isSafeInteger(item.pid) ||
       item.pid <= 0 ||
       typeof item.executablePath !== "string" ||
-      !isAbsolute(item.executablePath) ||
+      !win32.isAbsolute(item.executablePath) ||
       typeof item.startedAtMs !== "number" ||
       !Number.isFinite(item.startedAtMs)
     ) {
@@ -169,9 +169,8 @@ export function processExecutablePathsEqual(
   right: string,
   hostPlatform: NodeJS.Platform = process.platform,
 ): boolean {
-  const normalizedLeft = resolve(left);
-  const normalizedRight = resolve(right);
-  return hostPlatform === "win32"
-    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
-    : normalizedLeft === normalizedRight;
+  if (hostPlatform === "win32") {
+    return win32.resolve(left).toLowerCase() === win32.resolve(right).toLowerCase();
+  }
+  return resolve(left) === resolve(right);
 }

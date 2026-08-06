@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve, win32 } from "node:path";
 import { bridgeExternalCliDir } from "../core/locations.js";
 import {
   inspectProcessIdentities,
@@ -23,6 +23,7 @@ const LEGACY_EXECUTABLE_NAMES = new Set([
 function parseDescriptor(
   value: unknown,
   directory: string,
+  hostPlatform: NodeJS.Platform,
 ): ExternalCliSessionDescriptor {
   if (
     !isRecord(value) ||
@@ -44,7 +45,10 @@ function parseDescriptor(
     value.workspaceRoot.length === 0 ||
     ("threadId" in value && typeof value.threadId !== "string") ||
     ("executablePath" in value &&
-      (typeof value.executablePath !== "string" || !isAbsolute(value.executablePath))) ||
+      (typeof value.executablePath !== "string" ||
+        !(hostPlatform === "win32"
+          ? win32.isAbsolute(value.executablePath)
+          : isAbsolute(value.executablePath)))) ||
     (value.version === 2 && typeof value.executablePath !== "string")
   ) {
     throw new TypeError("Invalid external CLI session descriptor");
@@ -89,7 +93,11 @@ function descriptorMatchesProcess(
       hostPlatform,
     );
   }
-  return LEGACY_EXECUTABLE_NAMES.has(basename(identity.executablePath).toLowerCase());
+  const executableName =
+    hostPlatform === "win32"
+      ? win32.basename(identity.executablePath)
+      : basename(identity.executablePath);
+  return LEGACY_EXECUTABLE_NAMES.has(executableName.toLowerCase());
 }
 
 async function removeDescriptorIfUnchanged(path: string, expected: string): Promise<void> {
@@ -150,7 +158,7 @@ export async function discoverExternalCliSessions(
       const path = join(directory, name);
       const raw = await readFile(path, "utf8");
       candidates.push({
-        descriptor: parseDescriptor(JSON.parse(raw) as unknown, directory),
+        descriptor: parseDescriptor(JSON.parse(raw) as unknown, directory, hostPlatform),
         path,
         raw,
       });

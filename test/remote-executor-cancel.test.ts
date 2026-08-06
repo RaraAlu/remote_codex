@@ -70,6 +70,13 @@ function request(
   };
 }
 
+function extensionContext(): never {
+  return {
+    extension: { packageJSON: { version: "0.2.21" } },
+    subscriptions: [],
+  } as never;
+}
+
 async function completion(id: string): Promise<RemoteExecutionCompletedEvent> {
   let found: RemoteExecutionCompletedEvent | undefined;
   await vi.waitFor(() => {
@@ -92,7 +99,7 @@ describe.skipIf(process.platform === "win32")("Remote Executor operation ledger"
   it("binds cancel to the active execute request and returns CANCELLED", async () => {
     workspace = await realpath(await mkdtemp(join(tmpdir(), "codex-remote-cancel-")));
     mock.workspaceRoot = workspace;
-    activate({ subscriptions: [] } as never);
+    activate(extensionContext());
     const execute = mock.commands.get(REMOTE_EXECUTOR_COMMAND);
     expect(execute).toBeTypeOf("function");
 
@@ -148,7 +155,7 @@ describe.skipIf(process.platform === "win32")("Remote Executor operation ledger"
   it("stops and forgets every process owned by the remote workspace", async () => {
     workspace = await realpath(await mkdtemp(join(tmpdir(), "codex-remote-stop-")));
     mock.workspaceRoot = workspace;
-    activate({ subscriptions: [] } as never);
+    activate(extensionContext());
     const execute = mock.commands.get(REMOTE_EXECUTOR_COMMAND);
     expect(execute).toBeTypeOf("function");
 
@@ -227,7 +234,7 @@ describe.skipIf(process.platform === "win32")("Remote Executor operation ledger"
   it("replays a completed idempotency key without repeating its side effect", async () => {
     workspace = await realpath(await mkdtemp(join(tmpdir(), "codex-remote-ledger-")));
     mock.workspaceRoot = workspace;
-    activate({ subscriptions: [] } as never);
+    activate(extensionContext());
     const execute = mock.commands.get(REMOTE_EXECUTOR_COMMAND);
     expect(execute).toBeTypeOf("function");
     const effectsPath = join(workspace, "effects.log");

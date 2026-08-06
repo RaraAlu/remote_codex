@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, win32 } from "node:path";
 import {
   OFFICIAL_EXTENSION_HOST_PID_ENV,
   OFFICIAL_SHIM_TARGET_POINTER,
@@ -22,8 +22,10 @@ export function isOfficialShimLauncherInvocation(
   executablePath = process.execPath,
   hostPlatform: NodeJS.Platform = process.platform,
 ): boolean {
+  const executableName =
+    hostPlatform === "win32" ? win32.basename(executablePath) : basename(executablePath);
   return (
-    basename(executablePath).toLowerCase() ===
+    executableName.toLowerCase() ===
     officialShimLauncherName(hostPlatform).toLowerCase()
   );
 }

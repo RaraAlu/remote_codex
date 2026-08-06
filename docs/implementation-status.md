@@ -747,6 +747,12 @@ Executor 实现和协议未修改，继续保持 `0.2.16` / 9。
 该外部 CLI 设计不改变运行时权威：官方扩展内置 Codex 仍是唯一 app-server 来源；
 外部 Codex CLI 只是客户端，不参与发现或回退，远端也不安装 Codex。
 
+2026-08-05 在 Linux 发布门禁中补齐 Windows 路径语义的跨平台可测试性：稳定 Shim
+launcher 识别、外部会话描述符校验、进程可执行文件比较和旧版入口 basename 解析均按
+显式 `hostPlatform` 选择 Windows 或 POSIX 路径实现，不再隐式使用测试主机语义。
+Remote Executor 取消/停止/幂等测试夹具同步提供当前包版本诊断字段。相关 4 个测试文件
+共 18 项通过，TypeScript 类型检查通过；实际 Windows/Linux 同平台运行语义未改变。
+
 ## 升级与发布跟踪
 
 发布门禁、升级触发矩阵、量化回归规则和 Windows/Linux 分平台要求已统一写入
