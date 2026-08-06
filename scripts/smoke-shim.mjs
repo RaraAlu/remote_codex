@@ -13,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import WebSocket from "ws";
+import WebSocket, { WebSocketServer } from "ws";
 import { findOfficialCodexRuntime } from "./official-codex.mjs";
 
 const officialRuntime = await findOfficialCodexRuntime();
@@ -426,6 +426,35 @@ async function assertAutomaticCliAttach(shim, rootDir) {
   const tokenPath = join(externalCliDir, `${process.pid}.token`);
   const tokenEnv = "CODEX_BRIDGE_EXTERNAL_SESSION_TOKEN";
   const token = "automatic-cli-private-token";
+  const gateway = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await new Promise((resolvePromise, reject) => {
+    gateway.once("listening", resolvePromise);
+    gateway.once("error", reject);
+  });
+  gateway.on("connection", (socket, request) => {
+    if (request.headers.authorization !== `Bearer ${token}`) {
+      socket.close(1008, "unauthorized");
+      return;
+    }
+    socket.on("message", (data) => {
+      const message = JSON.parse(data.toString("utf8"));
+      if (message.method === "initialize") {
+        socket.send(JSON.stringify({ id: message.id, result: { userAgent: "smoke" } }));
+      } else if (message.method === "thread/resume") {
+        socket.send(
+          JSON.stringify({
+            id: message.id,
+            result: { thread: { id: "automatic-cli-thread" } },
+          }),
+        );
+      }
+    });
+  });
+  const address = gateway.address();
+  if (typeof address === "string" || address === null) {
+    throw new Error("Automatic CLI smoke gateway did not bind a TCP port");
+  }
+  const endpoint = `ws://127.0.0.1:${address.port}`;
   await mkdir(externalCliDir, { mode: 0o700, recursive: true });
   await mkdir(binDir, { mode: 0o700, recursive: true });
   await writeFile(
@@ -447,11 +476,12 @@ async function assertAutomaticCliAttach(shim, rootDir) {
   await writeFile(
     join(externalCliDir, `${process.pid}.json`),
     `${JSON.stringify({
-      version: 1,
-      endpoint: "ws://127.0.0.1:65535",
+      version: 2,
+      endpoint,
+      executablePath: process.execPath,
       host: "local",
       pid: process.pid,
-      startedAtMs: Date.now(),
+      startedAtMs: Math.round(Date.now() - process.uptime() * 1_000),
       tokenEnv,
       tokenPath,
       workspaceRoot: process.cwd(),
@@ -474,25 +504,33 @@ async function assertAutomaticCliAttach(shim, rootDir) {
     { mode: 0o600 },
   );
 
-  const child = spawn(launcher, [], {
-    cwd: process.cwd(),
-    env: appServerEnvironment(stateDir, join(rootDir, "automatic-cli-home")),
-    stdio: "pipe",
-  });
   let stdout = "";
   let stderr = "";
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
-  const exitCode = await new Promise((resolveExit, reject) => {
-    child.once("error", reject);
-    child.once("close", (code) => resolveExit(code));
-  });
+  let exitCode;
+  try {
+    const child = spawn(launcher, [], {
+      cwd: process.cwd(),
+      env: appServerEnvironment(stateDir, join(rootDir, "automatic-cli-home")),
+      stdio: "pipe",
+    });
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    exitCode = await new Promise((resolveExit, reject) => {
+      child.once("error", reject);
+      child.once("close", (code) => resolveExit(code));
+    });
+  } finally {
+    for (const socket of gateway.clients) {
+      socket.terminate();
+    }
+    await new Promise((resolvePromise) => gateway.close(resolvePromise));
+  }
   if (exitCode !== 0) {
     throw new Error(`Automatic plain Codex attach exited with ${exitCode}: ${stderr}`);
   }

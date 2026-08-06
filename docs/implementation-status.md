@@ -753,6 +753,11 @@ launcher 识别、外部会话描述符校验、进程可执行文件比较和�
 Remote Executor 取消/停止/幂等测试夹具同步提供当前包版本诊断字段。相关 4 个测试文件
 共 18 项通过，TypeScript 类型检查通过；实际 Windows/Linux 同平台运行语义未改变。
 
+同日修复 Linux SEA Shim 冒烟中已过期的自动 CLI 附着夹具。夹具不再发布不可连接的
+固定端口和旧版会话描述符，而是启动带 Bearer 认证的临时 loopback 网关、发布绑定当前
+测试进程身份的 v2 描述符，并真实完成 `initialize` 与 `thread/resume` 探针后验证上游
+CLI 参数和令牌传递。`npm run smoke:shim` 通过。
+
 ## 升级与发布跟踪
 
 发布门禁、升级触发矩阵、量化回归规则和 Windows/Linux 分平台要求已统一写入
