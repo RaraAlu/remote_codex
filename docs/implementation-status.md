@@ -1,6 +1,6 @@
 # 实施状态
 
-更新日期：2026-08-02
+更新日期：2026-08-05
 
 ## 能力边界复核
 
@@ -214,6 +214,11 @@ Windows 最终候选重载后在 `3,212 ms` 内恢复 `ready`，活动 Shim 为
 `initialize` 在 `30,016 ms` 超时后重试 `1 ms` 成功，性能分段诊断已保留为 README 活动
 TODO。完整证据见
 `docs/acceptance/2026-08-02-release-0.3.61-windows-tool-route-inventory.md`。
+
+2026-08-05 用户决定取消“统一工具代理与远程位置透明”的后续实施，活动 TODO
+已移除。`0.3.61` 已交付的路由清单、位置语义和参数形状不作为路由依据的行为
+继续保留；不再继续实现工具级快照、统一 Provider 代理、HTTP/SSE 远端转发和
+跨平台统一 Fixture。当前实施主线转为“Codex 原生上下文入口”。
 
 `0.3.62` 修复 Windows Remote SSH 前台命令跨 Extension Host 的重入等待。此前 Controller
 调用远端执行命令后等待完整结果，Remote Executor 又在该命令返回前同步反向调用

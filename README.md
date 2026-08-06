@@ -231,34 +231,6 @@ Remote SSH 实机验证。完整门禁和量化指标见
 
 ## TODO
 
-### 统一工具代理与远程位置透明
-
-- 在 `0.3.61` 已注入的统一工具路由清单基础上，继续读取 app-server 的实际工具快照，
-  把当前按 MCP server 和 App/Connector/Web provider family 声明的路由细化到实际工具；
-  对每项保留执行位置、工作区绑定、能力、状态和真实降级原因，不能退回依据参数形状猜测。
-- 将现有 `mcp-proxy` 收敛为统一代理入口，以稳定的路由描述和 Provider 接口承接
-  `stdio`、Streamable HTTP、SSE 与本机/云端 passthrough。Codex 侧使用统一调用路径，
-  传输差异只留在代理内部；未知工具参数不得被猜测或改写。
-- 保留安全自动路由，并增加显式远端路由配置，支持结构化 executable/argv、受约束的
-  远端 `cwd`、远端环境变量或凭据引用和显式适配器。不得复制、记录或回传本机 Token、
-  MCP `env`、本机 `cwd` 或进程环境快照。
-- HTTP/SSE Provider 必须复用活动 VS Code Remote SSH transport，不建立第二条 SSH
-  认证链路；实现远端请求、会话和流式响应转发，以及来源限制、大小上限、超时、取消、
-  断线恢复、凭据脱敏和窗口关闭后的资源回收。
-- App、Connector、Web 和必须留在本机或云端的 MCP 保持原执行位置，但应能用于远程
-  thread；涉及路径或项目语义的差异只能由显式适配器处理，不能伪造本机路径、远端路径
-  或工作区 URI。
-- 在仓库内提供同时覆盖 stdio、Streamable HTTP 和 SSE 的统一 MCP Fixture，以同一组
-  工具契约验证 `initialize`、`tools/list`、`tools/call`、流式结果、失败、超时、取消、
-  断线和清理；真实第三方兼容性至少使用 Codegraph 验证，不依赖安装大量外部 MCP。
-- 按统一代理核心、远端 Provider、模型位置透明和跨平台收口拆成独立可验证目标。每个
-  目标完成定向测试、`npm run check`、对应产物构建、真实 Remote SSH 审计和独立提交后
-  才进入下一目标。
-- 退出条件：Codex 在本地与 Remote SSH thread 中可以用相同方式选择并调用全部已配置
-  工具；工作区、进程和项目文件操作实际落在授权远端根，本机或云端工具保持可用且位置
-  明确；所有工具都有可诊断的有效路由或真实不兼容原因，Linux x64 与 Windows x64
-  分别完成发布门禁，不再因参数形状或缺少 `target` / `rootId` 产生模型侧误拒绝。
-
 ### Codex 原生上下文入口
 
 - 在 VS Code 资源管理器右键菜单增加“添加到 Codex 上下文”，同时覆盖普通本地窗口与
