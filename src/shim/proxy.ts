@@ -9,7 +9,11 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { AuditLog } from "../core/audit-log.js";
 import { normalizeRemotePath } from "../core/path-policy.js";
-import type { RemoteEditorContext } from "../core/vscode-transport.js";
+import type {
+  FuzzyFileSearchMatch,
+  RemoteEditorContext,
+  RemoteFuzzyFileSearchResult,
+} from "../core/vscode-transport.js";
 import type {
   BridgeClientIdentity,
   BridgeConfig,
@@ -96,6 +100,19 @@ function writeMessage(stream: Writable, message: unknown): void {
 export type RpcMessageWriter = (message: unknown) => void;
 
 const MAX_REMOTE_EDITOR_CONTEXT_BYTES = 128 * 1024;
+const MAX_REMOTE_FUZZY_QUERY_LENGTH = 1_024;
+const MAX_REMOTE_FUZZY_RESULTS = 100;
+const MAX_REMOTE_FUZZY_SESSIONS = 32;
+const REMOTE_FUZZY_FILE_SEARCH_METHODS = new Set([
+  "fuzzyFileSearch",
+  "fuzzyFileSearch/sessionStart",
+  "fuzzyFileSearch/sessionUpdate",
+  "fuzzyFileSearch/sessionStop",
+]);
+
+interface RemoteFuzzySearchSession {
+  generation: number;
+}
 
 function isRemoteEditorContext(value: unknown): value is RemoteEditorContext {
   if (!isRecord(value)) {
@@ -139,6 +156,50 @@ function isRemoteEditorContext(value: unknown): value is RemoteEditorContext {
     value.target === "remote" &&
     typeof value.workspaceRoot === "string" &&
     typeof value.workspaceUri === "string"
+  );
+}
+
+function isFuzzyFileSearchMatch(value: unknown, workspaceRoot: string): value is FuzzyFileSearchMatch {
+  if (!isRecord(value) || typeof value.path !== "string") {
+    return false;
+  }
+  const path = value.path;
+  const pathSegments = path.split("/");
+  return (
+    value.root === workspaceRoot &&
+    path.length > 0 &&
+    !path.includes("\0") &&
+    !path.startsWith("/") &&
+    pathSegments.every((segment) => segment.length > 0 && segment !== "." && segment !== "..") &&
+    value.match_type === "file" &&
+    typeof value.file_name === "string" &&
+    value.file_name === pathSegments.at(-1) &&
+    typeof value.score === "number" &&
+    Number.isFinite(value.score) &&
+    Array.isArray(value.indices) &&
+    value.indices.every(
+      (entry) =>
+        typeof entry === "number" &&
+        Number.isInteger(entry) &&
+        entry >= 0 &&
+        entry < path.length,
+    )
+  );
+}
+
+function isRemoteFuzzyFileSearchResult(
+  value: unknown,
+  workspaceRoot: string,
+): value is RemoteFuzzyFileSearchResult {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.files) &&
+    value.files.length <= MAX_REMOTE_FUZZY_RESULTS &&
+    value.files.every((entry) => isFuzzyFileSearchMatch(entry, workspaceRoot)) &&
+    typeof value.scannedFileCount === "number" &&
+    Number.isInteger(value.scannedFileCount) &&
+    value.scannedFileCount >= 0 &&
+    typeof value.truncated === "boolean"
   );
 }
 
@@ -437,6 +498,7 @@ export class ShimProxy {
   readonly #remoteToolCalls: RemoteToolCallCoordinator;
   readonly #turnClients: RemoteTurnClientTracker;
   readonly #pendingApprovals = new Map<RpcId, PendingApproval>();
+  readonly #remoteFuzzySearchSessions = new Map<string, RemoteFuzzySearchSession>();
   #child: ChildProcessWithoutNullStreams | null = null;
 
   constructor(options: ShimProxyOptions) {
@@ -600,6 +662,9 @@ export class ShimProxy {
       writeServer(message);
       return;
     }
+    if (await this.#handleRemoteFuzzyFileSearch(message, writeClient)) {
+      return;
+    }
     if (this.#options.config && isBlockedLocalClientMessage(message)) {
       await this.#audit.write({
         ...this.#clientIdentity,
@@ -725,6 +790,293 @@ export class ShimProxy {
             this.#options.toolRouteInventory,
           );
     writeServer(rewritten);
+  }
+
+  async #handleRemoteFuzzyFileSearch(
+    message: RpcMessage,
+    writeClient: RpcMessageWriter,
+  ): Promise<boolean> {
+    if (
+      !isRpcRequest(message) ||
+      !REMOTE_FUZZY_FILE_SEARCH_METHODS.has(message.method) ||
+      !this.#options.config ||
+      this.#options.config.connectionMode !== "vscode-remote" ||
+      this.#clientIdentity.clientSource !== "vscode" ||
+      !(this.#executor instanceof VsCodeRemoteExecutor)
+    ) {
+      return false;
+    }
+    const params = isRecord(message.params) ? message.params : null;
+    const root = this.#options.config.roots.find(
+      (candidate) => candidate.target === "remote" && candidate.role === "primary",
+    );
+    const reject = (reason: string): true => {
+      writeClient({
+        id: message.id,
+        error: { code: -32602, message: reason },
+      });
+      return true;
+    };
+    if (!params || !root || root.path !== this.#options.config.workspaceRoot) {
+      return reject("Codex Remote Bridge could not resolve the active remote workspace");
+    }
+    const sessionId = (): string | null =>
+      typeof params.sessionId === "string" &&
+      params.sessionId.length > 0 &&
+      params.sessionId.length <= 256 &&
+      !params.sessionId.includes("\0")
+        ? params.sessionId
+        : null;
+    const query = (): string | null =>
+      typeof params.query === "string" &&
+      params.query.length <= MAX_REMOTE_FUZZY_QUERY_LENGTH &&
+      !params.query.includes("\0")
+        ? params.query
+        : null;
+    const rootsAreValid = (): boolean =>
+      Array.isArray(params.roots) &&
+      params.roots.length > 0 &&
+      params.roots.length <= 16 &&
+      params.roots.every(
+        (entry) =>
+          typeof entry === "string" &&
+          entry.length > 0 &&
+          entry.length <= 4_096 &&
+          !entry.includes("\0"),
+      );
+
+    if (message.method === "fuzzyFileSearch/sessionStart") {
+      const id = sessionId();
+      if (!id || !rootsAreValid()) {
+        return reject("Invalid remote fuzzy search session parameters");
+      }
+      if (
+        !this.#remoteFuzzySearchSessions.has(id) &&
+        this.#remoteFuzzySearchSessions.size >= MAX_REMOTE_FUZZY_SESSIONS
+      ) {
+        return reject("Too many active remote fuzzy search sessions");
+      }
+      this.#remoteFuzzySearchSessions.set(id, { generation: 0 });
+      await this.#audit.write({
+        ...this.#clientIdentity,
+        operationId: String(message.id),
+        hostId: this.#options.config.host,
+        workspaceRoot: this.#options.config.workspaceRoot,
+        rootId: root.id,
+        rootRole: root.role,
+        rootPath: root.path,
+        target: root.target,
+        operation: "fuzzy_file_search.session_start",
+        outcome: "succeeded",
+        details: {
+          requestedRootCount: Array.isArray(params.roots) ? params.roots.length : 0,
+        },
+      });
+      writeClient({ id: message.id, result: {} });
+      return true;
+    }
+
+    if (message.method === "fuzzyFileSearch/sessionStop") {
+      const id = sessionId();
+      if (!id) {
+        return reject("Invalid remote fuzzy search session identifier");
+      }
+      this.#remoteFuzzySearchSessions.delete(id);
+      await this.#audit.write({
+        ...this.#clientIdentity,
+        operationId: String(message.id),
+        hostId: this.#options.config.host,
+        workspaceRoot: this.#options.config.workspaceRoot,
+        rootId: root.id,
+        rootRole: root.role,
+        rootPath: root.path,
+        target: root.target,
+        operation: "fuzzy_file_search.session_stop",
+        outcome: "succeeded",
+      });
+      writeClient({ id: message.id, result: {} });
+      return true;
+    }
+
+    if (message.method === "fuzzyFileSearch/sessionUpdate") {
+      const id = sessionId();
+      const nextQuery = query();
+      const session = id ? this.#remoteFuzzySearchSessions.get(id) : undefined;
+      if (!id || nextQuery === null || !session) {
+        return reject("Remote fuzzy search session is not active");
+      }
+      session.generation += 1;
+      const generation = session.generation;
+      writeClient({ id: message.id, result: {} });
+      this.#writeFuzzySearchUpdated(writeClient, id, nextQuery, []);
+      void this.#completeRemoteFuzzySearch(
+        message.id,
+        root,
+        id,
+        nextQuery,
+        session,
+        generation,
+        writeClient,
+      ).catch(() => undefined);
+      return true;
+    }
+
+    const nextQuery = query();
+    if (nextQuery === null || !rootsAreValid()) {
+      return reject("Invalid remote fuzzy file search parameters");
+    }
+    const startedAt = Date.now();
+    try {
+      const result = await this.#executor.requestControllerWorkspace<unknown>(
+        "resolveFuzzyFileSearch",
+        root.id,
+        { maxResults: MAX_REMOTE_FUZZY_RESULTS, query: nextQuery },
+      );
+      if (!isRemoteFuzzyFileSearchResult(result, this.#options.config.workspaceRoot)) {
+        throw new TypeError("VS Code returned an invalid remote fuzzy search result");
+      }
+      await this.#audit.write({
+        ...this.#clientIdentity,
+        operationId: String(message.id),
+        hostId: this.#options.config.host,
+        workspaceRoot: this.#options.config.workspaceRoot,
+        rootId: root.id,
+        rootRole: root.role,
+        rootPath: root.path,
+        target: root.target,
+        operation: "fuzzy_file_search.remote",
+        outcome: "succeeded",
+        durationMs: Date.now() - startedAt,
+        truncated: result.truncated,
+        details: {
+          fileCount: result.files.length,
+          queryLength: nextQuery.length,
+          scannedFileCount: result.scannedFileCount,
+        },
+      });
+      writeClient({ id: message.id, result: { files: result.files } });
+    } catch (error) {
+      await this.#audit.write({
+        ...this.#clientIdentity,
+        operationId: String(message.id),
+        hostId: this.#options.config.host,
+        workspaceRoot: this.#options.config.workspaceRoot,
+        rootId: root.id,
+        rootRole: root.role,
+        rootPath: root.path,
+        target: root.target,
+        operation: "fuzzy_file_search.remote",
+        outcome: "failed",
+        durationMs: Date.now() - startedAt,
+        details: { error: error instanceof Error ? error.message : String(error) },
+      });
+      writeClient({
+        id: message.id,
+        error: {
+          code: -32003,
+          message: "Codex Remote Bridge could not search the remote workspace",
+        },
+      });
+    }
+    return true;
+  }
+
+  async #completeRemoteFuzzySearch(
+    operationId: RpcId,
+    root: BridgeConfig["roots"][number],
+    sessionId: string,
+    query: string,
+    session: RemoteFuzzySearchSession,
+    generation: number,
+    writeClient: RpcMessageWriter,
+  ): Promise<void> {
+    const startedAt = Date.now();
+    try {
+      const result = await (this.#executor as VsCodeRemoteExecutor).requestControllerWorkspace<unknown>(
+        "resolveFuzzyFileSearch",
+        root.id,
+        { maxResults: MAX_REMOTE_FUZZY_RESULTS, query },
+      );
+      if (
+        !this.#options.config ||
+        !isRemoteFuzzyFileSearchResult(result, this.#options.config.workspaceRoot)
+      ) {
+        throw new TypeError("VS Code returned an invalid remote fuzzy search result");
+      }
+      if (
+        this.#remoteFuzzySearchSessions.get(sessionId) !== session ||
+        session.generation !== generation
+      ) {
+        return;
+      }
+      this.#writeFuzzySearchUpdated(writeClient, sessionId, query, result.files);
+      this.#writeFuzzySearchCompleted(writeClient, sessionId);
+      await this.#audit.write({
+        ...this.#clientIdentity,
+        operationId: String(operationId),
+        hostId: this.#options.config.host,
+        workspaceRoot: this.#options.config.workspaceRoot,
+        rootId: root.id,
+        rootRole: root.role,
+        rootPath: root.path,
+        target: root.target,
+        operation: "fuzzy_file_search.session_update",
+        outcome: "succeeded",
+        durationMs: Date.now() - startedAt,
+        truncated: result.truncated,
+        details: {
+          fileCount: result.files.length,
+          queryLength: query.length,
+          scannedFileCount: result.scannedFileCount,
+        },
+      });
+    } catch (error) {
+      if (
+        this.#remoteFuzzySearchSessions.get(sessionId) !== session ||
+        session.generation !== generation
+      ) {
+        return;
+      }
+      this.#writeFuzzySearchCompleted(writeClient, sessionId);
+      await this.#audit.write({
+        ...this.#clientIdentity,
+        operationId: String(operationId),
+        hostId: this.#options.config?.host,
+        workspaceRoot: this.#options.config?.workspaceRoot,
+        rootId: root.id,
+        rootRole: root.role,
+        rootPath: root.path,
+        target: root.target,
+        operation: "fuzzy_file_search.session_update",
+        outcome: "failed",
+        durationMs: Date.now() - startedAt,
+        details: { error: error instanceof Error ? error.message : String(error) },
+      });
+    }
+  }
+
+  #writeFuzzySearchUpdated(
+    writeClient: RpcMessageWriter,
+    sessionId: string,
+    query: string,
+    files: readonly FuzzyFileSearchMatch[],
+  ): void {
+    writeClient({
+      method: "fuzzyFileSearch/sessionUpdated",
+      params: { files, query, sessionId },
+      emittedAtMs: Date.now(),
+    });
+  }
+
+  #writeFuzzySearchCompleted(
+    writeClient: RpcMessageWriter,
+    sessionId: string,
+  ): void {
+    writeClient({
+      method: "fuzzyFileSearch/sessionCompleted",
+      params: { sessionId },
+      emittedAtMs: Date.now(),
+    });
   }
 
   async handleServerMessage(
@@ -1236,6 +1588,7 @@ export class ShimProxy {
 
   closeSession(): void {
     this.#cancelApprovals();
+    this.#remoteFuzzySearchSessions.clear();
     this.#executor?.close();
   }
 }

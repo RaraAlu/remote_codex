@@ -6,7 +6,19 @@ const mock = vi.hoisted(() => ({
   auditWrite: vi.fn(async () => undefined),
   executeCommand: vi.fn(async () => undefined),
   installShim: vi.fn(async () => "/managed/codex-bridge-shim.cjs"),
-  officialExtension: vi.fn(() => {
+  inlineMentionEnable: vi.fn(async () => ({
+    status: "patched",
+    changed: true,
+    extensionVersion: "1.0.0",
+    targetPath: "/extensions/openai.chatgpt/webview/assets/app.js",
+  })),
+  inlineMentionRestore: vi.fn(async () => ({
+    status: "restored",
+    changed: true,
+    extensionVersion: "1.0.0",
+    targetPath: "/extensions/openai.chatgpt/webview/assets/app.js",
+  })),
+  officialExtension: vi.fn<() => unknown>(() => {
     throw new Error("official extension must not be queried before reload");
   }),
   registeredCommands: new Map<string, (...args: unknown[]) => unknown>(),
@@ -17,9 +29,23 @@ const mock = vi.hoisted(() => ({
   settingsRepair: vi.fn(async () => ({ changed: false, reloadRequired: false })),
   settingsUpdate: vi.fn(async () => undefined),
   showErrorMessage: vi.fn(),
+  showInformationMessage: vi.fn(),
+  warningResponse: "Configure",
   transportStart: vi.fn(async () => {
     throw new Error("transport must not start before reload");
   }),
+  workbenchEnable: vi.fn(async () => ({
+    status: "patched",
+    changed: true,
+    targetPath: "/opt/code/workbench.js",
+  })),
+  workbenchNeedsElevation: vi.fn(async () => false),
+  workbenchPkexec: vi.fn(async () => undefined),
+  workbenchRestore: vi.fn(async () => ({
+    status: "restored",
+    changed: true,
+    targetPath: "/opt/code/workbench.js",
+  })),
 }));
 
 vi.mock("vscode", () => ({
@@ -36,6 +62,7 @@ vi.mock("vscode", () => ({
     },
   },
   env: {
+    appRoot: "/opt/code/resources/app",
     machineId: "local-machine",
     remoteName: "ssh-remote",
   },
@@ -53,9 +80,9 @@ vi.mock("vscode", () => ({
       show: vi.fn(),
     }),
     showErrorMessage: mock.showErrorMessage,
-    showInformationMessage: vi.fn(),
+    showInformationMessage: mock.showInformationMessage,
     showOpenDialog: mock.showOpenDialog,
-    showWarningMessage: vi.fn(async () => "Configure"),
+    showWarningMessage: vi.fn(async () => mock.warningResponse),
   },
   workspace: {
     getConfiguration: (section: string) => ({
@@ -124,6 +151,29 @@ vi.mock("../src/extension/vscode-transport-server.js", () => ({
   },
 }));
 
+vi.mock("../src/extension/workbench-drop-compatibility.js", () => ({
+  enableWorkbenchDropCompatibility: mock.workbenchEnable,
+  inspectWorkbenchDropCompatibility: vi.fn(async () => ({
+    status: "disabled",
+    changed: false,
+    targetPath: "/opt/code/workbench.js",
+  })),
+  replaceWorkbenchAssetWithPkexec: mock.workbenchPkexec,
+  restoreWorkbenchDropCompatibility: mock.workbenchRestore,
+  workbenchDropTargetNeedsElevation: mock.workbenchNeedsElevation,
+}));
+
+vi.mock("../src/extension/codex-inline-mention-compatibility.js", () => ({
+  enableCodexInlineMentionCompatibility: mock.inlineMentionEnable,
+  inspectCodexInlineMentionCompatibility: vi.fn(async () => ({
+    status: "disabled",
+    changed: false,
+    extensionVersion: "1.0.0",
+    targetPath: "/extensions/openai.chatgpt/webview/assets/app.js",
+  })),
+  restoreCodexInlineMentionCompatibility: mock.inlineMentionRestore,
+}));
+
 import { BridgeController } from "../src/extension/controller.js";
 
 function context(): vscode.ExtensionContext {
@@ -142,10 +192,20 @@ function context(): vscode.ExtensionContext {
 describe("BridgeController restored-state configuration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mock.officialExtension.mockImplementation(() => {
+      throw new Error("official extension must not be queried before reload");
+    });
     mock.registeredCommands.clear();
     mock.settingsConfigure.mockResolvedValue(true);
     mock.settingsHasManaged.mockReturnValue(false);
     mock.settingsRepair.mockResolvedValue({ changed: false, reloadRequired: false });
+    mock.warningResponse = "Configure";
+    mock.inlineMentionEnable.mockClear();
+    mock.inlineMentionRestore.mockClear();
+    mock.workbenchEnable.mockClear();
+    mock.workbenchNeedsElevation.mockClear();
+    mock.workbenchNeedsElevation.mockResolvedValue(false);
+    mock.workbenchRestore.mockClear();
   });
 
   it("restores UI settings and reloads before resolving the official runtime", async () => {
@@ -222,6 +282,57 @@ describe("BridgeController restored-state configuration", () => {
     expect(
       mock.registeredCommands.has("codexRemoteBridge.addRemoteSelectionContext"),
     ).toBe(true);
+    expect(mock.registeredCommands.has("codexRemoteBridge.enableWorkbenchDrop")).toBe(true);
+    expect(mock.registeredCommands.has("codexRemoteBridge.disableWorkbenchDrop")).toBe(true);
+  });
+
+  it("enables the Workbench drop patch through the explicit command", async () => {
+    mock.warningResponse = "Enable";
+    mock.workbenchNeedsElevation.mockResolvedValue(true);
+    mock.officialExtension.mockReturnValue({
+      extensionPath: "/extensions/openai.chatgpt",
+      packageJSON: { version: "1.0.0" },
+    });
+    const controller = new BridgeController(context());
+
+    await controller.enableWorkbenchDrop();
+
+    expect(mock.workbenchEnable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appRoot: "/opt/code/resources/app",
+        replaceTarget: mock.workbenchPkexec,
+      }),
+    );
+    expect(mock.inlineMentionEnable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extensionPath: "/extensions/openai.chatgpt",
+        extensionVersion: "1.0.0",
+      }),
+    );
+    expect(mock.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining("Reload VS Code manually"),
+    );
+  });
+
+  it("restores the Workbench drop patch through the explicit command", async () => {
+    mock.warningResponse = "Disable";
+    mock.officialExtension.mockReturnValue({
+      extensionPath: "/extensions/openai.chatgpt",
+      packageJSON: { version: "1.0.0" },
+    });
+    const controller = new BridgeController(context());
+
+    await controller.disableWorkbenchDrop();
+
+    expect(mock.workbenchRestore).toHaveBeenCalledWith(
+      expect.objectContaining({ appRoot: "/opt/code/resources/app" }),
+    );
+    expect(mock.inlineMentionRestore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extensionPath: "/extensions/openai.chatgpt",
+        extensionVersion: "1.0.0",
+      }),
+    );
   });
 
   it("opens local root authorization on the local filesystem in a remote window", async () => {

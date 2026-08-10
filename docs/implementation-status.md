@@ -387,13 +387,80 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
   API。直接改写官方安装目录属于不受支持的补丁，会被官方扩展升级替换，不能作为
   默认、无恢复能力的实现方式。
 - 官方扩展已经公开 `chatgpt.addToThread` 和 `chatgpt.addFileToThread` 命令，但当前
-  菜单只覆盖编辑器，未注册资源管理器右键入口。`addFileToThread` 的实现只接受一个
-  `file:` URI，再向官方 Webview 发送私有的 `add-context-file` 消息；它不接受
+  菜单只覆盖编辑器，未注册资源管理器右键入口。`addFileToThread` 每次只接受一个
+  `file:` URI，再向官方 Webview 发送私有的 `add-context-file` 消息；路径以 `/` 结尾时，
+  官方输入区会把它保留为一个原生 `@folder/` 引用并显示 Folder 表述。该命令仍不接受
   `vscode-remote:` 或 Bridge 虚拟资源 URI。
-- 官方编辑器已实现本机文件拖放，但当前拖放解析会明确丢弃
-  `webkitGetAsEntry().isDirectory` 的项目。Remote SSH 窗口中官方扩展被放置在本地
-  UI Extension Host，因此本机文件拖放具备实现基础；精确行为仍须用候选 VSIX 和
-  官方界面验收。
+- 官方 app-server 的原生 `@` 文件选择器使用 `fuzzyFileSearch`，交互搜索使用
+  `sessionStart`、`sessionUpdate`、`sessionStop` 三个请求，并以 `sessionUpdated` 和
+  `sessionCompleted` 通知返回结果与完成态。一次性请求返回 `{ files }`；每个文件结果
+  包含工作区根、相对路径、文件名、匹配类型、分数和匹配索引。
+- 2026-08-09 对本机实际加载的 `openai.chatgpt@26.803.41515` 再次核对：官方 `@` 文件
+  选择器只搜索传入的工作区 roots，`atMention` 提交时序列化为路径引用；真实文件附件则
+  通过独立的 `addedFiles` / `fileAttachments` 载荷进入 turn。因此工作区外任意路径不能
+  依赖原生 `@` 被发现或读取，用户从系统文件管理器显式拖入的路径应保留附件语义。
+- `26.727.40816` 的官方 Webview 实现了资源拖放解析：它合并 `File` 与
+  `text/uri-list`，通过 `webkitGetAsEntry().isDirectory` 识别目录并为路径补尾部 `/`，
+  随后走与 `@` 一致的文件描述符引用。该解析器只接受 `file:` URI，尚不接受
+  `vscode-remote:`。
+- 2026-08-06 进一步解析 VS Code 内置 Copilot 的实现：`ChatInputPart` 在 Workbench DOM
+  上创建 `ChatDragAndDrop`，由 `DragAndDropObserver` 接收 `EDITORS`、
+  `INTERNAL_URI_LIST`、`Files` 等数据，解析为附件后直接写入 `ChatAttachmentModel`。这不是
+  普通扩展 Webview 可调用的公开能力。
+- 同日普通本地窗口实测确认，Explorer 开始内部拖动时，`WebviewWindowDragMonitor` 会调用
+  `windowDidDragStart()`，最终把 Codex iframe 设为 `pointer-events: none`。不按 `Shift`
+  时 Webview 收不到拖放事件；按住 `Shift` 只会解除该屏蔽，进入 Webview 的仍是没有真实
+  路径的占位 `File`。桌面文件管理器目录虽能触发 Webview 拖放提示，最终也未生成附件。
+  因此仅修改官方 Webview 的 MIME 判断不能实现直接拖放，相关候选补丁已撤销；按住
+  `Shift` 或未落成的 Webview 事件均不得宣称为支持。
+- 2026-08-07 的 `0.3.70` 候选改为显式可选的 Workbench 外层兼容层，而非改写官方
+  Webview。源码探针按 ViewPane 身份、命令服务、贡献注册和主导出等实际代码形状定位；
+  外层捕获 Explorer/桌面拖放并调用官方 `chatgpt.addFileToThread`。安装器保存 Workbench、
+  `product.json` 的原始和补丁字节及各自 SHA-256，并让产品完整性摘要与补丁一致；只在
+  当前目标仍匹配预期哈希时原子替换。Linux 系统安装必须由
+  用户命令触发 polkit，扩展激活不自动提权。未知形状、无元数据补丁、备份损坏和外部
+  修改均失败关闭。自动化已覆盖生成源码语法、幂等、恢复、替换边界和冲突；真实 Codex
+  面板的无 `Shift` 文件/文件夹拖放及逐字节恢复仍待当前候选安装验收，验收前不扩大
+  支持声明。
+- 2026-08-07 本地初轮日志记录了四次完整的 Workbench drop、资源解析、`stat`、官方命令
+  调用和成功返回；后两次投放的是同一个 `motor_test` 目录，官方输入区按原生语义去重，
+  因而第二次不会新增可见引用。初轮同时暴露出接收覆盖层使用 `pointer-events:none` 且在
+  每次 `dragover` 后启动 180 ms 撤层，鼠标进入隔离 Webview iframe 后可能丢失后续事件；
+  候选已改为由可见覆盖层实际接管拖放、拖动期间不撤层，并禁止用过期活动面板兜底接受
+  面板外的 drop，仍待同一窗口实机复测。
+- 同日本地实机确认修正后的覆盖层可稳定捕获单文件与单目录，官方命令调用和路径映射均
+  成功；但官方 Composer 会把普通文件呈现为顶部附件、仅把尾部 `/` 的目录呈现为输入区
+  `@` 引用。按当前产品要求，`0.3.70` 候选新增第二个显式可逆兼容补丁：按消息处理器和
+  Composer 插入方法的实际代码形状定位唯一官方 Webview 资产，将 `add-context-file`
+  转为当前选区处的 `atMention` 节点，并在已有同路径节点时保持唯一。原始字节、目标和
+  SHA-256 独立托管，未知形状或外部修改失败关闭；自动化已验证当前安装资产可识别、补丁
+  后 JavaScript 语法、光标范围传递、去重、幂等、冲突和逐字节恢复，真实 UI 仍待重载
+  后验收。
+- 2026-08-09 根据上述官方语义把 Webview 补丁收窄为来源分流：Workbench 载荷出现
+  `INTERNAL_URI_LIST`、`ResourceURLs` 或 `CodeFiles` 时判定为 VS Code Explorer，Bridge
+  通过只用于本次命令的路径尾标记请求光标处 `@`，Webview 在构造节点前清除该标记；
+  系统文件管理器通常只有标准 URI list 或原生文件路径，没有 VS Code 专用证据时保守
+  判定为系统来源，并调用未标记的官方附件路径。普通官方 `chatgpt.addFileToThread` 同样
+  未标记，行为不被改变。自动化已覆盖来源判定、文件与目录标记清理、未标记附件回退、
+  旧受管补丁升级和冲突保护；本地与 Remote SSH 实机分流仍待验收。
+- 2026-08-09 本地系统文件管理器实测继续暴露拖放接收时序问题：极短行程可能在首个
+  `dragover` 前释放，而跨显示屏进入 VS Code 时首个 `dragenter` 可能暂时没有 MIME 类型。
+  旧贡献只在 `dragover` 取消默认动作，并把空类型直接判为不支持，导致覆盖层尚未接管就
+  丢失 drop。当前候选改为在首个可定位到 Codex 面板的 `dragenter` 立即取消默认动作，
+  把空类型仅作为拖动中的临时候选，最终 drop 仍必须解析出真实 URI 或本机文件路径才会
+  被消费；同时增加覆盖层自身和 `elementFromPoint` 的面板定位，并延长瞬时离开后的恢复
+  窗口。该修正仍待短行程、跨显示屏、普通行程和取消拖动的同窗口实机回归。
+- 随后实机进一步缩小了边界：系统文件第一次直接进入 Codex Webview 时，Workbench 主
+  文档完全收不到 `dragenter`；必须先经过任意非 Webview 的 VS Code 区域，原外层贡献才
+  能激活。这不是 MIME 或坐标判定能够单独修复的缺陷。当前候选在已受管的官方 Webview
+  资产中增加最小入口转发器：只对文件类拖放在捕获阶段向顶层 Workbench 发送固定通道的
+  `dragenter` / `dragover` 信号，外层随即建立覆盖层；若极短行程在覆盖层建立前已经 drop，
+  Webview 同时转发可验证的 URI/路径载荷作为一次性兜底。Workbench 仅在恰好一个可见
+  Codex ViewPane 时接受该信号，最终载荷仍经 Controller 的结构校验、路径解析和 `stat`，
+  并对外层 drop 与 Webview 兜底做短时去重。自动化已覆盖首次进入、极短 drop、无真实
+  资源不消费以及外层/内层通道闭环。2026-08-09 用户完成 Linux 本地 VS Code 实机
+  回归，确认不先经过其他 Workbench 区域的直接拖入已经可用，本地拖放能力通过验收；
+  Remote SSH 资源管理器拖放仍待实现和实机验证。
 
 活动实施项及其退出条件统一保存在根 `README.md` 最末尾的 `TODO` 中；本节只保留已完成
 的能力探针结论。

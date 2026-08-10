@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { OFFICIAL_CODEX_EXTENSION_ID } from "../core/official-codex.js";
 import { REMOTE_EXECUTOR_EXTENSION_ID } from "../core/vscode-transport.js";
 import { BridgeController } from "./controller.js";
+import { repairCodexViewLocation } from "./view-location.js";
 
 let controller: BridgeController | undefined;
 
@@ -19,6 +20,7 @@ function relevantExtensionFingerprint(): string {
 
 export function activate(context: vscode.ExtensionContext): void {
   controller = new BridgeController(context);
+  const activeController = controller;
   let extensionFingerprint = relevantExtensionFingerprint();
   context.subscriptions.push(
     controller,
@@ -40,6 +42,15 @@ export function activate(context: vscode.ExtensionContext): void {
       void controller?.initialize();
     }),
   );
+  void repairCodexViewLocation(vscode.commands, context.workspaceState)
+    .then((result) => {
+      activeController.logCodexContextDrop(`layout.integration result=${result}`);
+    })
+    .catch((error: unknown) => {
+      activeController.logCodexContextDrop(
+        `layout.integration result=failed error=${JSON.stringify(String(error))}`,
+      );
+    });
   void controller.initialize();
 }
 

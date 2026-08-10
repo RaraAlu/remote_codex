@@ -11,6 +11,7 @@ export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
 export const CONTROLLER_WORKSPACE_OPERATIONS = [
   "resolveEditorContext",
+  "resolveFuzzyFileSearch",
   "localApplyPatch",
   "localCanonicalPath",
   "localCreateDirectory",
@@ -55,6 +56,21 @@ export interface RemoteEditorContext {
   target: "remote";
   workspaceRoot: string;
   workspaceUri: string;
+}
+
+export interface FuzzyFileSearchMatch {
+  file_name: string;
+  indices: number[];
+  match_type: "file";
+  path: string;
+  root: string;
+  score: number;
+}
+
+export interface RemoteFuzzyFileSearchResult {
+  files: FuzzyFileSearchMatch[];
+  scannedFileCount: number;
+  truncated: boolean;
 }
 
 export const REMOTE_EXECUTOR_CAPABILITIES = [

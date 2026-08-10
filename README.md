@@ -6,7 +6,12 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.69`。Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
+> 当前源码版本为 `0.3.70` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
+> 快照附件；官方输入区的原生 `@` 文件搜索通过当前 VS Code Remote SSH 工作区查询，
+> 不访问本机控制目录。可选兼容层不要求用户按住 `Shift`：VS Code Explorer 拖放转换为
+> 当前光标处的原生 `@` 引用，系统文件管理器拖放保留官方附件语义，以支持工作区外路径；
+> 真实 VS Code/Remote SSH 完整验收仍在进行。
+> Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
 > `codex` 自动附着、显式 `codex-vscode.exe` TUI、外部 MCP、历史 thread 同步、无 rollout
 > 冷启动降级、停用恢复和 npm 升级恢复实测；官方 Remote SSH git watcher 的路径误判
 > 与重复告警也已完成可逆兼容修复和远端只读链路实测。Shim 现已把统一工具路由清单
@@ -68,6 +73,11 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 - 普通本地窗口按当前唯一文件工作区过滤任务列表；Remote SSH 窗口按主机和远程根隔离。
 - 本地次级根必须由用户显式授权，并可随时撤销。
 - 本地结构化审计不记录文件正文、密码、私钥、Token 或完整环境变量。
+- 可选的原生 Codex 拖放接收面通过 VS Code Workbench 外层接收 Explorer 与系统文件
+  管理器路径，再调用官方 `chatgpt.addFileToThread`。Bridge 为 Explorer 来源携带受管标记，
+  配套 Webview 补丁只把该来源插入当前光标处的原生 `@` 引用；未标记的系统文件管理器
+  来源和官方命令仍走原生附件处理。首次启用会明确请求同意，并为 Workbench、
+  `product.json` 和官方 Webview 资产保存带 SHA-256 的可恢复原件。
 
 ## 支持边界
 
@@ -125,6 +135,8 @@ Extension Host，避免它们占用远端 Extension Host；两项 `remote.extens
 | `Codex Bridge: Enable Automatic CLI Integration`  | 启用本地 Codex CLI 自动附着        |
 | `Codex Bridge: Disable Automatic CLI Integration` | 停用 CLI 集成并恢复托管入口        |
 | `Codex Bridge: Restore Official Codex Settings`   | 恢复 Bridge 接管前的官方设置       |
+| `Codex Bridge: Enable Native Codex Drop Surface`  | 启用 Codex 面板原生拖放接收面      |
+| `Codex Bridge: Disable Native Codex Drop Surface` | 校验并恢复原始 Workbench 资产      |
 
 ## 主要设置
 
@@ -233,20 +245,47 @@ Remote SSH 实机验证。完整门禁和量化指标见
 
 ### Codex 原生上下文入口
 
-- 在 VS Code 资源管理器右键菜单增加“添加到 Codex 上下文”，同时覆盖普通本地窗口与
-  Remote SSH 工作区，支持单文件、多文件、单文件夹和多文件夹。
-- 文件夹按稳定顺序展开和去重，遵守工作区排除规则、忽略文件、符号链接边界、二进制与
-  大小上限；超量输入必须在读取或发送前提示，不得静默形成不完整上下文。
-- 支持把一个或多个本机文件夹拖入 Codex 输入区，并保留官方现有的单文件和多文件拖放。
-- Remote SSH 窗口支持把本机文件拖入当前 Codex 上下文。上下文必须保留
-  `local` / `remote` 来源身份，不能把本机路径解释为远端路径，也不能伪造或替换
-  VS Code 工作区 URI。
-- 优先使用官方命令、VS Code 命令参数和 app-server 协议。若文件夹拖放必须修改官方
-  Webview，则实现独立、可关闭、可恢复的兼容适配层：按实际资产结构探测能力，幂等
-  备份和恢复，升级后失败关闭并保留 Bridge 核心功能，诊断中明确报告补丁状态。
-- 自动化覆盖选择集合、文件夹展开、去重、排除、大小限制、路径来源和升级后失败关闭；
-  实机覆盖本地单/多文件、本地单/多文件夹、本机文件夹拖放、Remote SSH 远端资源右键，
-  以及 Remote SSH 窗口中的本机文件拖放。
+- 核对官方 IDE 背景开关与 Bridge 隔离：当前 `openai.chatgpt@26.727.40816` 的
+  `composer-auto-context-enabled` 用户状态为关闭，现有本地 rollout 因而记录
+  `ide_context=null`。通过官方 `/ide` 重新开启后，分别验证普通本地窗口的活动文件、
+  打开标签和选区，以及 Remote SSH 窗口的 Bridge 自动编辑器上下文；退出条件是本地
+  原生上下文恢复、远端 `editor_context.inject` 成功，且 Bridge 从不改写该官方开关。
+- 跟踪官方 Codex Diff 回归：`openai.chatgpt@26.727.40816` 在两个普通本地窗口打开
+  变更审查时均于 `editor-diff-page` 触发错误边界，而 Bridge 当时处于 idle；已确认 Shim
+  下游收到的是可由官方解析器正常解析的标准 `turn/diff/updated`，且本地空配置不改写
+  该通知。退出条件是完成禁用 Bridge 后的重载对照，并在官方修复版或必要的兼容适配后
+  通过普通本地窗口与 Remote SSH 窗口的真实 Diff 审查。
+- `0.3.70` 候选已取消 Bridge 自定义的资源管理器右键菜单、目录展开和远端快照附件，
+  并实现可选的 Workbench 外层拖放接收面：拖入官方 Codex 对话区域时才显示覆盖提示，
+  解析内部 URI、`ResourceURLs`、`CodeFiles` 与桌面 `File` 路径，然后调用官方
+  `chatgpt.addFileToThread`。安装器按实际 Workbench 代码形状探测，不按 VS Code 版本
+  放行；首次启用显式确认，Linux 系统安装通过 polkit 提权，替换前后校验 SHA-256，
+  同步更新 `product.json` 的 Workbench 完整性摘要，保存两份原件并提供冲突保护恢复。
+  当前又按官方 `add-context-file` 处理器和 Composer 插入能力的实际形状定位唯一 Webview
+  资产。Bridge 根据拖放载荷中的 VS Code 专用 MIME 证据区分来源：Explorer 文件/文件夹
+  携带一次性路径标记并在进入 Composer 前清除，作为当前光标处的原生 `@` 引用插入；
+  系统文件管理器及没有 VS Code 来源证据的载荷不携带标记，继续进入官方附件处理，以便
+  工作区外路径仍能加入对话。同一路径已在 Composer 中时不重复插入。2026-08-09 用户已
+  完成 Linux 本地窗口实机验收，确认 Explorer 与系统文件管理器可以直接拖入 Codex 区域，
+  不再依赖先经过其他 VS Code 区域。本地细分日志、取消拖动和逐字节恢复继续在发布证据中
+  固化；本目标剩余退出条件是 Remote SSH 资源管理器远端文件/文件夹的原生 `@` 语义和
+  来源隔离通过实机验证。
+- `0.3.70` 候选已把官方输入区的 `fuzzyFileSearch` 一次性请求及三个会话请求显式代理到
+  当前 Remote SSH 工作区；未知 `fuzzyFileSearch/*` 仍失败关闭。退出条件是重载真实
+  Remote SSH 窗口后，原生 `@` 搜索能返回并选择远端文件、搜索完成态不再卡住，实际 turn
+  能读取该文件，同时审计出现 `fuzzy_file_search.session_update` 且不再出现对应的
+  `local_core_request.blocked`。
+- 本地直接拖放已经通过验收，下一步验收 Remote SSH 资源管理器拖放。远端文件必须沿用原生 `@`
+  返回的远端绝对路径和单一引用语义，不得创建本机快照、来源清单或第二个附件；本机
+  文件也不能被解释为远端路径，且不得伪造或替换 VS Code 工作区 URI。
+- Workbench 与官方 Codex Webview 兼容层只能由用户显式启用，不在扩展激活时静默提权
+  或修改安装目录；Webview 补丁只转换带 Bridge 受管标记的 Explorer 拖放，普通
+  `chatgpt.addFileToThread` 和系统文件管理器拖放保持官方附件语义。未知代码形状、缺失
+  备份、哈希不符和外部修改均失败关闭；VS Code 或官方扩展升级后必须重新探测并完成
+  对应回归，不能沿用旧版本放行结果。
+- 自动化覆盖原生拖放数据解析、来源判定、附件/`@` 分流、远端 URI 映射和失败关闭；
+  实机先覆盖本地 Explorer 单/多文件与单/多文件夹，再覆盖系统文件管理器的项目内、
+  项目外文件/文件夹，以及 Remote SSH Explorer 远端资源拖放。
 - 退出条件：所有入口把内容加入当前活动 thread，重复资源只出现一次，本机与远端同名
   文件保持可区分；窗口重载、官方扩展升级和功能撤销不破坏官方 Codex UI 或 Bridge
   主链路。

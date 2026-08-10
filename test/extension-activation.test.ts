@@ -8,10 +8,22 @@ const mock = vi.hoisted(() => ({
   configurationListener: null as null | ((event: { affectsConfiguration(key: string): boolean }) => void),
   extensionVersions: new Map<string, string>(),
   extensionsListener: null as null | (() => void),
+  repairViewLocation: vi.fn(async () => "repaired"),
   workspaceListener: null as null | (() => void),
+  workspaceState: {
+    get: vi.fn((_key: string, fallback: unknown) => fallback),
+    update: vi.fn(async () => undefined),
+  },
 }));
 
 vi.mock("vscode", () => ({
+  commands: {
+    executeCommand: vi.fn(async () => undefined),
+    getCommands: vi.fn(async () => [
+      "chatgpt.sidebarSecondaryView.focus",
+      "workbench.action.resetFocusedViewLocation",
+    ]),
+  },
   extensions: {
     getExtension: (id: string) => {
       const version = mock.extensionVersions.get(id);
@@ -44,6 +56,7 @@ vi.mock("vscode", () => ({
 vi.mock("../src/extension/controller.js", () => ({
   BridgeController: class {
     initialize = vi.fn(async () => undefined);
+    logCodexContextDrop = vi.fn();
     shutdown = vi.fn(async () => undefined);
 
     constructor() {
@@ -54,6 +67,10 @@ vi.mock("../src/extension/controller.js", () => ({
       return [];
     }
   },
+}));
+
+vi.mock("../src/extension/view-location.js", () => ({
+  repairCodexViewLocation: mock.repairViewLocation,
 }));
 
 import { activate, deactivate } from "../src/extension/extension.js";
@@ -67,14 +84,18 @@ describe("extension activation", () => {
       ["zkbot.codex-remote-bridge-executor", "0.2.20"],
     ]);
     mock.extensionsListener = null;
+    mock.repairViewLocation.mockClear();
     mock.workspaceListener = null;
+    mock.workspaceState.get.mockClear();
+    mock.workspaceState.update.mockClear();
   });
 
   it("initializes for relevant changes, ignores extension-list churn, and awaits shutdown", async () => {
     const subscriptions: unknown[] = [];
-    activate({ subscriptions } as never);
+    activate({ subscriptions, workspaceState: mock.workspaceState } as never);
 
     expect(mock.controller?.initialize).toHaveBeenCalledTimes(1);
+    expect(mock.repairViewLocation).toHaveBeenCalledTimes(1);
     mock.workspaceListener?.();
     expect(mock.controller?.initialize).toHaveBeenCalledTimes(2);
     mock.configurationListener?.({

@@ -1,8 +1,8 @@
 import type * as vscode from "vscode";
 
-const CODEX_VIEW_FOCUS_COMMAND = "chatgpt.sidebarSecondaryView.focus";
 const RESET_FOCUSED_VIEW_COMMAND = "workbench.action.resetFocusedViewLocation";
-const REPAIRED_KEY = "codexRemoteBridge.codexViewLocationRepaired.v1";
+const CODEX_VIEW_FOCUS_COMMAND = "chatgpt.sidebarSecondaryView.focus";
+const REPAIRED_KEY = "codexRemoteBridge.codexViewLocationRepaired.v2";
 
 export type ViewLocationRepairResult = "already-repaired" | "repaired" | "unavailable";
 

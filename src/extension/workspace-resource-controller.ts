@@ -4,7 +4,9 @@ import { BridgeError } from "../core/errors.js";
 import type { BridgeConfig, WorkspaceRootConfig } from "../core/types.js";
 import type {
   ControllerWorkspaceRequest,
+  FuzzyFileSearchMatch,
   RemoteEditorContext,
+  RemoteFuzzyFileSearchResult,
 } from "../core/vscode-transport.js";
 import {
   buildWorkspaceResourceUri,
@@ -20,6 +22,9 @@ const MAX_SNAPSHOT_BYTES = 1024 * 1024;
 const MAX_SNAPSHOT_COUNT = 16;
 const MAX_TOTAL_SNAPSHOT_BYTES = 16 * 1024 * 1024;
 const MAX_EDITOR_CONTEXT_BYTES = 128 * 1024;
+const MAX_FUZZY_FILE_CANDIDATES = 50_000;
+const MAX_FUZZY_FILE_RESULTS = 200;
+const MAX_FUZZY_QUERY_LENGTH = 1_024;
 
 interface Snapshot {
   content: string;
@@ -91,15 +96,76 @@ function decodeSnapshot(value: string): Uint8Array {
   return content;
 }
 
+function fuzzyMatch(relativePath: string, rawQuery: string): FuzzyFileSearchMatch | null {
+  const query = rawQuery.trim().replace(/^@/, "").replaceAll("\\", "/").toLowerCase();
+  if (query.length === 0) {
+    return null;
+  }
+  const candidate = relativePath.toLowerCase();
+  const indices: number[] = [];
+  let cursor = 0;
+  for (const character of query) {
+    const index = candidate.indexOf(character, cursor);
+    if (index < 0) {
+      return null;
+    }
+    indices.push(index);
+    cursor = index + 1;
+  }
+
+  const fileName = relativePath.slice(relativePath.lastIndexOf("/") + 1);
+  const lowerFileName = fileName.toLowerCase();
+  const first = indices[0] ?? 0;
+  const last = indices.at(-1) ?? first;
+  const gaps = last - first + 1 - indices.length;
+  let score = 1_000 - Math.min(relativePath.length, 500) - gaps * 5;
+  if (candidate === query) {
+    score += 4_000;
+  } else if (lowerFileName === query) {
+    score += 3_000;
+  } else if (lowerFileName.startsWith(query)) {
+    score += 2_000;
+  } else if (candidate.includes(query)) {
+    score += 1_000;
+  }
+  return {
+    file_name: fileName,
+    indices,
+    match_type: "file",
+    path: relativePath,
+    root: "",
+    score,
+  };
+}
+
+function fuzzySearchGlob(rawQuery: string): string {
+  const normalized = rawQuery.trim().replace(/^@/, "").replaceAll("\\", "/");
+  const segments = normalized.split("/").filter(Boolean);
+  const fuzzySegments = segments.map((segment) => {
+    const characters = [...segment].filter((character) => /[\p{L}\p{N}]/u.test(character));
+    const pattern = characters
+      .map((character) =>
+        /^[a-z]$/i.test(character)
+          ? `[${character.toLowerCase()}${character.toUpperCase()}]`
+          : character,
+      )
+      .join("*");
+    return pattern.length > 0 ? `*${pattern}*` : "*";
+  });
+  return `**/${fuzzySegments.length > 0 ? fuzzySegments.join("/") : "*"}`;
+}
+
 export function isWorkspaceResourceOperation(
   operation: string,
 ): operation is
   | "resolveEditorContext"
+  | "resolveFuzzyFileSearch"
   | "openWorkspaceResource"
   | "registerWorkspaceResource"
   | "showWorkspaceDiff" {
   return (
     operation === "resolveEditorContext" ||
+    operation === "resolveFuzzyFileSearch" ||
     operation === "openWorkspaceResource" ||
     operation === "registerWorkspaceResource" ||
     operation === "showWorkspaceDiff"
@@ -177,6 +243,9 @@ export class WorkspaceResourceController
     const rootId = requiredString(request.params, "rootId");
     if (request.operation === "resolveEditorContext") {
       return await this.#resolveEditorContext(rootId);
+    }
+    if (request.operation === "resolveFuzzyFileSearch") {
+      return await this.#resolveFuzzyFileSearch(rootId, request.params);
     }
     const path = requiredString(request.params, "path");
     const resolved = this.#resolve(rootId, path);
@@ -322,6 +391,97 @@ export class WorkspaceResourceController
       }
       throw error;
     }
+  }
+
+  async #resolveFuzzyFileSearch(
+    rootId: string,
+    params: Record<string, unknown>,
+  ): Promise<RemoteFuzzyFileSearchResult> {
+    const query = params.query;
+    if (
+      typeof query !== "string" ||
+      query.includes("\0") ||
+      query.length > MAX_FUZZY_QUERY_LENGTH
+    ) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        `params.query must be a NUL-free string of at most ${MAX_FUZZY_QUERY_LENGTH} characters`,
+      );
+    }
+    const requestedMaxResults = params.maxResults ?? 100;
+    if (
+      typeof requestedMaxResults !== "number" ||
+      !Number.isInteger(requestedMaxResults) ||
+      requestedMaxResults < 1 ||
+      requestedMaxResults > MAX_FUZZY_FILE_RESULTS
+    ) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        `params.maxResults must be an integer between 1 and ${MAX_FUZZY_FILE_RESULTS}`,
+      );
+    }
+    const config = this.#config();
+    const root = config?.roots.find((candidate) => candidate.id === rootId);
+    if (
+      !config ||
+      config.connectionMode !== "vscode-remote" ||
+      !root ||
+      root.target !== "remote" ||
+      root.role !== "primary" ||
+      root.path !== config.workspaceRoot
+    ) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Remote file search does not match the active workspace",
+      );
+    }
+    const remote = detectRemoteWorkspace();
+    if (
+      remote.host !== config.host ||
+      remote.workspaceRoot !== config.workspaceRoot
+    ) {
+      throw new BridgeError(
+        "REMOTE_TRANSPORT_DISCONNECTED",
+        "The active Remote SSH workspace no longer matches the Bridge session",
+      );
+    }
+    if (query.trim().replace(/^@/, "").length === 0) {
+      return { files: [], scannedFileCount: 0, truncated: false };
+    }
+
+    const candidates = await vscode.workspace.findFiles(
+      new vscode.RelativePattern(remote.workspaceUri, fuzzySearchGlob(query)),
+      undefined,
+      MAX_FUZZY_FILE_CANDIDATES + 1,
+    );
+    const truncated = candidates.length > MAX_FUZZY_FILE_CANDIDATES;
+    const matches: FuzzyFileSearchMatch[] = [];
+    for (const uri of candidates.slice(0, MAX_FUZZY_FILE_CANDIDATES)) {
+      if (
+        uri.scheme !== remote.workspaceUri.scheme ||
+        uri.authority !== remote.workspaceUri.authority
+      ) {
+        continue;
+      }
+      let relativePath: string;
+      try {
+        relativePath = workspaceRelativePath(root.path, uri.path, "remote");
+      } catch {
+        continue;
+      }
+      const match = fuzzyMatch(relativePath, query);
+      if (match) {
+        matches.push({ ...match, root: root.path });
+      }
+    }
+    matches.sort(
+      (left, right) => right.score - left.score || left.path.localeCompare(right.path),
+    );
+    return {
+      files: matches.slice(0, requestedMaxResults),
+      scannedFileCount: Math.min(candidates.length, MAX_FUZZY_FILE_CANDIDATES),
+      truncated,
+    };
   }
 
   #resolveRemoteEditor(uri: vscode.Uri): ResolvedResource {

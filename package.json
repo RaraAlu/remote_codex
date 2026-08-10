@@ -2,7 +2,7 @@
   "name": "codex-vscode-remote-bridge",
   "displayName": "Codex Remote Bridge",
   "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
-  "version": "0.3.69",
+  "version": "0.3.70",
   "private": true,
   "publisher": "zkbot",
   "license": "MIT",
@@ -39,7 +39,9 @@
     "onCommand:codexRemoteBridge.addRemoteSelectionContext",
     "onCommand:codexRemoteBridge.enableExternalCliMcp",
     "onCommand:codexRemoteBridge.disableExternalCliMcp",
-    "onCommand:codexRemoteBridge.restoreSettings"
+    "onCommand:codexRemoteBridge.restoreSettings",
+    "onCommand:codexRemoteBridge.enableWorkbenchDrop",
+    "onCommand:codexRemoteBridge.disableWorkbenchDrop"
   ],
   "contributes": {
     "commands": [
@@ -90,6 +92,14 @@
       {
         "command": "codexRemoteBridge.restoreSettings",
         "title": "Codex Bridge: Restore Official Codex Settings"
+      },
+      {
+        "command": "codexRemoteBridge.enableWorkbenchDrop",
+        "title": "Codex Bridge: Enable Native Codex Drop Surface"
+      },
+      {
+        "command": "codexRemoteBridge.disableWorkbenchDrop",
+        "title": "Codex Bridge: Disable Native Codex Drop Surface"
       }
     ],
     "menus": {

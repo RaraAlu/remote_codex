@@ -6,7 +6,9 @@ import {
   bridgeSessionConfigPath,
   bridgeShimRuntimeStatusPath,
   bridgeStateDir,
+  codexInlineMentionCompatibilityDir,
   officialExtensionCompatibilityDir,
+  workbenchDropCompatibilityDir,
 } from "../src/core/locations.js";
 
 describe("bridge window session locations", () => {
@@ -88,6 +90,20 @@ describe("bridge window session locations", () => {
       officialExtensionCompatibilityDir(environment, "win32", "C:\\Users\\tester"),
     ).toBe(
       "C:\\Users\\tester\\AppData\\Local\\codex-remote-bridge\\official-extension-compatibility",
+    );
+    expect(
+      workbenchDropCompatibilityDir(environment, "win32", "C:\\Users\\tester"),
+    ).toBe(
+      "C:\\Users\\tester\\AppData\\Local\\codex-remote-bridge\\workbench-drop-compatibility",
+    );
+    expect(
+      codexInlineMentionCompatibilityDir(
+        environment,
+        "win32",
+        "C:\\Users\\tester",
+      ),
+    ).toBe(
+      "C:\\Users\\tester\\AppData\\Local\\codex-remote-bridge\\codex-inline-mention-compatibility",
     );
     expect(
       bridgeRemoteControlDir(

@@ -80,6 +80,30 @@ export function officialExtensionCompatibilityDir(
   );
 }
 
+export function workbenchDropCompatibilityDir(
+  environment: NodeJS.ProcessEnv = process.env,
+  hostPlatform: NodeJS.Platform = process.platform,
+  homeDirectory = homedir(),
+): string {
+  const pathApi = hostPlatform === "win32" ? win32 : posix;
+  return pathApi.join(
+    bridgeStateDir(environment, hostPlatform, homeDirectory),
+    "workbench-drop-compatibility",
+  );
+}
+
+export function codexInlineMentionCompatibilityDir(
+  environment: NodeJS.ProcessEnv = process.env,
+  hostPlatform: NodeJS.Platform = process.platform,
+  homeDirectory = homedir(),
+): string {
+  const pathApi = hostPlatform === "win32" ? win32 : posix;
+  return pathApi.join(
+    bridgeStateDir(environment, hostPlatform, homeDirectory),
+    "codex-inline-mention-compatibility",
+  );
+}
+
 export function bridgeControlDir(
   environment: NodeJS.ProcessEnv = process.env,
   hostPlatform: NodeJS.Platform = process.platform,

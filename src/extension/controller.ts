@@ -22,8 +22,10 @@ import {
   bridgeRemoteControlDir,
   bridgeSessionConfigPath,
   bridgeShimRuntimeStatusPath,
+  codexInlineMentionCompatibilityDir,
   officialCodexRuntimePath,
   officialExtensionCompatibilityDir,
+  workbenchDropCompatibilityDir,
 } from "../core/locations.js";
 import {
   OFFICIAL_CODEX_EXTENSION_ID,
@@ -83,8 +85,28 @@ import {
   type LocalRootDiagnostic,
 } from "./local-root-authority.js";
 import { ControllerWorkspaceDispatcher } from "./controller-workspace-dispatcher.js";
+import {
+  attachDroppedResourcesToCodex,
+  parseWorkbenchDropPayload,
+  type CodexContextInsertionMode,
+} from "./codex-context-drop.js";
+import {
+  enableCodexInlineMentionCompatibility,
+  inspectCodexInlineMentionCompatibility,
+  restoreCodexInlineMentionCompatibility,
+  type CodexInlineMentionCompatibilityResult,
+} from "./codex-inline-mention-compatibility.js";
 import { LocalWorkspaceExecutor } from "./local-workspace-executor.js";
 import { repairCodexViewLocation } from "./view-location.js";
+import {
+  enableWorkbenchDropCompatibility,
+  inspectWorkbenchDropCompatibility,
+  replaceWorkbenchAssetWithPkexec,
+  restoreWorkbenchDropCompatibility,
+  workbenchDropTargetNeedsElevation,
+  type WorkbenchAssetReplacer,
+  type WorkbenchDropCompatibilityResult,
+} from "./workbench-drop-compatibility.js";
 import { VsCodeTransportServer } from "./vscode-transport-server.js";
 import {
   isWorkspaceResourceOperation,
@@ -135,6 +157,8 @@ interface DiagnosticReport {
     appServerLastError: string | null;
     officialSettings: OfficialSettingsStatus;
     officialExtensionCompatibility: OfficialExtensionCompatibilityResult | null;
+    codexInlineMentionCompatibility: CodexInlineMentionCompatibilityResult | null;
+    workbenchDropCompatibility: WorkbenchDropCompatibilityResult | null;
     authorizedRoots: LocalRootDiagnostic[];
   };
   remote: {
@@ -325,6 +349,15 @@ export class BridgeController implements vscode.Disposable {
       vscode.commands.registerCommand("codexRemoteBridge.restoreSettings", () =>
         this.restoreOfficialSettings(),
       ),
+      vscode.commands.registerCommand("codexRemoteBridge.enableWorkbenchDrop", () =>
+        this.enableWorkbenchDrop(),
+      ),
+      vscode.commands.registerCommand("codexRemoteBridge.disableWorkbenchDrop", () =>
+        this.disableWorkbenchDrop(),
+      ),
+      vscode.commands.registerCommand("codexRemoteBridge.acceptWorkbenchDrop", (payload) =>
+        this.addWorkbenchCodexContext(payload),
+      ),
       vscode.commands.registerCommand(REMOTE_OUTPUT_COMMAND, (event) =>
         this.#transport.handleOutput(event),
       ),
@@ -372,11 +405,6 @@ export class BridgeController implements vscode.Disposable {
       remoteName: vscode.env.remoteName,
       workspaceFolderCount: vscode.workspace.workspaceFolders?.length ?? 0,
     });
-    if (!plan.refreshOfficialRuntime && !plan.reconcileExternalCli) {
-      this.#log("automatic initialization disabled; bridge remains idle");
-      return;
-    }
-
     if (plan.repairManagedExecutable) {
       try {
         const shimPath = await installOfficialShimLauncher(this.#context);
@@ -397,6 +425,11 @@ export class BridgeController implements vscode.Disposable {
         void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
         return;
       }
+    }
+
+    if (!plan.refreshOfficialRuntime && !plan.reconcileExternalCli) {
+      this.#log("automatic initialization disabled; bridge remains idle");
+      return;
     }
 
     if (plan.refreshOfficialRuntime) {
@@ -569,6 +602,252 @@ export class BridgeController implements vscode.Disposable {
       this.#log(`remote editor context queue failed: ${bridgeError.message}`);
       void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
     }
+  }
+
+  async addDroppedCodexContext(
+    resources: readonly vscode.Uri[],
+    insertionMode: CodexContextInsertionMode = "attachment",
+  ): Promise<Awaited<ReturnType<typeof attachDroppedResourcesToCodex>>> {
+    try {
+      const result = await attachDroppedResourcesToCodex(resources, {
+        insertionMode,
+        log: (message) => this.logCodexContextDrop(message),
+      });
+      if (result.attachedCount === 0) {
+        throw new BridgeError(
+          "COMMAND_DENIED",
+          result.firstFailure ?? "No dropped resource could be added to Codex",
+        );
+      }
+      await this.#audit.write({
+        operation: "codex_context.drop",
+        outcome: "succeeded",
+        hostId: this.#config?.host,
+        workspaceRoot: this.#config?.workspaceRoot,
+        details: {
+          attachedCount: result.attachedCount,
+          directoryCount: result.directoryCount,
+          duplicateCount: result.duplicateCount,
+          failedCount: result.failedCount,
+          fileCount: result.fileCount,
+          insertionMode,
+          localCount: result.localCount,
+          remoteCount: result.remoteCount,
+        },
+      });
+      if (result.failedCount > 0) {
+        void vscode.window.showWarningMessage(
+          `Codex Bridge added ${result.attachedCount} context item(s); ${result.failedCount} failed: ${result.firstFailure ?? "unknown error"}`,
+        );
+      } else {
+        vscode.window.setStatusBarMessage(
+          `Codex Bridge added ${result.attachedCount} context item(s)`,
+          3_000,
+        );
+      }
+      return result;
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "COMMAND_DENIED");
+      this.#log(`Codex context drop failed: ${bridgeError.message}`);
+      await this.#audit.write({
+        operation: "codex_context.drop",
+        outcome: "failed",
+        hostId: this.#config?.host,
+        workspaceRoot: this.#config?.workspaceRoot,
+        details: { error: bridgeError.message },
+      });
+      throw bridgeError;
+    }
+  }
+
+  async addWorkbenchCodexContext(payload: unknown): Promise<void> {
+    try {
+      this.logCodexContextDrop("phase.workbench.drop.begin");
+      const parsed = parseWorkbenchDropPayload(
+        payload,
+        (message) => this.logCodexContextDrop(message),
+      );
+      const insertionMode: CodexContextInsertionMode =
+        parsed.source === "vscode-explorer" ? "inline-mention" : "attachment";
+      const result = await this.addDroppedCodexContext(
+        parsed.resources,
+        insertionMode,
+      );
+      this.logCodexContextDrop(
+        `phase.workbench.drop.complete source=${JSON.stringify(parsed.source)} insertionMode=${JSON.stringify(insertionMode)} resourceCount=${parsed.resources.length} attachedCount=${result.attachedCount}`,
+      );
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "COMMAND_DENIED");
+      this.logCodexContextDrop(
+        `phase.workbench.drop.failure error=${JSON.stringify(bridgeError.message)}`,
+      );
+      void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+      throw bridgeError;
+    }
+  }
+
+  logCodexContextDrop(message: string): void {
+    this.#log(`[context-drop] ${message}`);
+  }
+
+  async enableWorkbenchDrop(): Promise<void> {
+    const confirmation = await vscode.window.showWarningMessage(
+      [
+        "This compatibility layer modifies the installed VS Code Workbench and official Codex Webview JavaScript assets.",
+        "VS Code Explorer drops will be inserted as native @ mentions at the current composer cursor.",
+        "System file manager drops will keep Codex file attachment behavior so paths outside the workspace remain usable.",
+        "Codex Bridge keeps SHA-256 verified backups and refuses to overwrite later changes.",
+        "A VS Code or official Codex update may remove the patches and require a new compatibility check.",
+      ].join("\n"),
+      { modal: true },
+      "Enable",
+    );
+    if (confirmation !== "Enable") {
+      return;
+    }
+    let inlineMentionChanged = false;
+    try {
+      const installation = this.#officialCodexExtensionIdentity();
+      const inlineMention = await enableCodexInlineMentionCompatibility({
+        extensionPath: installation.extensionPath,
+        extensionVersion: installation.extensionVersion,
+        stateDirectory: codexInlineMentionCompatibilityDir(),
+      });
+      await this.#recordCodexInlineMentionCompatibility("enable", inlineMention);
+      if (["conflict", "unavailable", "unsupported"].includes(inlineMention.status)) {
+        throw new BridgeError(
+          "COMMAND_DENIED",
+          inlineMention.detail ??
+            `Codex inline mention compatibility is ${inlineMention.status}`,
+        );
+      }
+      inlineMentionChanged = inlineMention.changed;
+
+      const workbench = await enableWorkbenchDropCompatibility({
+        appRoot: vscode.env.appRoot,
+        stateDirectory: workbenchDropCompatibilityDir(),
+        replaceTarget: await this.#workbenchDropReplacer(),
+      });
+      await this.#recordWorkbenchDropCompatibility("enable", workbench);
+      if (["conflict", "unavailable", "unsupported"].includes(workbench.status)) {
+        throw new BridgeError(
+          "COMMAND_DENIED",
+          workbench.detail ?? `Workbench drop compatibility is ${workbench.status}`,
+        );
+      }
+      void vscode.window.showInformationMessage(
+        workbench.changed || inlineMention.changed
+          ? "Codex Bridge enabled cursor-positioned @ mention drops. Reload VS Code manually to activate them."
+          : "The native Codex drop surface is already enabled.",
+      );
+    } catch (error) {
+      if (inlineMentionChanged) {
+        try {
+          const installation = this.#officialCodexExtensionIdentity();
+          const restored = await restoreCodexInlineMentionCompatibility({
+            extensionPath: installation.extensionPath,
+            extensionVersion: installation.extensionVersion,
+            stateDirectory: codexInlineMentionCompatibilityDir(),
+          });
+          await this.#recordCodexInlineMentionCompatibility("rollback", restored);
+        } catch (rollbackError) {
+          this.#log(
+            `Codex inline mention compatibility rollback failed: ${String(rollbackError)}`,
+          );
+        }
+      }
+      const bridgeError = asBridgeError(error, "COMMAND_DENIED");
+      this.#log(`Workbench drop compatibility enable failed: ${bridgeError.message}`);
+      void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+    }
+  }
+
+  async disableWorkbenchDrop(): Promise<void> {
+    const confirmation = await vscode.window.showWarningMessage(
+      "Restore the exact VS Code Workbench and official Codex Webview assets saved before drop compatibility was enabled?",
+      { modal: true },
+      "Disable",
+    );
+    if (confirmation !== "Disable") {
+      return;
+    }
+    try {
+      const workbench = await restoreWorkbenchDropCompatibility({
+        appRoot: vscode.env.appRoot,
+        stateDirectory: workbenchDropCompatibilityDir(),
+        replaceTarget: await this.#workbenchDropReplacer(),
+      });
+      await this.#recordWorkbenchDropCompatibility("restore", workbench);
+      const installation = this.#officialCodexExtensionIdentity();
+      const inlineMention = await restoreCodexInlineMentionCompatibility({
+        extensionPath: installation.extensionPath,
+        extensionVersion: installation.extensionVersion,
+        stateDirectory: codexInlineMentionCompatibilityDir(),
+      });
+      await this.#recordCodexInlineMentionCompatibility("restore", inlineMention);
+      const failed = [workbench, inlineMention].find((result) =>
+        ["conflict", "unavailable", "unsupported"].includes(result.status),
+      );
+      if (failed) {
+        throw new BridgeError(
+          "COMMAND_DENIED",
+          failed.detail ?? `Codex drop compatibility is ${failed.status}`,
+        );
+      }
+      void vscode.window.showInformationMessage(
+        workbench.changed || inlineMention.changed
+          ? "Codex Bridge restored the original VS Code and Codex assets. Reload VS Code manually to finish."
+          : "The native Codex drop surface is not enabled.",
+      );
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "COMMAND_DENIED");
+      this.#log(`Workbench drop compatibility restore failed: ${bridgeError.message}`);
+      void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+    }
+  }
+
+  async #workbenchDropReplacer(): Promise<WorkbenchAssetReplacer | undefined> {
+    if (!(await workbenchDropTargetNeedsElevation(vscode.env.appRoot))) {
+      return undefined;
+    }
+    if (process.platform !== "linux") {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "The current VS Code installation needs elevated file access, which this platform does not yet support",
+      );
+    }
+    return replaceWorkbenchAssetWithPkexec;
+  }
+
+  async #recordWorkbenchDropCompatibility(
+    action: "enable" | "restore",
+    result: WorkbenchDropCompatibilityResult,
+  ): Promise<void> {
+    this.#log(
+      `Workbench drop compatibility ${action}: ${result.status}${result.detail ? ` (${result.detail})` : ""}`,
+    );
+    await this.#audit.write({
+      operation: `workbench_drop.${action}`,
+      outcome: result.status === "conflict" || result.status === "unsupported" ? "failed" : "succeeded",
+      details: { ...result },
+    });
+  }
+
+  async #recordCodexInlineMentionCompatibility(
+    action: "enable" | "restore" | "rollback",
+    result: CodexInlineMentionCompatibilityResult,
+  ): Promise<void> {
+    this.#log(
+      `Codex inline mention compatibility ${action}: ${result.status}${result.detail ? ` (${result.detail})` : ""}`,
+    );
+    await this.#audit.write({
+      operation: `codex_inline_mention.${action}`,
+      outcome:
+        result.status === "conflict" || result.status === "unsupported"
+          ? "failed"
+          : "succeeded",
+      details: { ...result },
+    });
   }
 
   async #configureCurrentRemote(interactive: boolean): Promise<void> {
@@ -793,8 +1072,18 @@ export class BridgeController implements vscode.Disposable {
       .getConfiguration("codexRemoteBridge")
       .update("autoInitialize", false, vscode.ConfigurationTarget.Global);
     let compatibility: OfficialExtensionCompatibilityResult | null = null;
+    let inlineMentionCompatibility: CodexInlineMentionCompatibilityResult | null = null;
     try {
       const installation = this.#officialCodexInstallation();
+      inlineMentionCompatibility = await restoreCodexInlineMentionCompatibility({
+        extensionPath: installation.extensionPath,
+        extensionVersion: installation.extensionVersion,
+        stateDirectory: codexInlineMentionCompatibilityDir(),
+      });
+      await this.#recordCodexInlineMentionCompatibility(
+        "restore",
+        inlineMentionCompatibility,
+      );
       compatibility = await restoreOfficialExtensionCompatibility({
         extensionPath: installation.extensionPath,
         extensionVersion: installation.extensionVersion,
@@ -813,11 +1102,14 @@ export class BridgeController implements vscode.Disposable {
       this.#log(`official Codex compatibility restoration skipped: ${String(error)}`);
     }
     const restored = await this.#settings.restore();
-    if (compatibility?.status === "conflict") {
+    if (
+      compatibility?.status === "conflict" ||
+      inlineMentionCompatibility?.status === "conflict"
+    ) {
       void vscode.window.showErrorMessage(
-        `Codex Bridge restored its saved settings but did not overwrite the changed official extension asset: ${compatibility.detail ?? "compatibility state conflict"}`,
+        `Codex Bridge restored its saved settings but did not overwrite a changed official extension asset: ${inlineMentionCompatibility?.detail ?? compatibility?.detail ?? "compatibility state conflict"}`,
       );
-    } else if (restored && compatibility?.changed) {
+    } else if (restored && (compatibility?.changed || inlineMentionCompatibility?.changed)) {
       void vscode.window.showInformationMessage(
         "Codex Bridge restored the previous official Codex settings and managed compatibility files. Reload VS Code.",
       );
@@ -825,7 +1117,7 @@ export class BridgeController implements vscode.Disposable {
       void vscode.window.showInformationMessage(
         "Codex Bridge restored the previous official Codex and Remote SSH settings. Reload VS Code.",
       );
-    } else if (compatibility?.changed) {
+    } else if (compatibility?.changed || inlineMentionCompatibility?.changed) {
       void vscode.window.showInformationMessage(
         "Codex Bridge restored the managed official Codex compatibility file. Reload VS Code.",
       );
@@ -1347,6 +1639,26 @@ export class BridgeController implements vscode.Disposable {
     const shimHealth = config
       ? await this.#readShimRuntimeHealth(config)
       : { ...EMPTY_SHIM_RUNTIME_HEALTH };
+    const workbenchDropCompatibility = await inspectWorkbenchDropCompatibility({
+      appRoot: vscode.env.appRoot,
+      stateDirectory: workbenchDropCompatibilityDir(),
+    }).catch((error) => {
+      this.#log(`Workbench drop compatibility diagnostics failed: ${String(error)}`);
+      return null;
+    });
+    const codexInlineMentionCompatibility = codexExtension
+      ? await inspectCodexInlineMentionCompatibility({
+          extensionPath: codexExtension.extensionPath,
+          extensionVersion:
+            typeof codexExtension.packageJSON.version === "string"
+              ? codexExtension.packageJSON.version
+              : null,
+          stateDirectory: codexInlineMentionCompatibilityDir(),
+        }).catch((error) => {
+          this.#log(`Codex inline mention compatibility diagnostics failed: ${String(error)}`);
+          return null;
+        })
+      : null;
     return {
       generatedAt: new Date().toISOString(),
       bridge: {
@@ -1397,6 +1709,8 @@ export class BridgeController implements vscode.Disposable {
         appServerLastError: shimHealth.appServerLastError,
         officialSettings: this.#settings.status(shimPath),
         officialExtensionCompatibility: this.#officialExtensionCompatibility,
+        codexInlineMentionCompatibility,
+        workbenchDropCompatibility,
         authorizedRoots: await this.#localRootDiagnostics(config),
       },
       remote: {
@@ -1445,6 +1759,17 @@ export class BridgeController implements vscode.Disposable {
     extensionPath: string;
     extensionVersion: string | null;
   } {
+    const extension = this.#officialCodexExtensionIdentity();
+    return {
+      executable: resolveOfficialCodexExecutable(extension.extensionPath),
+      ...extension,
+    };
+  }
+
+  #officialCodexExtensionIdentity(): {
+    extensionPath: string;
+    extensionVersion: string | null;
+  } {
     const extension = vscode.extensions.getExtension(OFFICIAL_CODEX_EXTENSION_ID);
     if (!extension) {
       throw new BridgeError(
@@ -1454,7 +1779,6 @@ export class BridgeController implements vscode.Disposable {
     }
     const extensionVersion = extension.packageJSON.version;
     return {
-      executable: resolveOfficialCodexExecutable(extension.extensionPath),
       extensionPath: extension.extensionPath,
       extensionVersion:
         typeof extensionVersion === "string" && extensionVersion ? extensionVersion : null,

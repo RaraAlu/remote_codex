@@ -13,7 +13,7 @@ function state() {
 }
 
 describe("repairCodexViewLocation", () => {
-  it("focuses, resets, and reopens the Codex view only once per workspace", async () => {
+  it("restores and reopens the official Codex view only once per workspace", async () => {
     const executeCommand = vi.fn(async (_command: string) => undefined);
     const commands = {
       getCommands: vi.fn(async () => [
@@ -36,7 +36,7 @@ describe("repairCodexViewLocation", () => {
     expect(executeCommand).toHaveBeenCalledTimes(3);
   });
 
-  it("leaves layout untouched when VS Code does not expose the focused-view reset command", async () => {
+  it("leaves layout untouched when the focused-view reset is unavailable", async () => {
     const executeCommand = vi.fn(async (_command: string) => undefined);
     const commands = {
       getCommands: vi.fn(async () => ["chatgpt.sidebarSecondaryView.focus"]),

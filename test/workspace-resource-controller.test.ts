@@ -7,6 +7,7 @@ import type { ControllerWorkspaceRequest } from "../src/core/vscode-transport.js
 const mock = vi.hoisted(() => ({
   activeTextEditor: null as vscodeTypes.TextEditor | null,
   executeCommand: vi.fn(async () => undefined),
+  findFiles: vi.fn(async () => [] as vscodeTypes.Uri[]),
   openTextDocument: vi.fn(async (uri: unknown) => ({ uri })),
   readFile: vi.fn(async () => new Uint8Array(Buffer.from("live\n"))),
   remoteContext: null as null | {
@@ -74,8 +75,19 @@ vi.mock("vscode", () => {
     }
   }
 
+  class RelativePattern {
+    readonly base: Uri;
+    readonly pattern: string;
+
+    constructor(base: Uri, pattern: string) {
+      this.base = base;
+      this.pattern = pattern;
+    }
+  }
+
   return {
     Range,
+    RelativePattern,
     Uri,
     commands: { executeCommand: mock.executeCommand },
     window: {
@@ -85,6 +97,7 @@ vi.mock("vscode", () => {
       showTextDocument: mock.showTextDocument,
     },
     workspace: {
+      findFiles: mock.findFiles,
       fs: {
         readFile: mock.readFile,
         stat: mock.stat,
@@ -148,6 +161,7 @@ function config(roots: WorkspaceRootConfig[] = [remoteRoot]): BridgeConfig {
 function request(
   operation:
     | "resolveEditorContext"
+    | "resolveFuzzyFileSearch"
     | "openWorkspaceResource"
     | "registerWorkspaceResource"
     | "showWorkspaceDiff",
@@ -170,6 +184,7 @@ function request(
 describe("WorkspaceResourceController", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mock.findFiles.mockResolvedValue([]);
     mock.activeTextEditor = null;
     mock.remoteContext = {
       host: "test_40",
@@ -231,6 +246,51 @@ describe("WorkspaceResourceController", () => {
           "vscode-remote://ssh-remote%2Btest_40/home/zkbot/work/train/zklab/Zklab/src/main.py",
       }),
     );
+  });
+
+  it("searches and ranks files inside the exact Remote SSH workspace", async () => {
+    mock.findFiles.mockResolvedValue([
+      vscode.Uri.parse(
+        "vscode-remote://ssh-remote%2Btest_40/home/zkbot/work/train/zklab/Zklab/docs/recording.md",
+      ),
+      vscode.Uri.parse(
+        "vscode-remote://ssh-remote%2Btest_40/home/zkbot/work/train/zklab/Zklab/src/locomotion/scripts/record_torque.py",
+      ),
+      vscode.Uri.parse(
+        "vscode-remote://ssh-remote%2Bother-host/home/zkbot/work/train/zklab/Zklab/record_torque.py",
+      ),
+    ]);
+    const controller = new WorkspaceResourceController(
+      () => config(),
+      () => undefined,
+    );
+
+    const result = await controller.execute(
+      request("resolveFuzzyFileSearch", remoteRoot.id, {
+        maxResults: 10,
+        query: "record_torque",
+      }),
+    );
+
+    expect(mock.findFiles).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pattern: expect.stringMatching(/^\*\*\/.*\[rR\].*\[tT\]/),
+      }),
+      undefined,
+      50_001,
+    );
+    expect(result).toEqual({
+      files: [
+        expect.objectContaining({
+          file_name: "record_torque.py",
+          match_type: "file",
+          path: "src/locomotion/scripts/record_torque.py",
+          root: remoteRoot.path,
+        }),
+      ],
+      scannedFileCount: 3,
+      truncated: false,
+    });
   });
 
   it("opens a verified in-memory before snapshot against the live remote URI", async () => {
