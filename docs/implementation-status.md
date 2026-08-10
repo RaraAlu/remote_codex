@@ -490,6 +490,13 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
   内联标记和远端默认内联路径。2026-08-10 用户完成真实环境回归，确认统一 `@` 拖放在
   本地和 Remote SSH 使用路径均可用；本实现目标据此完成，兼容层禁用恢复与后续官方升级
   回归继续作为独立发布门禁保留。
+- `0.3.72` 修复依赖审计无法自动收敛的问题。根 `overrides` 曾把 Ajv 使用的
+  `fast-uri` 显式固定在存在 `GHSA-7p8r-x3mc-p8w7` 的 `3.1.4`，因此
+  `npm audit fix` 必须尊重覆盖值，虽报告存在修复仍不能自行升级。覆盖值现固定为已修复的
+  `3.1.5`，并应用 npm 给出的非破坏性审计更新到 `hono`、`ip-address`、`undici`、
+  `brace-expansion`、`js-yaml`、`nanoid` 和 `postcss`。更新后 `npm audit` 为 0，完整检查、
+  Shim 冒烟和 Linux x64 构包通过；详细证据见
+  `docs/acceptance/2026-08-10-release-0.3.72-dependency-audit.md`。
 
 活动实施项及其退出条件统一保存在根 `README.md` 最末尾的 `TODO` 中；本节只保留已完成
 的能力探针结论。
