@@ -62,12 +62,18 @@ vi.mock("vscode", () => {
       return `${this.scheme}://${this.authority}${this.path}${query}${fragment}`;
     }
 
-    with(change: { fragment?: string | null }): Uri {
+    with(change: {
+      authority?: string | null;
+      fragment?: string | null;
+      path?: string | null;
+      query?: string | null;
+      scheme?: string | null;
+    }): Uri {
       return new Uri(
-        this.scheme,
-        this.authority,
-        this.path,
-        this.query,
+        change.scheme === undefined ? this.scheme : (change.scheme ?? ""),
+        change.authority === undefined ? this.authority : (change.authority ?? ""),
+        change.path === undefined ? this.path : (change.path ?? ""),
+        change.query === undefined ? this.query : (change.query ?? ""),
         change.fragment === undefined ? this.fragment : (change.fragment ?? ""),
       );
     }
@@ -100,7 +106,10 @@ import {
   extractWorkbenchDropPayloadUris,
   parseWorkbenchDropPayload,
 } from "../src/extension/codex-context-drop.js";
-import { CODEX_INLINE_MENTION_PATH_MARKER } from "../src/extension/codex-inline-mention-patch.js";
+import {
+  CODEX_INLINE_MENTION_PATH_MARKER,
+  CODEX_REMOTE_INLINE_MENTION_PATH_PREFIX,
+} from "../src/extension/codex-inline-mention-patch.js";
 
 describe("Codex Workbench drop", () => {
   beforeEach(() => {
@@ -148,7 +157,56 @@ describe("Codex Workbench drop", () => {
     ]);
   });
 
-  it("adds local files and folders through the official command with folder semantics", async () => {
+  it("canonicalizes Remote SSH Explorer CodeFiles to the active remote URI", () => {
+    mock.remoteName = "ssh-remote";
+    mock.workspaceFolders = [
+      {
+        index: 0,
+        name: "project",
+        uri: vscode.Uri.parse("vscode-remote://ssh-remote%2Bdev/home/unitree/project"),
+      },
+    ];
+
+    const parsed = parseWorkbenchDropPayload({
+      schemaVersion: 1,
+      codeFiles: '["/home/unitree/project/src/main.py"]',
+      internalUriList:
+        "vscode-remote://ssh-remote%2Bdev/home/unitree/project/src/main.py",
+    });
+
+    expect(parsed.source).toBe("vscode-explorer");
+    expect(parsed.resources.map((resource) => resource.toString())).toEqual([
+      "vscode-remote://ssh-remote+dev/home/unitree/project/src/main.py",
+    ]);
+  });
+
+  it("maps a CodeFiles-only Remote SSH Explorer path without reclassifying desktop files", () => {
+    mock.remoteName = "ssh-remote";
+    mock.workspaceFolders = [
+      {
+        index: 0,
+        name: "project",
+        uri: vscode.Uri.parse("vscode-remote://ssh-remote%2Bdev/home/unitree/project"),
+      },
+    ];
+
+    const explorer = parseWorkbenchDropPayload({
+      schemaVersion: 1,
+      codeFiles: '["/home/unitree/project/src/main.py"]',
+    });
+    const desktop = parseWorkbenchDropPayload({
+      schemaVersion: 1,
+      nativeFilePaths: ["/home/unitree/project/local-copy.py"],
+      uriList: "file:///home/unitree/project/local-copy.py",
+    });
+
+    expect(explorer.resources[0]?.scheme).toBe("vscode-remote");
+    expect(explorer.resources[0]?.path).toBe("/home/unitree/project/src/main.py");
+    expect(desktop.source).toBe("system-file-manager");
+    expect(desktop.resources[0]?.scheme).toBe("file");
+  });
+
+  it("adds every local file and folder as a cursor-positioned inline mention", async () => {
     const logs: string[] = [];
     const result = await attachDroppedResourcesToCodex(
       [
@@ -162,10 +220,10 @@ describe("Codex Workbench drop", () => {
     expect(mock.executeCommand).toHaveBeenCalledTimes(2);
     expect(mock.executeCommand.mock.calls[0]?.[0]).toBe("chatgpt.addFileToThread");
     expect((mock.executeCommand.mock.calls[0]?.[1] as vscodeTypes.Uri).fsPath).toBe(
-      "/work/main.py",
+      `/work/main.py${CODEX_INLINE_MENTION_PATH_MARKER}`,
     );
     expect((mock.executeCommand.mock.calls[1]?.[1] as vscodeTypes.Uri).fsPath).toBe(
-      "/work/folder/",
+      `/work/folder${CODEX_INLINE_MENTION_PATH_MARKER}/`,
     );
     expect(result).toEqual({
       attachedCount: 2,
@@ -180,10 +238,10 @@ describe("Codex Workbench drop", () => {
     expect(logs).toEqual(
       expect.arrayContaining([
         expect.stringContaining(
-          'phase.attach.map index=0 source="local-file" insertionMode="attachment" official=uri="file:///work/main.py"',
+          'phase.attach.map index=0 source="local-file" insertionMode="inline-mention"',
         ),
         expect.stringContaining(
-          'phase.attach.map index=1 source="local-file" insertionMode="attachment" official=uri="file:///work/folder/"',
+          'phase.attach.map index=1 source="local-file" insertionMode="inline-mention"',
         ),
         "phase.attach.complete attached=2 failed=0 duplicates=1 files=1 directories=1 local=2 remote=0",
       ]),
@@ -193,10 +251,22 @@ describe("Codex Workbench drop", () => {
   it("marks VS Code Explorer resources for cursor-positioned inline mentions", async () => {
     await attachDroppedResourcesToCodex(
       [vscode.Uri.file("/work/main.py"), vscode.Uri.file("/work/folder")],
-      { insertionMode: "inline-mention" },
     );
 
     expect(mock.executeCommand).toHaveBeenCalledTimes(2);
+    expect((mock.executeCommand.mock.calls[0]?.[1] as vscodeTypes.Uri).fsPath).toBe(
+      `/work/main.py${CODEX_INLINE_MENTION_PATH_MARKER}`,
+    );
+    expect((mock.executeCommand.mock.calls[1]?.[1] as vscodeTypes.Uri).fsPath).toBe(
+      `/work/folder${CODEX_INLINE_MENTION_PATH_MARKER}/`,
+    );
+  });
+
+  it("keeps a mixed drop uniformly represented as inline mentions", async () => {
+    await attachDroppedResourcesToCodex(
+      [vscode.Uri.file("/work/main.py"), vscode.Uri.file("/work/folder")],
+    );
+
     expect((mock.executeCommand.mock.calls[0]?.[1] as vscodeTypes.Uri).fsPath).toBe(
       `/work/main.py${CODEX_INLINE_MENTION_PATH_MARKER}`,
     );
@@ -215,16 +285,18 @@ describe("Codex Workbench drop", () => {
       },
     ];
 
-    const result = await attachDroppedResourcesToCodex([
-      vscode.Uri.parse(
-        "vscode-remote://ssh-remote%2Bdev/home/unitree/project/src/main.py",
-      ),
-      vscode.Uri.parse("vscode-remote://ssh-remote%2Bdev/home/unitree/other.py"),
-    ]);
+    const result = await attachDroppedResourcesToCodex(
+      [
+        vscode.Uri.parse(
+          "vscode-remote://ssh-remote%2Bdev/home/unitree/project/src/main.py",
+        ),
+        vscode.Uri.parse("vscode-remote://ssh-remote%2Bdev/home/unitree/other.py"),
+      ],
+    );
 
     expect(mock.executeCommand).toHaveBeenCalledTimes(1);
     expect((mock.executeCommand.mock.calls[0]?.[1] as vscodeTypes.Uri).fsPath).toBe(
-      "/home/unitree/project/src/main.py",
+      `/${CODEX_REMOTE_INLINE_MENTION_PATH_PREFIX}${encodeURIComponent("/home/unitree/project/src/main.py")}${CODEX_INLINE_MENTION_PATH_MARKER}`,
     );
     expect(result).toMatchObject({
       attachedCount: 1,
@@ -233,6 +305,29 @@ describe("Codex Workbench drop", () => {
       remoteCount: 1,
     });
     expect(result.firstFailure).toContain("outside the active Remote SSH workspace");
+  });
+
+  it("uses an inline mention for a remote workspace URI by default", async () => {
+    mock.remoteName = "ssh-remote";
+    mock.workspaceFolders = [
+      {
+        index: 0,
+        name: "project",
+        uri: vscode.Uri.parse("vscode-remote://ssh-remote%2Bdev/home/unitree/project"),
+      },
+    ];
+
+    const result = await attachDroppedResourcesToCodex([
+      vscode.Uri.parse(
+        "vscode-remote://ssh-remote%2Bdev/home/unitree/project/src/main.py",
+      ),
+    ]);
+
+    expect(mock.executeCommand).toHaveBeenCalledOnce();
+    expect((mock.executeCommand.mock.calls[0]?.[1] as vscodeTypes.Uri).fsPath).toBe(
+      `/${CODEX_REMOTE_INLINE_MENTION_PATH_PREFIX}${encodeURIComponent("/home/unitree/project/src/main.py")}${CODEX_INLINE_MENTION_PATH_MARKER}`,
+    );
+    expect(result.firstFailure).toBeNull();
   });
 
   it("fails closed when the official native context command is unavailable", async () => {

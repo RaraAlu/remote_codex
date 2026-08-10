@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
-import { basename, isAbsolute, normalize, parse } from "node:path";
+import { basename, isAbsolute, normalize, parse, relative, sep } from "node:path";
 import type * as vscode from "vscode";
 import { BridgeError } from "../core/errors.js";
 import type { WorkspaceRootConfig } from "../core/types.js";
@@ -75,6 +75,56 @@ function parseStoredRoots(value: unknown): WorkspaceRootConfig[] {
   return roots;
 }
 
+function isWithinRoot(rootPath: string, candidatePath: string): boolean {
+  const child = relative(rootPath, candidatePath);
+  return (
+    child === "" ||
+    (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child))
+  );
+}
+
+async function canonicalDirectory(selectedPath: string): Promise<string> {
+  let canonicalPath: string;
+  try {
+    canonicalPath = await realpath(selectedPath);
+    const metadata = await stat(canonicalPath);
+    if (!metadata.isDirectory()) {
+      throw new BridgeError("COMMAND_DENIED", "The selected local root is not a directory");
+    }
+  } catch (error) {
+    if (error instanceof BridgeError) {
+      throw error;
+    }
+    throw new BridgeError(
+      "COMMAND_DENIED",
+      "The selected local root does not exist or cannot be opened",
+      { path: selectedPath },
+      { cause: error },
+    );
+  }
+  if (
+    !isAbsolute(canonicalPath) ||
+    normalize(canonicalPath) !== canonicalPath ||
+    parse(canonicalPath).root === canonicalPath
+  ) {
+    throw new BridgeError(
+      "COMMAND_DENIED",
+      "The selected local root must not be a filesystem root",
+    );
+  }
+  return canonicalPath;
+}
+
+function localRoot(canonicalPath: string): WorkspaceRootConfig {
+  return {
+    id: `local-${createHash("sha256").update(canonicalPath).digest("hex").slice(0, 16)}`,
+    target: "local",
+    role: "secondary",
+    path: canonicalPath,
+    displayName: basename(canonicalPath).slice(0, 128),
+  };
+}
+
 export class LocalRootAuthority {
   readonly #state: vscode.Memento;
 
@@ -90,38 +140,21 @@ export class LocalRootAuthority {
     return this.roots().find((root) => root.id === rootId);
   }
 
-  async authorize(selectedPath: string): Promise<WorkspaceRootConfig> {
-    let canonicalPath: string;
-    try {
-      canonicalPath = await realpath(selectedPath);
-      const metadata = await stat(canonicalPath);
-      if (!metadata.isDirectory()) {
-        throw new BridgeError("COMMAND_DENIED", "The selected local root is not a directory");
-      }
-    } catch (error) {
-      if (error instanceof BridgeError) {
-        throw error;
-      }
-      throw new BridgeError(
-        "COMMAND_DENIED",
-        "The selected local root does not exist or cannot be opened",
-        { path: selectedPath },
-        { cause: error },
-      );
-    }
-    if (
-      !isAbsolute(canonicalPath) ||
-      normalize(canonicalPath) !== canonicalPath ||
-      parse(canonicalPath).root === canonicalPath
-    ) {
-      throw new BridgeError(
-        "COMMAND_DENIED",
-        "The selected local root must not be a filesystem root",
-      );
-    }
+  availableSlots(): number {
+    return MAX_LOCAL_ROOTS - this.roots().length;
+  }
 
+  async findContainingDirectory(
+    selectedPath: string,
+  ): Promise<WorkspaceRootConfig | undefined> {
+    const canonicalPath = await canonicalDirectory(selectedPath);
+    return this.roots().find((root) => isWithinRoot(root.path, canonicalPath));
+  }
+
+  async authorize(selectedPath: string): Promise<WorkspaceRootConfig> {
+    const canonicalPath = await canonicalDirectory(selectedPath);
     const current = this.roots();
-    const existing = current.find((root) => root.path === canonicalPath);
+    const existing = current.find((root) => isWithinRoot(root.path, canonicalPath));
     if (existing) {
       return existing;
     }
@@ -132,13 +165,7 @@ export class LocalRootAuthority {
       );
     }
 
-    const root: WorkspaceRootConfig = {
-      id: `local-${createHash("sha256").update(canonicalPath).digest("hex").slice(0, 16)}`,
-      target: "local",
-      role: "secondary",
-      path: canonicalPath,
-      displayName: basename(canonicalPath).slice(0, 128),
-    };
+    const root = localRoot(canonicalPath);
     const collision = current.find((candidate) => candidate.id === root.id);
     if (collision) {
       throw new BridgeError("INVALID_CONFIG", "Local root authorization ID collision");

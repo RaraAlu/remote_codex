@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
+import { dirname } from "node:path";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
 import { AuditLog } from "../core/audit-log.js";
@@ -42,7 +43,12 @@ import {
   type ShimRuntimeHealth,
 } from "../core/shim-runtime-status.js";
 import { BridgeStateMachine } from "../core/state-machine.js";
-import type { BridgeConfig, BridgeState, RemoteIdentity } from "../core/types.js";
+import type {
+  BridgeConfig,
+  BridgeState,
+  RemoteIdentity,
+  WorkspaceRootConfig,
+} from "../core/types.js";
 import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
 import {
   REMOTE_EXECUTOR_COMMAND,
@@ -88,7 +94,6 @@ import { ControllerWorkspaceDispatcher } from "./controller-workspace-dispatcher
 import {
   attachDroppedResourcesToCodex,
   parseWorkbenchDropPayload,
-  type CodexContextInsertionMode,
 } from "./codex-context-drop.js";
 import {
   enableCodexInlineMentionCompatibility,
@@ -606,11 +611,9 @@ export class BridgeController implements vscode.Disposable {
 
   async addDroppedCodexContext(
     resources: readonly vscode.Uri[],
-    insertionMode: CodexContextInsertionMode = "attachment",
   ): Promise<Awaited<ReturnType<typeof attachDroppedResourcesToCodex>>> {
     try {
       const result = await attachDroppedResourcesToCodex(resources, {
-        insertionMode,
         log: (message) => this.logCodexContextDrop(message),
       });
       if (result.attachedCount === 0) {
@@ -630,7 +633,7 @@ export class BridgeController implements vscode.Disposable {
           duplicateCount: result.duplicateCount,
           failedCount: result.failedCount,
           fileCount: result.fileCount,
-          insertionMode,
+          insertionMode: "inline-mention",
           localCount: result.localCount,
           remoteCount: result.remoteCount,
         },
@@ -667,14 +670,18 @@ export class BridgeController implements vscode.Disposable {
         payload,
         (message) => this.logCodexContextDrop(message),
       );
-      const insertionMode: CodexContextInsertionMode =
-        parsed.source === "vscode-explorer" ? "inline-mention" : "attachment";
-      const result = await this.addDroppedCodexContext(
+      const localResourcesReady = await this.#prepareDroppedLocalResources(
         parsed.resources,
-        insertionMode,
       );
+      if (!localResourcesReady) {
+        this.logCodexContextDrop(
+          `phase.workbench.drop.deferred source=${JSON.stringify(parsed.source)} reason="local-resource-authorization"`,
+        );
+        return;
+      }
+      const result = await this.addDroppedCodexContext(parsed.resources);
       this.logCodexContextDrop(
-        `phase.workbench.drop.complete source=${JSON.stringify(parsed.source)} insertionMode=${JSON.stringify(insertionMode)} resourceCount=${parsed.resources.length} attachedCount=${result.attachedCount}`,
+        `phase.workbench.drop.complete source=${JSON.stringify(parsed.source)} insertionMode="inline-mention" resourceCount=${parsed.resources.length} attachedCount=${result.attachedCount}`,
       );
     } catch (error) {
       const bridgeError = asBridgeError(error, "COMMAND_DENIED");
@@ -686,6 +693,95 @@ export class BridgeController implements vscode.Disposable {
     }
   }
 
+  async #prepareDroppedLocalResources(
+    resources: readonly vscode.Uri[],
+  ): Promise<boolean> {
+    if (vscode.env.remoteName !== "ssh-remote") {
+      return true;
+    }
+    const authorizationDirectories = new Map<string, string>();
+    for (const resource of resources) {
+      if (resource.scheme !== "file") {
+        continue;
+      }
+      const metadata = await vscode.workspace.fs.stat(resource);
+      const directoryPath = (metadata.type & vscode.FileType.Directory) !== 0
+        ? resource.fsPath
+        : dirname(resource.fsPath);
+      authorizationDirectories.set(
+        vscode.Uri.file(directoryPath).toString(true),
+        directoryPath,
+      );
+    }
+    if (authorizationDirectories.size === 0) {
+      return true;
+    }
+
+    const unauthorized: string[] = [];
+    for (const directoryPath of authorizationDirectories.values()) {
+      if (!(await this.#localRoots.findContainingDirectory(directoryPath))) {
+        unauthorized.push(directoryPath);
+      }
+    }
+    if (unauthorized.length === 0) {
+      return true;
+    }
+    if (unauthorized.length > this.#localRoots.availableSlots()) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "The dropped local folders exceed the remaining local root authorization limit",
+      );
+    }
+
+    const confirmation = await vscode.window.showWarningMessage(
+      "Authorize the local folder containing the dropped resource for analysis from this Remote SSH Codex window?",
+      {
+        modal: true,
+        detail: [
+          ...unauthorized,
+          "",
+          "Dropped files and folders are inserted as @ references and are not copied to the remote host. Bridge exposes them only through the authorized local workspace tools.",
+        ].join("\n"),
+      },
+      "Authorize Local Path",
+    );
+    if (confirmation !== "Authorize Local Path") {
+      return false;
+    }
+
+    const authorized = new Map<string, WorkspaceRootConfig>();
+    for (const directoryPath of unauthorized) {
+      const root = await this.#localRoots.authorize(directoryPath);
+      authorized.set(root.id, root);
+    }
+    await this.#persistLocalRoots();
+    for (const root of authorized.values()) {
+      await this.#audit.write({
+        operation: "local_root.authorize_drop",
+        outcome: "succeeded",
+        rootId: root.id,
+        rootRole: root.role,
+        rootPath: root.path,
+        target: root.target,
+      });
+    }
+    if (!this.#sessionConfig) {
+      const action = await vscode.window.showInformationMessage(
+        "Codex Bridge authorized the local path. Reload this Remote SSH window, then drop the resource again to analyze it.",
+        "Reload Window",
+      );
+      if (action === "Reload Window") {
+        await vscode.commands.executeCommand("workbench.action.reloadWindow");
+      }
+      return false;
+    }
+    vscode.window.setStatusBarMessage(
+      `Codex Bridge authorized ${authorized.size} local path(s) for this conversation`,
+      3_000,
+    );
+    return true;
+  }
+
   logCodexContextDrop(message: string): void {
     this.#log(`[context-drop] ${message}`);
   }
@@ -694,8 +790,8 @@ export class BridgeController implements vscode.Disposable {
     const confirmation = await vscode.window.showWarningMessage(
       [
         "This compatibility layer modifies the installed VS Code Workbench and official Codex Webview JavaScript assets.",
-        "VS Code Explorer drops will be inserted as native @ mentions at the current composer cursor.",
-        "System file manager drops will keep Codex file attachment behavior so paths outside the workspace remain usable.",
+        "VS Code Explorer and system file manager drops will be inserted as native @ mentions at the current composer cursor.",
+        "In Remote SSH windows, local resources outside an authorized root require one explicit local path authorization.",
         "Codex Bridge keeps SHA-256 verified backups and refuses to overwrite later changes.",
         "A VS Code or official Codex update may remove the patches and require a new compatibility check.",
       ].join("\n"),

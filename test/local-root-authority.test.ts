@@ -38,8 +38,11 @@ describe("LocalRootAuthority", () => {
     directories.push(parent);
     const selected = join(parent, "reference");
     await mkdir(selected);
+    const nested = join(selected, "nested");
+    await mkdir(nested);
     const storage = state();
     const authority = new LocalRootAuthority(storage);
+    expect(authority.availableSlots()).toBe(15);
 
     const root = await authority.authorize(selected);
     expect(root).toMatchObject({
@@ -50,7 +53,10 @@ describe("LocalRootAuthority", () => {
     });
     expect(root.id).toMatch(/^local-[a-f0-9]{16}$/);
     await expect(authority.authorize(selected)).resolves.toEqual(root);
+    await expect(authority.authorize(nested)).resolves.toEqual(root);
+    await expect(authority.findContainingDirectory(nested)).resolves.toEqual(root);
     expect(authority.roots()).toEqual([root]);
+    expect(authority.availableSlots()).toBe(14);
     await expect(authority.diagnostics()).resolves.toEqual([
       { ...root, accessible: true, error: null },
     ]);

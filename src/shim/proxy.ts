@@ -7,6 +7,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
+import { isDeepStrictEqual } from "node:util";
 import { AuditLog } from "../core/audit-log.js";
 import { normalizeRemotePath } from "../core/path-policy.js";
 import type {
@@ -70,6 +71,7 @@ export interface ShimProxyOptions {
   auditPath: string;
   codexExecutable: string;
   config: BridgeConfig | null;
+  configProvider?: () => Promise<BridgeConfig | null>;
   controlDir: string;
   input?: Readable;
   output?: Writable;
@@ -606,6 +608,34 @@ export class ShimProxy {
     writeServer: RpcMessageWriter,
     writeClient: RpcMessageWriter,
   ): Promise<void> {
+    if (
+      this.#options.config &&
+      this.#options.configProvider &&
+      isRpcRequest(message) &&
+      ["thread/start", "thread/resume", "turn/start"].includes(message.method)
+    ) {
+      try {
+        await this.#refreshSessionRoots();
+      } catch (error) {
+        await this.#audit.write({
+          ...this.#clientIdentity,
+          operationId: String(message.id),
+          hostId: this.#options.config.host,
+          workspaceRoot: this.#options.config.workspaceRoot,
+          operation: "local_root.refresh",
+          outcome: "failed",
+          details: { error: error instanceof Error ? error.message : String(error) },
+        });
+        writeClient({
+          id: message.id,
+          error: {
+            code: -32003,
+            message: "Codex Remote Bridge could not refresh local root authorizations",
+          },
+        });
+        return;
+      }
+    }
     if (this.#options.observeApprovalPolicy !== false) {
       this.#remoteApprovalPolicies.observeClientMessage(message);
     }
@@ -790,6 +820,39 @@ export class ShimProxy {
             this.#options.toolRouteInventory,
           );
     writeServer(rewritten);
+  }
+
+  async #refreshSessionRoots(): Promise<void> {
+    const current = this.#options.config;
+    const provider = this.#options.configProvider;
+    if (!current || !provider) {
+      return;
+    }
+    const next = await provider();
+    if (!next) {
+      throw new TypeError("Active Bridge session configuration is unavailable");
+    }
+    const currentIdentity = { ...current, roots: [] };
+    const nextIdentity = { ...next, roots: [] };
+    if (!isDeepStrictEqual(currentIdentity, nextIdentity)) {
+      throw new TypeError("Active Bridge session identity changed while refreshing roots");
+    }
+    if (isDeepStrictEqual(current.roots, next.roots)) {
+      return;
+    }
+    current.roots.splice(0, current.roots.length, ...next.roots.map((root) => ({ ...root })));
+    await this.#audit.write({
+      ...this.#clientIdentity,
+      hostId: current.host,
+      workspaceRoot: current.workspaceRoot,
+      operation: "local_root.refresh",
+      outcome: "succeeded",
+      details: {
+        localRootIds: current.roots
+          .filter((root) => root.target === "local" && root.role === "secondary")
+          .map((root) => root.id),
+      },
+    });
   }
 
   async #handleRemoteFuzzyFileSearch(

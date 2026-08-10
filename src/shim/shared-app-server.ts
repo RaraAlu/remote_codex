@@ -101,6 +101,7 @@ export interface SharedAppServerOptions {
   auditPath: string;
   codexExecutable: string;
   config: BridgeConfig | null;
+  configProvider?: () => Promise<BridgeConfig | null>;
   controlDir: string;
   localWorkspaceContextPath?: string;
   localWorkspaceRoot?: string;
@@ -834,6 +835,7 @@ export class SharedAppServer {
       auditPath: this.#options.auditPath,
       codexExecutable: this.#options.codexExecutable,
       config: this.#options.config,
+      configProvider: this.#options.configProvider,
       controlDir: this.#options.controlDir,
       approvalPolicies: this.#approvalPolicies,
       clientIdentity,

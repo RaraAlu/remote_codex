@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import {
   CODEX_INLINE_MENTION_PATH_MARKER,
+  CODEX_REMOTE_INLINE_MENTION_PATH_PREFIX,
   CODEX_WEBVIEW_DROP_CHANNEL,
   inspectCodexInlineMentionSource,
 } from "../src/extension/codex-inline-mention-patch.js";
@@ -103,6 +104,36 @@ describe("official Codex inline file mention patch", () => {
         matchType: "directory",
       },
       range: { from: 3, to: 3 },
+    });
+  });
+
+  it("decodes a platform-neutral Remote SSH path before inserting the mention", () => {
+    const runtimeSource = [
+      "let captured=null,handler=null",
+      "class Composer{constructor(){this.view={dom:{},state:{selection:{from:2,to:2},schema:{nodes:{atMention:'atMention'}},doc:{descendants:()=>{}}}}}insertAtMention(e,t){captured={attrs:e,range:t.range}}insertMentionNodeInRange(e,t,n,r,i=!1){}}",
+      "let controller=new Composer()",
+      "let listen=(type,dom,callback)=>{handler=callback},focus=()=>{},addDescriptors=()=>{}",
+      "listen(`add-context-file`,controller.view.dom,event=>{focus(),addDescriptors([event.file])});",
+    ].join(";");
+    const inspected = inspectCodexInlineMentionSource(runtimeSource);
+    expect(inspected.status).toBe("patchable");
+    if (inspected.status !== "patchable") {
+      return;
+    }
+    const encoded = encodeURIComponent("/home/unitree/project/src/main.py");
+    const transport = `\\\\${CODEX_REMOTE_INLINE_MENTION_PATH_PREFIX}${encoded}${CODEX_INLINE_MENTION_PATH_MARKER}`;
+    const evaluate = new Function(
+      `${inspected.patchedSource};handler({file:{label:'transport',path:${JSON.stringify(transport)},fsPath:${JSON.stringify(transport)}}});return captured;`,
+    ) as () => unknown;
+
+    expect(evaluate()).toEqual({
+      attrs: {
+        label: "main.py",
+        path: "/home/unitree/project/src/main.py",
+        fsPath: "/home/unitree/project/src/main.py",
+        matchType: "file",
+      },
+      range: { from: 2, to: 2 },
     });
   });
 

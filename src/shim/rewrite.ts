@@ -20,6 +20,7 @@ const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
 - Preserve and report the returned codex-bridge resourceUri as the stable workspace resource identity.
 - For workspace_* explicit-root routes, omitting target and rootId selects the remote primary root.
 - Access a local secondary root only through a workspace_* explicit-root route with target="local" and rootId.
+- A local directory dropped into a Remote SSH conversation is a local secondary-root reference. Match its absolute path to the authorized local root list, then analyze it with workspace_* using target="local" and that rootId; never pass it to remote_exec or interpret it relative to the remote primary root.
 - For project overviews, prefer one workspace_list_tree call before focused directory listings.
 - At the start of every turn, remember that remote_exec is the project command runner.
 - Use remote_exec for all project commands. Its approval behavior follows the active Codex permission mode.

@@ -203,6 +203,69 @@ async function exerciseRemoteExecApproval(
 }
 
 describe("ShimProxy JSONL integration", () => {
+  it("refreshes local secondary roots before rewriting the next turn", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-bridge-root-refresh-"));
+    const config = parseBridgeConfig({
+      version: 2,
+      host: "training-gpu",
+      workspaceRoot: "/remote/workspace",
+      roots: [
+        {
+          displayName: "workspace",
+          id: "remote-primary",
+          path: "/remote/workspace",
+          role: "primary",
+          target: "remote",
+        },
+      ],
+    });
+    const refreshed = parseBridgeConfig({
+      ...config,
+      roots: [
+        ...config.roots,
+        {
+          displayName: "reference",
+          id: "local-reference",
+          path: "/local/reference",
+          role: "secondary",
+          target: "local",
+        },
+      ],
+    });
+    const proxy = new ShimProxy({
+      appServerArgs: ["app-server", "--stdio"],
+      auditPath: join(directory, "audit.jsonl"),
+      codexExecutable: "fake-codex",
+      config,
+      configProvider: async () => refreshed,
+      controlDir: join(directory, "control"),
+      toolRouteInventory: createToolRouteInventory(config),
+    });
+    const serverMessages: RpcMessage[] = [];
+    try {
+      await proxy.handleClientMessage(
+        {
+          id: 1,
+          method: "turn/start",
+          params: { input: [], threadId: "thread-1" },
+        },
+        (message) => serverMessages.push(message as RpcMessage),
+        () => undefined,
+      );
+
+      expect(config.roots).toEqual(refreshed.roots);
+      expect(serverMessages).toHaveLength(1);
+      const params = "params" in serverMessages[0]!
+        ? serverMessages[0]!.params as Record<string, unknown>
+        : {};
+      expect(JSON.stringify(params.additionalContext)).toContain(
+        "Root id: local-reference; target: local; role: secondary; path: /local/reference",
+      );
+    } finally {
+      proxy.closeSession();
+    }
+  });
+
   it("identifies remote-routed MCP tools in the forwarded thread policy", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-remote-mcp-policy-"));
     const forwarded: RpcMessage[] = [];

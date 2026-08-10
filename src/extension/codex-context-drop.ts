@@ -1,8 +1,14 @@
 import * as posix from "node:path/posix";
 import * as vscode from "vscode";
 import { BridgeError } from "../core/errors.js";
-import { CODEX_INLINE_MENTION_PATH_MARKER } from "./codex-inline-mention-patch.js";
-import { detectRemoteWorkspace } from "./remote-context.js";
+import {
+  CODEX_INLINE_MENTION_PATH_MARKER,
+  CODEX_REMOTE_INLINE_MENTION_PATH_PREFIX,
+} from "./codex-inline-mention-patch.js";
+import {
+  detectRemoteWorkspace,
+  type RemoteWorkspaceContext,
+} from "./remote-context.js";
 
 const OFFICIAL_ADD_FILE_COMMAND = "chatgpt.addFileToThread";
 const MAX_DROPPED_RESOURCES = 128;
@@ -10,7 +16,6 @@ const MAX_TRANSFER_TEXT_LENGTH = 1024 * 1024;
 const MAX_NATIVE_PATH_LENGTH = 32 * 1024;
 
 export type CodexContextDropLog = (message: string) => void;
-export type CodexContextInsertionMode = "attachment" | "inline-mention";
 export type WorkbenchDropSource = "system-file-manager" | "vscode-explorer";
 
 export interface WorkbenchDropPayload {
@@ -39,8 +44,19 @@ export interface ParsedWorkbenchDrop {
 }
 
 export interface CodexContextDropOptions {
-  insertionMode?: CodexContextInsertionMode;
   log?: CodexContextDropLog;
+}
+
+type WorkbenchDropField =
+  | "codeFiles"
+  | "internalUriList"
+  | "nativeFilePaths"
+  | "resourceUrls"
+  | "uriList";
+
+interface WorkbenchDropCandidate {
+  field: WorkbenchDropField;
+  uri: vscode.Uri;
 }
 
 function parseUriList(value: string): vscode.Uri[] {
@@ -120,6 +136,77 @@ function parseFilePaths(value: string): vscode.Uri[] {
   }
 }
 
+function tryDetectRemoteWorkspace(): RemoteWorkspaceContext | null {
+  try {
+    return detectRemoteWorkspace();
+  } catch {
+    return null;
+  }
+}
+
+function normalizedRemotePathWithinRoot(
+  remote: RemoteWorkspaceContext,
+  candidatePath: string,
+): string | null {
+  if (!posix.isAbsolute(candidatePath)) {
+    return null;
+  }
+  const root = posix.normalize(remote.workspaceRoot);
+  const candidate = posix.normalize(candidatePath);
+  const relative = posix.relative(root, candidate);
+  return relative === ".." || relative.startsWith("../") || posix.isAbsolute(relative)
+    ? null
+    : candidate;
+}
+
+function normalizeRemoteExplorerCandidates(
+  candidates: readonly WorkbenchDropCandidate[],
+  source: WorkbenchDropSource,
+  log?: CodexContextDropLog,
+): WorkbenchDropCandidate[] {
+  if (source !== "vscode-explorer") {
+    return [...candidates];
+  }
+  const remote = tryDetectRemoteWorkspace();
+  if (!remote) {
+    return [...candidates];
+  }
+  const explicitRemotePaths = new Set(
+    candidates.flatMap(({ uri }) => {
+      if (
+        uri.scheme !== remote.workspaceUri.scheme ||
+        uri.authority !== remote.workspaceUri.authority
+      ) {
+        return [];
+      }
+      const path = normalizedRemotePathWithinRoot(remote, uri.path);
+      return path ? [path] : [];
+    }),
+  );
+  return candidates.map((candidate) => {
+    if (candidate.uri.scheme !== "file") {
+      return candidate;
+    }
+    const remotePath = normalizedRemotePathWithinRoot(remote, candidate.uri.path);
+    if (
+      !remotePath ||
+      (candidate.field !== "codeFiles" && !explicitRemotePaths.has(remotePath))
+    ) {
+      return candidate;
+    }
+    const uri = remote.workspaceUri.with({
+      fragment: "",
+      path: remotePath,
+      query: "",
+    });
+    logDrop(
+      log,
+      `phase.drop.remote-map field=${JSON.stringify(candidate.field)} from=${JSON.stringify(candidate.uri.toString(true))} to=${JSON.stringify(uri.toString(true))}`,
+    );
+    return { ...candidate, uri };
+  });
+}
+
 function validatePayload(payload: unknown): WorkbenchDropPayload {
   if (!payload || typeof payload !== "object") {
     throw new BridgeError("COMMAND_DENIED", "Workbench drop payload must be an object");
@@ -161,25 +248,7 @@ export function parseWorkbenchDropPayload(
   log?: CodexContextDropLog,
 ): ParsedWorkbenchDrop {
   const payload = validatePayload(untrustedPayload);
-  const sourceEvidence = [
-    ["internalUriList", payload.internalUriList],
-    ["resourceUrls", payload.resourceUrls],
-    ["codeFiles", payload.codeFiles],
-  ] as const;
-  const source: WorkbenchDropSource = sourceEvidence.some(
-    ([, value]) => typeof value === "string" && value.length > 0,
-  )
-    ? "vscode-explorer"
-    : "system-file-manager";
-  logDrop(
-    log,
-    `phase.drop.source source=${JSON.stringify(source)} evidence=${JSON.stringify(
-      sourceEvidence.flatMap(([field, value]) =>
-        typeof value === "string" && value.length > 0 ? [field] : [],
-      ),
-    )}`,
-  );
-  const resources: vscode.Uri[] = [];
+  const candidates: WorkbenchDropCandidate[] = [];
   for (const [field, value] of [
     ["internalUriList", payload.internalUriList],
     ["uriList", payload.uriList],
@@ -187,7 +256,7 @@ export function parseWorkbenchDropPayload(
     if (value) {
       const parsed = parseUriList(value);
       logDrop(log, `phase.drop.parse field=${JSON.stringify(field)} uriCount=${parsed.length}`);
-      resources.push(...parsed);
+      candidates.push(...parsed.map((uri) => ({ field, uri })));
     }
   }
   if (payload.resourceUrls) {
@@ -196,16 +265,35 @@ export function parseWorkbenchDropPayload(
       log,
       `phase.drop.parse field="resourceUrls" uriCount=${parsed.length}`,
     );
-    resources.push(...parsed);
+    candidates.push(...parsed.map((uri) => ({ field: "resourceUrls" as const, uri })));
   }
   if (payload.codeFiles) {
     const parsed = parseFilePaths(payload.codeFiles);
     logDrop(log, `phase.drop.parse field="codeFiles" uriCount=${parsed.length}`);
-    resources.push(...parsed);
+    candidates.push(...parsed.map((uri) => ({ field: "codeFiles" as const, uri })));
   }
   for (const filePath of payload.nativeFilePaths ?? []) {
-    resources.push(vscode.Uri.file(filePath));
+    candidates.push({ field: "nativeFilePaths", uri: vscode.Uri.file(filePath) });
   }
+
+  const sourceEvidence = [
+    ["internalUriList", payload.internalUriList],
+    ["resourceUrls", payload.resourceUrls],
+    ["codeFiles", payload.codeFiles],
+  ] as const;
+  const evidence = sourceEvidence.flatMap(([field, value]) =>
+    typeof value === "string" && value.length > 0 ? [field] : [],
+  );
+  const source: WorkbenchDropSource =
+    evidence.length > 0 || candidates.some(({ uri }) => uri.scheme === "vscode-remote")
+      ? "vscode-explorer"
+      : "system-file-manager";
+  logDrop(
+    log,
+    `phase.drop.source source=${JSON.stringify(source)} evidence=${JSON.stringify(evidence)}`,
+  );
+  const normalizedCandidates = normalizeRemoteExplorerCandidates(candidates, source, log);
+  const resources = normalizedCandidates.map(({ uri }) => uri);
 
   const seen = new Set<string>();
   const unique = resources.filter((resource) => {
@@ -245,10 +333,8 @@ function remoteAttachmentPath(uri: vscode.Uri): string {
       "Dropped remote resource does not belong to the active Remote SSH workspace",
     );
   }
-  const root = posix.normalize(remote.workspaceRoot);
-  const candidate = posix.normalize(uri.path);
-  const relative = posix.relative(root, candidate);
-  if (relative === ".." || relative.startsWith("../") || posix.isAbsolute(relative)) {
+  const candidate = normalizedRemotePathWithinRoot(remote, uri.path);
+  if (!candidate) {
     throw new BridgeError(
       "PATH_OUTSIDE_ROOT",
       "Dropped remote resource is outside the active Remote SSH workspace",
@@ -257,20 +343,33 @@ function remoteAttachmentPath(uri: vscode.Uri): string {
   return candidate;
 }
 
+function remoteInlineMentionTransportPath(
+  remotePath: string,
+  directory: boolean,
+): string {
+  const normalized = directory && remotePath !== "/"
+    ? remotePath.replace(/\/+$/, "")
+    : remotePath;
+  const encoded = encodeURIComponent(normalized);
+  return `/${CODEX_REMOTE_INLINE_MENTION_PATH_PREFIX}${encoded}${CODEX_INLINE_MENTION_PATH_MARKER}${directory ? "/" : ""}`;
+}
+
 function asOfficialFileUri(
   uri: vscode.Uri,
   directory: boolean,
-  insertionMode: CodexContextInsertionMode,
 ): vscode.Uri {
-  const rawPath = uri.scheme === "vscode-remote" ? remoteAttachmentPath(uri) : uri.fsPath;
+  if (uri.scheme === "vscode-remote") {
+    return vscode.Uri.file(
+      remoteInlineMentionTransportPath(remoteAttachmentPath(uri), directory),
+    );
+  }
+  const rawPath = uri.fsPath;
   const separator = uri.scheme === "vscode-remote" || process.platform !== "win32" ? "/" : "\\";
   const contextPath =
     directory && !rawPath.endsWith(separator) ? `${rawPath}${separator}` : rawPath;
-  const path = insertionMode === "inline-mention"
-    ? directory
-      ? `${contextPath.slice(0, -separator.length)}${CODEX_INLINE_MENTION_PATH_MARKER}${separator}`
-      : `${contextPath}${CODEX_INLINE_MENTION_PATH_MARKER}`
-    : contextPath;
+  const path = directory
+    ? `${contextPath.slice(0, -separator.length)}${CODEX_INLINE_MENTION_PATH_MARKER}${separator}`
+    : `${contextPath}${CODEX_INLINE_MENTION_PATH_MARKER}`;
   return vscode.Uri.file(path);
 }
 
@@ -282,7 +381,6 @@ export async function attachDroppedResourcesToCodex(
   resources: readonly vscode.Uri[],
   options: CodexContextDropOptions = {},
 ): Promise<CodexContextDropResult> {
-  const insertionMode = options.insertionMode ?? "attachment";
   const { log } = options;
   if (resources.length === 0) {
     throw new BridgeError("COMMAND_DENIED", "The drop did not contain a file or folder path");
@@ -302,7 +400,7 @@ export async function attachDroppedResourcesToCodex(
   }
   logDrop(
     log,
-    `phase.attach.capability command=${JSON.stringify(OFFICIAL_ADD_FILE_COMMAND)} available=true resourceCount=${resources.length} insertionMode=${JSON.stringify(insertionMode)}`,
+    `phase.attach.capability command=${JSON.stringify(OFFICIAL_ADD_FILE_COMMAND)} available=true resourceCount=${resources.length} insertionMode="inline-mention"`,
   );
 
   const result: CodexContextDropResult = {
@@ -333,10 +431,10 @@ export async function attachDroppedResourcesToCodex(
         log,
         `phase.attach.stat index=${index} type=${metadata.type} kind=${directory ? "directory" : "file"} size=${metadata.size}`,
       );
-      const attachment = asOfficialFileUri(resource, directory, insertionMode);
+      const attachment = asOfficialFileUri(resource, directory);
       logDrop(
         log,
-        `phase.attach.map index=${index} source=${JSON.stringify(original.scheme === "vscode-remote" ? "remote-workspace" : "local-file")} insertionMode=${JSON.stringify(insertionMode)} official=${formatUri(attachment)}`,
+        `phase.attach.map index=${index} source=${JSON.stringify(original.scheme === "vscode-remote" ? "remote-workspace" : "local-file")} insertionMode="inline-mention" official=${formatUri(attachment)}`,
       );
       const key = process.platform === "win32"
         ? attachment.fsPath.toLowerCase()

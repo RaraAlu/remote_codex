@@ -4,6 +4,8 @@ const PATCH_END = `/* ${PATCH_MARKER}:end */`;
 
 export const CODEX_INLINE_MENTION_PATH_MARKER =
   ".__codex_remote_bridge_inline_6b9f5d70f1d84a5f__";
+export const CODEX_REMOTE_INLINE_MENTION_PATH_PREFIX =
+  ".__codex_remote_bridge_remote_3c4ca1f4b3d74649__";
 export const CODEX_WEBVIEW_DROP_CHANNEL =
   "codex-remote-bridge-webview-drop-v1";
 
@@ -130,19 +132,36 @@ export function inspectCodexInlineMentionSource(
     `${focusComposer}();`,
     `let CodexRemoteBridgeFile=${event}.file,`,
     `CodexRemoteBridgeMarker=${JSON.stringify(CODEX_INLINE_MENTION_PATH_MARKER)},`,
+    `CodexRemoteBridgeRemotePrefix=${JSON.stringify(CODEX_REMOTE_INLINE_MENTION_PATH_PREFIX)},`,
+    "CodexRemoteBridgeIsRemote=CodexRemoteBridgeValue=>{",
+    "let CodexRemoteBridgeSeparator=/[\\\\/]$/.test(CodexRemoteBridgeValue)?CodexRemoteBridgeValue.slice(-1):\"\",",
+    "CodexRemoteBridgeBody=CodexRemoteBridgeSeparator?CodexRemoteBridgeValue.slice(0,-1):CodexRemoteBridgeValue;",
+    "if(!CodexRemoteBridgeBody.endsWith(CodexRemoteBridgeMarker))return!1;",
+    "let CodexRemoteBridgeClean=CodexRemoteBridgeBody.slice(0,-CodexRemoteBridgeMarker.length),",
+    "CodexRemoteBridgeLeaf=CodexRemoteBridgeClean.slice(Math.max(CodexRemoteBridgeClean.lastIndexOf(\"/\"),CodexRemoteBridgeClean.lastIndexOf(\"\\\\\"))+1);",
+    "return CodexRemoteBridgeLeaf.startsWith(CodexRemoteBridgeRemotePrefix)",
+    "},",
     "CodexRemoteBridgeCleanPath=CodexRemoteBridgeValue=>{",
     "let CodexRemoteBridgeSeparator=/[\\\\/]$/.test(CodexRemoteBridgeValue)?CodexRemoteBridgeValue.slice(-1):\"\",",
     "CodexRemoteBridgeBody=CodexRemoteBridgeSeparator?CodexRemoteBridgeValue.slice(0,-1):CodexRemoteBridgeValue;",
-    "return CodexRemoteBridgeBody.endsWith(CodexRemoteBridgeMarker)?",
-    "CodexRemoteBridgeBody.slice(0,-CodexRemoteBridgeMarker.length)+CodexRemoteBridgeSeparator:null",
+    "if(!CodexRemoteBridgeBody.endsWith(CodexRemoteBridgeMarker))return null;",
+    "let CodexRemoteBridgeClean=CodexRemoteBridgeBody.slice(0,-CodexRemoteBridgeMarker.length),",
+    "CodexRemoteBridgeLeaf=CodexRemoteBridgeClean.slice(Math.max(CodexRemoteBridgeClean.lastIndexOf(\"/\"),CodexRemoteBridgeClean.lastIndexOf(\"\\\\\"))+1);",
+    "if(CodexRemoteBridgeLeaf.startsWith(CodexRemoteBridgeRemotePrefix)){",
+    "try{let CodexRemoteBridgeDecoded=decodeURIComponent(CodexRemoteBridgeLeaf.slice(CodexRemoteBridgeRemotePrefix.length));",
+    "if(!CodexRemoteBridgeDecoded.startsWith(\"/\")||CodexRemoteBridgeDecoded.includes(\"\\0\"))return null;",
+    "return CodexRemoteBridgeDecoded.replace(/\\/+$/,\"\")+(CodexRemoteBridgeSeparator?\"/\":\"\")}catch{return null}",
+    "}",
+    "return CodexRemoteBridgeClean+CodexRemoteBridgeSeparator",
     "},",
+    "CodexRemoteBridgeWasRemote=CodexRemoteBridgeIsRemote(CodexRemoteBridgeFile.path)||CodexRemoteBridgeIsRemote(CodexRemoteBridgeFile.fsPath),",
     "CodexRemoteBridgePath=CodexRemoteBridgeCleanPath(CodexRemoteBridgeFile.path),",
     "CodexRemoteBridgeFsPath=CodexRemoteBridgeCleanPath(CodexRemoteBridgeFile.fsPath);",
     "if(CodexRemoteBridgePath===null||CodexRemoteBridgeFsPath===null){",
     `${addDescriptors}([CodexRemoteBridgeFile]);return`,
     "}",
     "CodexRemoteBridgeFile={...CodexRemoteBridgeFile,",
-    "label:CodexRemoteBridgeFile.label.endsWith(CodexRemoteBridgeMarker)?CodexRemoteBridgeFile.label.slice(0,-CodexRemoteBridgeMarker.length):CodexRemoteBridgeFile.label,",
+    "label:CodexRemoteBridgeWasRemote?CodexRemoteBridgePath.replace(/[\\\\/]$/,\"\").split(/[\\\\/]/).pop():CodexRemoteBridgeFile.label.endsWith(CodexRemoteBridgeMarker)?CodexRemoteBridgeFile.label.slice(0,-CodexRemoteBridgeMarker.length):CodexRemoteBridgeFile.label,",
     "path:CodexRemoteBridgePath,fsPath:CodexRemoteBridgeFsPath};",
     "let CodexRemoteBridgeDuplicate=!1;",
     `${composer}.view.state.doc.descendants(CodexRemoteBridgeNode=>{`,

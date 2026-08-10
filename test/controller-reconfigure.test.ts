@@ -4,6 +4,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mock = vi.hoisted(() => ({
   auditWrite: vi.fn(async () => undefined),
+  attachDrop: vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({
+    attachedCount: 1,
+    directoryCount: 1,
+    duplicateCount: 0,
+    failedCount: 0,
+    fileCount: 0,
+    firstFailure: null,
+    localCount: 1,
+    remoteCount: 0,
+  })),
   executeCommand: vi.fn(async () => undefined),
   installShim: vi.fn(async () => "/managed/codex-bridge-shim.cjs"),
   inlineMentionEnable: vi.fn(async () => ({
@@ -18,10 +28,23 @@ const mock = vi.hoisted(() => ({
     extensionVersion: "1.0.0",
     targetPath: "/extensions/openai.chatgpt/webview/assets/app.js",
   })),
+  localRootAuthorize: vi.fn(async () => ({
+    displayName: "reference",
+    id: "local-reference",
+    path: "/local/reference",
+    role: "secondary",
+    target: "local",
+  })),
+  localRootContaining: vi.fn(async () => undefined as unknown),
+  localRoots: vi.fn(() => [] as unknown[]),
   officialExtension: vi.fn<() => unknown>(() => {
     throw new Error("official extension must not be queried before reload");
   }),
   registeredCommands: new Map<string, (...args: unknown[]) => unknown>(),
+  parsedDrop: {
+    resources: [] as unknown[],
+    source: "system-file-manager",
+  },
   saveConfig: vi.fn(async () => undefined),
   showOpenDialog: vi.fn(async () => undefined),
   settingsConfigure: vi.fn(async () => true),
@@ -46,13 +69,23 @@ const mock = vi.hoisted(() => ({
     changed: true,
     targetPath: "/opt/code/workbench.js",
   })),
+  workspaceStat: vi.fn(async () => ({ ctime: 0, mtime: 0, size: 0, type: 2 })),
 }));
 
 vi.mock("vscode", () => ({
   ConfigurationTarget: { Global: 1 },
   StatusBarAlignment: { Left: 1 },
+  FileType: { Directory: 2, File: 1 },
   Uri: {
-    file: (path: string) => ({ fsPath: path, scheme: "file" }),
+    file: (path: string) => ({
+      authority: "",
+      fragment: "",
+      fsPath: path,
+      path,
+      scheme: "file",
+      toString: () => `file://${path}`,
+      with: () => ({ toString: () => `file://${path}` }),
+    }),
   },
   commands: {
     executeCommand: mock.executeCommand,
@@ -83,14 +116,35 @@ vi.mock("vscode", () => ({
     showInformationMessage: mock.showInformationMessage,
     showOpenDialog: mock.showOpenDialog,
     showWarningMessage: vi.fn(async () => mock.warningResponse),
+    setStatusBarMessage: vi.fn(),
   },
   workspace: {
+    fs: {
+      stat: mock.workspaceStat,
+    },
     getConfiguration: (section: string) => ({
       get: <T>(_key: string, fallback?: T) => fallback,
       update: mock.settingsUpdate,
     }),
     registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
     workspaceFolders: [{ uri: { path: "/home/unitree/rl_sar" } }],
+  },
+}));
+
+vi.mock("../src/extension/codex-context-drop.js", () => ({
+  attachDroppedResourcesToCodex: mock.attachDrop,
+  parseWorkbenchDropPayload: vi.fn(() => mock.parsedDrop),
+}));
+
+vi.mock("../src/extension/local-root-authority.js", () => ({
+  LocalRootAuthority: class {
+    authorize = mock.localRootAuthorize;
+    availableSlots = () => 15;
+    diagnostics = vi.fn(async () => []);
+    find = vi.fn(() => undefined);
+    findContainingDirectory = mock.localRootContaining;
+    revoke = vi.fn(async () => false);
+    roots = mock.localRoots;
   },
 }));
 
@@ -202,10 +256,20 @@ describe("BridgeController restored-state configuration", () => {
     mock.warningResponse = "Configure";
     mock.inlineMentionEnable.mockClear();
     mock.inlineMentionRestore.mockClear();
+    mock.attachDrop.mockClear();
+    mock.localRootAuthorize.mockClear();
+    mock.localRootContaining.mockReset();
+    mock.localRootContaining.mockResolvedValue(undefined);
+    mock.localRoots.mockReset();
+    mock.localRoots.mockReturnValue([]);
+    mock.parsedDrop.resources = [];
+    mock.parsedDrop.source = "system-file-manager";
     mock.workbenchEnable.mockClear();
     mock.workbenchNeedsElevation.mockClear();
     mock.workbenchNeedsElevation.mockResolvedValue(false);
     mock.workbenchRestore.mockClear();
+    mock.workspaceStat.mockReset();
+    mock.workspaceStat.mockResolvedValue({ ctime: 0, mtime: 0, size: 0, type: 2 });
   });
 
   it("restores UI settings and reloads before resolving the official runtime", async () => {
@@ -340,13 +404,100 @@ describe("BridgeController restored-state configuration", () => {
 
     await controller.authorizeLocalRoot();
 
-    expect(mock.showOpenDialog).toHaveBeenCalledWith({
-      canSelectFiles: false,
-      canSelectFolders: true,
-      canSelectMany: false,
-      defaultUri: { fsPath: homedir(), scheme: "file" },
-      openLabel: "Authorize Folder",
-      title: "Authorize a local secondary root for Codex Bridge",
+    expect(mock.showOpenDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        defaultUri: expect.objectContaining({ fsPath: homedir(), scheme: "file" }),
+        openLabel: "Authorize Folder",
+        title: "Authorize a local secondary root for Codex Bridge",
+      }),
+    );
+  });
+
+  it("asks before authorizing a locally dropped directory in a Remote SSH window", async () => {
+    mock.warningResponse = "Authorize Local Path";
+    mock.parsedDrop.resources = [
+      {
+        authority: "",
+        fragment: "",
+        fsPath: "/local/reference",
+        path: "/local/reference",
+        scheme: "file",
+        toString: () => "file:///local/reference",
+        with: () => ({ toString: () => "file:///local/reference" }),
+      },
+    ];
+    const controller = new BridgeController(context());
+
+    await controller.addWorkbenchCodexContext({ schemaVersion: 1 });
+
+    expect(mock.localRootAuthorize).toHaveBeenCalledWith("/local/reference");
+    expect(mock.saveConfig).toHaveBeenCalled();
+    expect(mock.auditWrite).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "local_root.authorize_drop",
+        rootId: "local-reference",
+        target: "local",
+      }),
+    );
+    expect(mock.attachDrop).not.toHaveBeenCalled();
+    expect(mock.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining("drop the resource again"),
+      "Reload Window",
+    );
+  });
+
+  it("authorizes the containing folder before adding a local file from the system file manager", async () => {
+    mock.warningResponse = "Authorize Local Path";
+    mock.workspaceStat.mockResolvedValue({ ctime: 0, mtime: 0, size: 12, type: 1 });
+    mock.parsedDrop.resources = [
+      {
+        authority: "",
+        fragment: "",
+        fsPath: "/local/reference/manual.pdf",
+        path: "/local/reference/manual.pdf",
+        scheme: "file",
+        toString: () => "file:///local/reference/manual.pdf",
+        with: () => ({ toString: () => "file:///local/reference/manual.pdf" }),
+      },
+    ];
+    const controller = new BridgeController(context());
+
+    await controller.addWorkbenchCodexContext({ schemaVersion: 1 });
+
+    expect(mock.localRootContaining).toHaveBeenCalledWith("/local/reference");
+    expect(mock.localRootAuthorize).toHaveBeenCalledWith("/local/reference");
+    expect(mock.attachDrop).not.toHaveBeenCalled();
+  });
+
+  it("adds an authorized local file through the uniform inline mention path", async () => {
+    mock.workspaceStat.mockResolvedValue({ ctime: 0, mtime: 0, size: 12, type: 1 });
+    const resource = {
+      authority: "",
+      fragment: "",
+      fsPath: "/local/reference/main.py",
+      path: "/local/reference/main.py",
+      scheme: "file",
+      toString: () => "file:///local/reference/main.py",
+      with: () => ({ toString: () => "file:///local/reference/main.py" }),
+    };
+    mock.parsedDrop.resources = [resource];
+    mock.localRootContaining.mockResolvedValue({
+      id: "local-reference",
+      path: "/local/reference",
+      role: "secondary",
+      target: "local",
+    });
+    const controller = new BridgeController(context());
+
+    await controller.addWorkbenchCodexContext({ schemaVersion: 1 });
+
+    expect(mock.localRootContaining).toHaveBeenCalledWith("/local/reference");
+    expect(mock.attachDrop).toHaveBeenCalledOnce();
+    expect(mock.attachDrop).toHaveBeenCalledWith([resource], {
+      log: expect.any(Function),
     });
   });
 });
