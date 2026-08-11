@@ -55,6 +55,8 @@ jobs:
     name: Collect & verify dual-platform VSIX
     needs: [package-linux, package-windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

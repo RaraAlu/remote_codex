@@ -895,6 +895,11 @@ CLI 参数和令牌传递。`npm run smoke:shim` 通过。
 
 ## 升级与发布跟踪
 
+2026-08-11 修复标签构建的 GitHub Release 发布权限：双平台 VSIX 构建、汇总、校验和
+Actions 工件上传原本均已成功，但 `collect` 作业的 `GITHUB_TOKEN` 仅有 `contents: read`，
+导致 Release API 返回 403。工作流现仅为负责发布的 `collect` 作业授予
+`contents: write`；普通分支构建仍跳过 Release 步骤。
+
 发布门禁、升级触发矩阵、量化回归规则和 Windows/Linux 分平台要求已统一写入
 `docs/upgrade-tracking.md`，候选版本使用 `docs/acceptance/release-template.md` 保存独立
 证据。0.2.7 首份基线位于 `docs/acceptance/2026-07-18-release-0.2.7.md`：Windows x64
