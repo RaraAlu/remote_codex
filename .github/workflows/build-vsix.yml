@@ -26,7 +26,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: stage-linux-x64
-          path: artifacts/controller-*-linux-x64
+          path: artifacts/controller-*-linux-x64/*
           if-no-files-found: error
 
   package-windows:
