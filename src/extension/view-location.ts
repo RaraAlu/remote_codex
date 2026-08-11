@@ -2,9 +2,15 @@ import type * as vscode from "vscode";
 
 const RESET_FOCUSED_VIEW_COMMAND = "workbench.action.resetFocusedViewLocation";
 const CODEX_VIEW_FOCUS_COMMAND = "chatgpt.sidebarSecondaryView.focus";
+const CODEX_VIEW_ID = "chatgpt.sidebarSecondaryView";
+const GET_CONTEXT_KEY_VALUE_COMMAND = "getContextKeyValue";
 const REPAIRED_KEY = "codexRemoteBridge.codexViewLocationRepaired.v2";
 
-export type ViewLocationRepairResult = "already-repaired" | "repaired" | "unavailable";
+export type ViewLocationRepairResult =
+  | "already-repaired"
+  | "not-focused"
+  | "repaired"
+  | "unavailable";
 
 export async function repairCodexViewLocation(
   commands: typeof vscode.commands,
@@ -17,12 +23,20 @@ export async function repairCodexViewLocation(
   const available = new Set(await commands.getCommands(true));
   if (
     !available.has(CODEX_VIEW_FOCUS_COMMAND) ||
+    !available.has(GET_CONTEXT_KEY_VALUE_COMMAND) ||
     !available.has(RESET_FOCUSED_VIEW_COMMAND)
   ) {
     return "unavailable";
   }
 
   await commands.executeCommand(CODEX_VIEW_FOCUS_COMMAND);
+  const focusedView = await commands.executeCommand<unknown>(
+    GET_CONTEXT_KEY_VALUE_COMMAND,
+    "focusedView",
+  );
+  if (focusedView !== CODEX_VIEW_ID) {
+    return "not-focused";
+  }
   await commands.executeCommand(RESET_FOCUSED_VIEW_COMMAND);
   await commands.executeCommand(CODEX_VIEW_FOCUS_COMMAND);
   await workspaceState.update(REPAIRED_KEY, true);

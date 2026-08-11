@@ -497,6 +497,20 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
   `brace-expansion`、`js-yaml`、`nanoid` 和 `postcss`。更新后 `npm audit` 为 0，完整检查、
   Shim 冒烟和 Linux x64 构包通过；详细证据见
   `docs/acceptance/2026-08-10-release-0.3.72-dependency-audit.md`。
+- `0.3.73` 把原生拖放兼容层的首次启用改为自动引导。Controller 在常规初始化完成且
+  没有待执行重载时，按 VS Code 版本、安装根、官方 Codex 路径和版本生成资产指纹；仅当
+  Workbench 与 Webview 探针均确认可安全应用时显示一次模态确认。确认后沿用现有 polkit
+  哈希校验替换链自动请求权限，两个补丁均成功才自动调用 `reloadWindow`；拒绝、关闭或
+  显式禁用会记住当前资产指纹，避免下次激活重新打扰或自动反向启用。冲突、未知形状和
+  探针失败仍保持失败关闭。自动化覆盖一次性引导、拒绝去重、已启用跳过、提权替换器选择
+  和成功后重载。2026-08-10 Linux 本地实机已记录自动引导、用户完成 polkit、两个补丁
+  成功、自动重载及新 Extension Host 不重复提示；Remote SSH 窗口随后加载 `0.3.73`，
+  到达 `ready` 并完成一次内联目录拖放。
+  实测还发现欢迎页激活时 Codex focus 命令可能未建立 `focusedView`，旧布局修复随后直接
+  执行 `resetFocusedViewLocation` 会弹出“当前没有重点视图”。修复现仅在 Workbench 同时
+  暴露焦点查询、Codex focus 和重置三项命令时继续，并要求查询结果精确等于官方 Codex
+  View ID；当前 VS Code 未公开焦点查询命令，因此直接跳过，不修改布局、不写入已修复
+  标记，也不触发错误弹窗。用户重载欢迎页确认错误框不再出现。
 
 活动实施项及其退出条件统一保存在根 `README.md` 最末尾的 `TODO` 中；本节只保留已完成
 的能力探针结论。

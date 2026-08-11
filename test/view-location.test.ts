@@ -14,10 +14,13 @@ function state() {
 
 describe("repairCodexViewLocation", () => {
   it("restores and reopens the official Codex view only once per workspace", async () => {
-    const executeCommand = vi.fn(async (_command: string) => undefined);
+    const executeCommand = vi.fn(async (command: string) =>
+      command === "getContextKeyValue" ? "chatgpt.sidebarSecondaryView" : undefined,
+    );
     const commands = {
       getCommands: vi.fn(async () => [
         "chatgpt.sidebarSecondaryView.focus",
+        "getContextKeyValue",
         "workbench.action.resetFocusedViewLocation",
       ]),
       executeCommand,
@@ -27,19 +30,56 @@ describe("repairCodexViewLocation", () => {
     await expect(repairCodexViewLocation(commands, workspaceState)).resolves.toBe("repaired");
     expect(executeCommand.mock.calls.map(([command]) => command)).toEqual([
       "chatgpt.sidebarSecondaryView.focus",
+      "getContextKeyValue",
       "workbench.action.resetFocusedViewLocation",
       "chatgpt.sidebarSecondaryView.focus",
     ]);
     await expect(repairCodexViewLocation(commands, workspaceState)).resolves.toBe(
       "already-repaired",
     );
-    expect(executeCommand).toHaveBeenCalledTimes(3);
+    expect(executeCommand).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not reset a view when Codex could not become the focused view", async () => {
+    const executeCommand = vi.fn(async (_command: string) => undefined);
+    const commands = {
+      getCommands: vi.fn(async () => [
+        "chatgpt.sidebarSecondaryView.focus",
+        "getContextKeyValue",
+        "workbench.action.resetFocusedViewLocation",
+      ]),
+      executeCommand,
+    } as unknown as typeof vscode.commands;
+    const workspaceState = state();
+
+    await expect(repairCodexViewLocation(commands, workspaceState)).resolves.toBe(
+      "not-focused",
+    );
+    expect(executeCommand.mock.calls).toEqual([
+      ["chatgpt.sidebarSecondaryView.focus"],
+      ["getContextKeyValue", "focusedView"],
+    ]);
+    expect(workspaceState.update).not.toHaveBeenCalled();
   });
 
   it("leaves layout untouched when the focused-view reset is unavailable", async () => {
     const executeCommand = vi.fn(async (_command: string) => undefined);
     const commands = {
       getCommands: vi.fn(async () => ["chatgpt.sidebarSecondaryView.focus"]),
+      executeCommand,
+    } as unknown as typeof vscode.commands;
+
+    await expect(repairCodexViewLocation(commands, state())).resolves.toBe("unavailable");
+    expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("leaves layout untouched when the focused-view context command is unavailable", async () => {
+    const executeCommand = vi.fn(async (_command: string) => undefined);
+    const commands = {
+      getCommands: vi.fn(async () => [
+        "chatgpt.sidebarSecondaryView.focus",
+        "workbench.action.resetFocusedViewLocation",
+      ]),
       executeCommand,
     } as unknown as typeof vscode.commands;
 

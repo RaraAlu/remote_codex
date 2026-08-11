@@ -28,6 +28,12 @@ const mock = vi.hoisted(() => ({
     extensionVersion: "1.0.0",
     targetPath: "/extensions/openai.chatgpt/webview/assets/app.js",
   })),
+  inlineMentionInspect: vi.fn(async () => ({
+    status: "disabled",
+    changed: false,
+    extensionVersion: "1.0.0",
+    targetPath: "/extensions/openai.chatgpt/webview/assets/app.js",
+  })),
   localRootAuthorize: vi.fn(async () => ({
     displayName: "reference",
     id: "local-reference",
@@ -53,7 +59,7 @@ const mock = vi.hoisted(() => ({
   settingsUpdate: vi.fn(async () => undefined),
   showErrorMessage: vi.fn(),
   showInformationMessage: vi.fn(),
-  warningResponse: "Configure",
+  warningResponse: "Configure" as string | undefined,
   transportStart: vi.fn(async () => {
     throw new Error("transport must not start before reload");
   }),
@@ -63,6 +69,11 @@ const mock = vi.hoisted(() => ({
     targetPath: "/opt/code/workbench.js",
   })),
   workbenchNeedsElevation: vi.fn(async () => false),
+  workbenchInspect: vi.fn(async () => ({
+    status: "disabled",
+    changed: false,
+    targetPath: "/opt/code/workbench.js",
+  })),
   workbenchPkexec: vi.fn(async () => undefined),
   workbenchRestore: vi.fn(async () => ({
     status: "restored",
@@ -99,6 +110,7 @@ vi.mock("vscode", () => ({
     machineId: "local-machine",
     remoteName: "ssh-remote",
   },
+  version: "1.126.0",
   extensions: {
     getExtension: mock.officialExtension,
   },
@@ -207,11 +219,7 @@ vi.mock("../src/extension/vscode-transport-server.js", () => ({
 
 vi.mock("../src/extension/workbench-drop-compatibility.js", () => ({
   enableWorkbenchDropCompatibility: mock.workbenchEnable,
-  inspectWorkbenchDropCompatibility: vi.fn(async () => ({
-    status: "disabled",
-    changed: false,
-    targetPath: "/opt/code/workbench.js",
-  })),
+  inspectWorkbenchDropCompatibility: mock.workbenchInspect,
   replaceWorkbenchAssetWithPkexec: mock.workbenchPkexec,
   restoreWorkbenchDropCompatibility: mock.workbenchRestore,
   workbenchDropTargetNeedsElevation: mock.workbenchNeedsElevation,
@@ -219,16 +227,13 @@ vi.mock("../src/extension/workbench-drop-compatibility.js", () => ({
 
 vi.mock("../src/extension/codex-inline-mention-compatibility.js", () => ({
   enableCodexInlineMentionCompatibility: mock.inlineMentionEnable,
-  inspectCodexInlineMentionCompatibility: vi.fn(async () => ({
-    status: "disabled",
-    changed: false,
-    extensionVersion: "1.0.0",
-    targetPath: "/extensions/openai.chatgpt/webview/assets/app.js",
-  })),
+  inspectCodexInlineMentionCompatibility: mock.inlineMentionInspect,
   restoreCodexInlineMentionCompatibility: mock.inlineMentionRestore,
 }));
 
 import { BridgeController } from "../src/extension/controller.js";
+
+const globalStateValues = new Map<string, unknown>();
 
 function context(): vscode.ExtensionContext {
   return {
@@ -237,8 +242,14 @@ function context(): vscode.ExtensionContext {
       packageJSON: { version: "0.3.10" },
     },
     globalState: {
-      get: () => undefined,
-      update: async () => undefined,
+      get: (key: string) => globalStateValues.get(key),
+      update: async (key: string, value: unknown) => {
+        if (value === undefined) {
+          globalStateValues.delete(key);
+        } else {
+          globalStateValues.set(key, value);
+        }
+      },
     },
   } as unknown as vscode.ExtensionContext;
 }
@@ -250,11 +261,19 @@ describe("BridgeController restored-state configuration", () => {
       throw new Error("official extension must not be queried before reload");
     });
     mock.registeredCommands.clear();
+    globalStateValues.clear();
     mock.settingsConfigure.mockResolvedValue(true);
     mock.settingsHasManaged.mockReturnValue(false);
     mock.settingsRepair.mockResolvedValue({ changed: false, reloadRequired: false });
     mock.warningResponse = "Configure";
     mock.inlineMentionEnable.mockClear();
+    mock.inlineMentionInspect.mockReset();
+    mock.inlineMentionInspect.mockResolvedValue({
+      status: "disabled",
+      changed: false,
+      extensionVersion: "1.0.0",
+      targetPath: "/extensions/openai.chatgpt/webview/assets/app.js",
+    });
     mock.inlineMentionRestore.mockClear();
     mock.attachDrop.mockClear();
     mock.localRootAuthorize.mockClear();
@@ -265,6 +284,12 @@ describe("BridgeController restored-state configuration", () => {
     mock.parsedDrop.resources = [];
     mock.parsedDrop.source = "system-file-manager";
     mock.workbenchEnable.mockClear();
+    mock.workbenchInspect.mockReset();
+    mock.workbenchInspect.mockResolvedValue({
+      status: "disabled",
+      changed: false,
+      targetPath: "/opt/code/workbench.js",
+    });
     mock.workbenchNeedsElevation.mockClear();
     mock.workbenchNeedsElevation.mockResolvedValue(false);
     mock.workbenchRestore.mockClear();
@@ -374,8 +399,73 @@ describe("BridgeController restored-state configuration", () => {
       }),
     );
     expect(mock.showInformationMessage).toHaveBeenCalledWith(
-      expect.stringContaining("Reload VS Code manually"),
+      expect.stringContaining("Reloading VS Code automatically"),
     );
+    expect(mock.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
+  });
+
+  it("offers compatible native drop access once and reloads after approval", async () => {
+    mock.warningResponse = "Enable";
+    mock.workbenchNeedsElevation.mockResolvedValue(true);
+    mock.officialExtension.mockReturnValue({
+      extensionPath: "/extensions/openai.chatgpt",
+      packageJSON: { version: "1.0.0" },
+    });
+    const controller = new BridgeController(context());
+
+    await controller.offerWorkbenchDropOnboarding();
+    await controller.offerWorkbenchDropOnboarding();
+
+    expect(mock.workbenchInspect).toHaveBeenCalledOnce();
+    expect(mock.inlineMentionInspect).toHaveBeenCalledOnce();
+    expect(mock.workbenchEnable).toHaveBeenCalledOnce();
+    expect(mock.workbenchEnable).toHaveBeenCalledWith(
+      expect.objectContaining({ replaceTarget: mock.workbenchPkexec }),
+    );
+    expect(mock.executeCommand).toHaveBeenCalledTimes(1);
+    expect(mock.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
+  });
+
+  it("does not repeat automatic native drop consent after dismissal", async () => {
+    mock.warningResponse = undefined;
+    mock.officialExtension.mockReturnValue({
+      extensionPath: "/extensions/openai.chatgpt",
+      packageJSON: { version: "1.0.0" },
+    });
+    const controller = new BridgeController(context());
+
+    await controller.offerWorkbenchDropOnboarding();
+    await controller.offerWorkbenchDropOnboarding();
+
+    expect(mock.workbenchInspect).toHaveBeenCalledOnce();
+    expect(mock.inlineMentionInspect).toHaveBeenCalledOnce();
+    expect(mock.workbenchEnable).not.toHaveBeenCalled();
+    expect(mock.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("does not request access when both native drop assets are already patched", async () => {
+    mock.workbenchInspect.mockResolvedValue({
+      status: "already-patched",
+      changed: false,
+      targetPath: "/opt/code/workbench.js",
+    });
+    mock.inlineMentionInspect.mockResolvedValue({
+      status: "already-patched",
+      changed: false,
+      extensionVersion: "1.0.0",
+      targetPath: "/extensions/openai.chatgpt/webview/assets/app.js",
+    });
+    mock.officialExtension.mockReturnValue({
+      extensionPath: "/extensions/openai.chatgpt",
+      packageJSON: { version: "1.0.0" },
+    });
+    const controller = new BridgeController(context());
+
+    await controller.offerWorkbenchDropOnboarding();
+
+    expect(mock.workbenchEnable).not.toHaveBeenCalled();
+    expect(mock.inlineMentionEnable).not.toHaveBeenCalled();
+    expect(mock.executeCommand).not.toHaveBeenCalled();
   });
 
   it("restores the Workbench drop patch through the explicit command", async () => {

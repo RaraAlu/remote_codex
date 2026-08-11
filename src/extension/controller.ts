@@ -119,6 +119,8 @@ import {
 } from "./workspace-resource-controller.js";
 
 const execFileAsync = promisify(execFile);
+const WORKBENCH_DROP_ONBOARDING_KEY =
+  "codexRemoteBridge.workbenchDropOnboardingFingerprint.v1";
 
 interface DiagnosticReport {
   generatedAt: string;
@@ -260,7 +262,9 @@ export class BridgeController implements vscode.Disposable {
   #executor: OpenSshExecutor | null = null;
   #sessionConfig: BridgeConfig | null = null;
   #initialization: Promise<void> | null = null;
+  #dropOnboarding: Promise<void> | null = null;
   #shutdown: Promise<void> | null = null;
+  #reloadRequested = false;
   #autoSuppressed = false;
   #remoteIdentity: RemoteIdentity | null = null;
   #shimRuntimeHealth: ShimRuntimeHealth = { ...EMPTY_SHIM_RUNTIME_HEALTH };
@@ -381,7 +385,11 @@ export class BridgeController implements vscode.Disposable {
       return await this.#initialization;
     }
 
-    const task = this.#initializeOnce();
+    const task = (async () => {
+      if (await this.#initializeOnce()) {
+        await this.offerWorkbenchDropOnboarding();
+      }
+    })();
     this.#initialization = task;
     try {
       await task;
@@ -392,10 +400,10 @@ export class BridgeController implements vscode.Disposable {
     }
   }
 
-  async #initializeOnce(): Promise<void> {
+  async #initializeOnce(): Promise<boolean> {
     if (this.#state.state === "configuring") {
       this.#log("automatic initialization deferred while configuration is in progress");
-      return;
+      return false;
     }
 
     const plan = planAutomaticInitialization({
@@ -417,7 +425,7 @@ export class BridgeController implements vscode.Disposable {
         if (repair.reloadRequired) {
           this.#log(`migrated the managed Codex launcher to ${shimPath}; reloading the window`);
           await this.#reloadWindow();
-          return;
+          return false;
         }
         if (repair.changed) {
           this.#log(
@@ -428,13 +436,13 @@ export class BridgeController implements vscode.Disposable {
         const bridgeError = asBridgeError(error, "INVALID_CONFIG");
         this.#log(`managed launcher repair failed: ${bridgeError.message}`);
         void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
-        return;
+        return false;
       }
     }
 
     if (!plan.refreshOfficialRuntime && !plan.reconcileExternalCli) {
       this.#log("automatic initialization disabled; bridge remains idle");
-      return;
+      return true;
     }
 
     if (plan.refreshOfficialRuntime) {
@@ -444,11 +452,11 @@ export class BridgeController implements vscode.Disposable {
         const bridgeError = asBridgeError(error, "PROTOCOL_MISMATCH");
         this.#log(`official Codex runtime validation failed: ${bridgeError.message}`);
         void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
-        return;
+        return false;
       }
       try {
         if (await this.#reconcileOfficialExtensionCompatibility()) {
-          return;
+          return false;
         }
       } catch (error) {
         this.#log(`official Codex compatibility reconciliation skipped: ${String(error)}`);
@@ -465,9 +473,10 @@ export class BridgeController implements vscode.Disposable {
 
     if (!plan.connectRemote) {
       this.#log("automatic Remote SSH initialization disabled; bridge remains idle");
-      return;
+      return true;
     }
     await this.#configureCurrentRemote(false);
+    return !this.#reloadRequested;
   }
 
   async configure(): Promise<void> {
@@ -786,6 +795,81 @@ export class BridgeController implements vscode.Disposable {
     this.#log(`[context-drop] ${message}`);
   }
 
+  async offerWorkbenchDropOnboarding(): Promise<void> {
+    if (this.#dropOnboarding) {
+      return await this.#dropOnboarding;
+    }
+    const task = this.#offerWorkbenchDropOnboardingOnce();
+    this.#dropOnboarding = task;
+    try {
+      await task;
+    } finally {
+      if (this.#dropOnboarding === task) {
+        this.#dropOnboarding = null;
+      }
+    }
+  }
+
+  async #offerWorkbenchDropOnboardingOnce(): Promise<void> {
+    let installation: {
+      extensionPath: string;
+      extensionVersion: string | null;
+    };
+    try {
+      installation = this.#officialCodexExtensionIdentity();
+    } catch (error) {
+      this.#log(`native Codex drop onboarding deferred: ${String(error)}`);
+      return;
+    }
+    const fingerprint = this.#workbenchDropOnboardingFingerprint(installation);
+    if (
+      this.#context.globalState.get<string>(WORKBENCH_DROP_ONBOARDING_KEY) ===
+      fingerprint
+    ) {
+      return;
+    }
+
+    const [workbench, inlineMention] = await Promise.all([
+      inspectWorkbenchDropCompatibility({
+        appRoot: vscode.env.appRoot,
+        stateDirectory: workbenchDropCompatibilityDir(),
+      }),
+      inspectCodexInlineMentionCompatibility({
+        extensionPath: installation.extensionPath,
+        extensionVersion: installation.extensionVersion,
+        stateDirectory: codexInlineMentionCompatibilityDir(),
+      }),
+    ]).catch((error) => {
+      this.#log(`native Codex drop onboarding inspection failed: ${String(error)}`);
+      return [] as const;
+    });
+    if (!workbench || !inlineMention) {
+      return;
+    }
+
+    const patchableStatuses = new Set(["disabled", "already-restored", "already-patched"]);
+    if (
+      !patchableStatuses.has(workbench.status) ||
+      !patchableStatuses.has(inlineMention.status)
+    ) {
+      this.#log(
+        `native Codex drop onboarding skipped: workbench=${workbench.status} inlineMention=${inlineMention.status}`,
+      );
+      return;
+    }
+
+    await this.#context.globalState.update(WORKBENCH_DROP_ONBOARDING_KEY, fingerprint);
+    if (
+      workbench.status === "already-patched" &&
+      inlineMention.status === "already-patched"
+    ) {
+      this.#log("native Codex drop onboarding: compatibility layer already enabled");
+      return;
+    }
+    this.#log("native Codex drop onboarding: requesting user consent and required file access");
+    await this.enableWorkbenchDrop();
+  }
+
   async enableWorkbenchDrop(): Promise<void> {
     const confirmation = await vscode.window.showWarningMessage(
       [
@@ -798,10 +882,12 @@ export class BridgeController implements vscode.Disposable {
       { modal: true },
       "Enable",
     );
+    await this.#rememberWorkbenchDropOnboardingDecision();
     if (confirmation !== "Enable") {
       return;
     }
     let inlineMentionChanged = false;
+    let compatibilityChanged = false;
     try {
       const installation = this.#officialCodexExtensionIdentity();
       const inlineMention = await enableCodexInlineMentionCompatibility({
@@ -831,11 +917,7 @@ export class BridgeController implements vscode.Disposable {
           workbench.detail ?? `Workbench drop compatibility is ${workbench.status}`,
         );
       }
-      void vscode.window.showInformationMessage(
-        workbench.changed || inlineMention.changed
-          ? "Codex Bridge enabled cursor-positioned @ mention drops. Reload VS Code manually to activate them."
-          : "The native Codex drop surface is already enabled.",
-      );
+      compatibilityChanged = workbench.changed || inlineMention.changed;
     } catch (error) {
       if (inlineMentionChanged) {
         try {
@@ -855,6 +937,27 @@ export class BridgeController implements vscode.Disposable {
       const bridgeError = asBridgeError(error, "COMMAND_DENIED");
       this.#log(`Workbench drop compatibility enable failed: ${bridgeError.message}`);
       void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
+      return;
+    }
+
+    if (!compatibilityChanged) {
+      void vscode.window.showInformationMessage(
+        "The native Codex drop surface is already enabled.",
+      );
+      return;
+    }
+    this.#log("native Codex drop compatibility enabled; reloading the window automatically");
+    void vscode.window.showInformationMessage(
+      "Codex Bridge enabled cursor-positioned @ mention drops. Reloading VS Code automatically.",
+    );
+    try {
+      await this.#reloadWindow();
+    } catch (error) {
+      const bridgeError = asBridgeError(error, "COMMAND_DENIED");
+      this.#log(`automatic reload after native Codex drop enable failed: ${bridgeError.message}`);
+      void vscode.window.showErrorMessage(
+        `Codex Bridge enabled native drops, but could not reload VS Code automatically: ${bridgeError.message}`,
+      );
     }
   }
 
@@ -867,6 +970,7 @@ export class BridgeController implements vscode.Disposable {
     if (confirmation !== "Disable") {
       return;
     }
+    await this.#rememberWorkbenchDropOnboardingDecision();
     try {
       const workbench = await restoreWorkbenchDropCompatibility({
         appRoot: vscode.env.appRoot,
@@ -913,6 +1017,34 @@ export class BridgeController implements vscode.Disposable {
       );
     }
     return replaceWorkbenchAssetWithPkexec;
+  }
+
+  async #rememberWorkbenchDropOnboardingDecision(): Promise<void> {
+    try {
+      const installation = this.#officialCodexExtensionIdentity();
+      await this.#context.globalState.update(
+        WORKBENCH_DROP_ONBOARDING_KEY,
+        this.#workbenchDropOnboardingFingerprint(installation),
+      );
+    } catch (error) {
+      this.#log(`native Codex drop onboarding decision could not be recorded: ${String(error)}`);
+    }
+  }
+
+  #workbenchDropOnboardingFingerprint(installation: {
+    extensionPath: string;
+    extensionVersion: string | null;
+  }): string {
+    return createHash("sha256")
+      .update(
+        [
+          vscode.env.appRoot,
+          vscode.version,
+          installation.extensionPath,
+          installation.extensionVersion ?? "unknown",
+        ].join("\0"),
+      )
+      .digest("hex");
   }
 
   async #recordWorkbenchDropCompatibility(
@@ -1020,6 +1152,7 @@ export class BridgeController implements vscode.Disposable {
   }
 
   async #reloadWindow(): Promise<void> {
+    this.#reloadRequested = true;
     try {
       await vscode.commands.executeCommand("workbench.action.reloadWindow");
     } catch (error) {
@@ -1633,7 +1766,7 @@ export class BridgeController implements vscode.Disposable {
     void vscode.window.showInformationMessage(
       `Codex Bridge installed Remote Executor ${REMOTE_EXECUTOR_VERSION}. Reloading the Remote SSH window automatically.`,
     );
-    await vscode.commands.executeCommand("workbench.action.reloadWindow");
+    await this.#reloadWindow();
     throw new BridgeError(
       "BRIDGE_NOT_READY",
       "Remote Executor installation triggered an automatic Remote SSH window reload",

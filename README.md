@@ -6,7 +6,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.72` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
+> 当前源码版本为 `0.3.73` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
 > 快照附件；官方输入区的原生 `@` 文件搜索通过当前 VS Code Remote SSH 工作区查询，
 > 不访问本机控制目录。可选兼容层不要求用户按住 `Shift`：VS Code Explorer 拖放转换为
 > 当前光标处的原生 `@` 引用；无论来自 VS Code Explorer 还是系统文件管理器，文件和
@@ -79,8 +79,9 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
   管理器路径，再调用官方 `chatgpt.addFileToThread`。Bridge 为所有受管拖放路径携带标记，
   配套 Webview 补丁统一在当前光标处插入原生 `@` 引用；普通未标记的官方命令仍保持官方
   行为。Remote SSH 对话中的本机文件会授权其所在目录，本机目录会授权其自身，随后由
-  当前 turn 热刷新根列表并通过本地 `workspace_*` 工具分析。首次启用会
-  明确请求同意，并为 Workbench、
+  当前 turn 热刷新根列表并通过本地 `workspace_*` 工具分析。扩展激活会按当前 VS Code
+  与官方 Codex 资产组合自动检查兼容性；首次可安全启用时只弹出一次明确确认，确认后
+  自动请求所需系统文件权限并重载窗口。Bridge 会为 Workbench、
   `product.json` 和官方 Webview 资产保存带 SHA-256 的可恢复原件。
 
 ## 支持边界
@@ -152,9 +153,12 @@ code --install-extension "dist/codex-remote-bridge-$version-win32-x64.vsix" --fo
 
 ### 启用和使用原生拖放
 
-1. 从命令面板执行 `Codex Bridge: Enable Native Codex Drop Surface`，阅读兼容层修改范围并
-   确认启用，然后执行一次 `Developer: Reload Window`。VS Code 或官方 Codex 扩展升级后，
-   若补丁被替换，需要重新执行该命令；哈希或代码形状不匹配时 Bridge 会拒绝修改。
+1. 扩展激活后会自动检查当前 VS Code 与官方 Codex 资产。检测到兼容且尚未启用的原生
+   拖放接收面时，Bridge 只对该资产组合弹出一次确认；确认后自动请求所需文件权限，
+   Linux 系统安装会出现 polkit 授权框，补丁成功后窗口自动重载。拒绝或关闭确认后不会
+   对同一资产组合重复打扰，可随时从命令面板执行
+   `Codex Bridge: Enable Native Codex Drop Surface` 手动重试。VS Code 或官方 Codex 扩展
+   升级后会重新探测；哈希或代码形状不匹配时 Bridge 会拒绝修改。
 2. 把 VS Code Explorer 或系统文件管理器中的文件、目录直接拖入官方 Codex 对话区域。
    所有 Bridge 捕获的拖放都在当前 Composer 光标处生成一个原生 `@` 引用，不需要按
    `Shift`，也不按拖动来源切换为附件。
@@ -315,13 +319,16 @@ Remote SSH 实机验证。完整门禁和量化指标见
   Remote SSH 窗口后，原生 `@` 搜索能返回并选择远端文件、搜索完成态不再卡住，实际 turn
   能读取该文件，同时审计出现 `fuzzy_file_search.session_update` 且不再出现对应的
   `local_core_request.blocked`。
-- Workbench 与官方 Codex Webview 兼容层只能由用户显式启用，不在扩展激活时静默提权
-  或修改安装目录；Webview 补丁只转换带 Bridge 受管标记的拖放，Explorer 与系统文件
-  管理器捕获结果均使用该标记，普通未标记的 `chatgpt.addFileToThread` 仍保持官方语义。
+- Workbench 与官方 Codex Webview 兼容层在扩展激活时自动探测，并对每组 VS Code/Codex
+  资产提供一次明确确认；只有用户确认后才请求 polkit 或修改安装目录，补丁成功后自动
+  重载，拒绝后同一资产组合不再重复提示。Webview 补丁只转换带 Bridge 受管标记的拖放，
+  Explorer 与系统文件管理器捕获结果均使用该标记，普通未标记的
+  `chatgpt.addFileToThread` 仍保持官方语义。
   未知代码形状、备份缺失、哈希不符和外部修改均失败关闭。当前 Linux 本地与 Remote SSH
   的统一 `@` 拖放
-  已于 2026-08-10 完成实机验证；剩余退出条件是执行禁用与逐字节恢复验收，并在 VS Code
-  或官方扩展升级后重新探测和回归，不能沿用旧版本放行结果。
+  已于 2026-08-10 完成实机验证；`0.3.73` 的自动权限请求、成功后自动重载、欢迎页无焦点
+  降级和 Remote SSH 窗口重载回归也已完成。剩余退出条件是执行禁用与逐字节恢复验收，
+  并在 VS Code 或官方扩展升级后重新探测和回归，不能沿用旧版本放行结果。
 
 ### Windows x64 与 0.4.0
 
