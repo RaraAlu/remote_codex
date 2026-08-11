@@ -120,7 +120,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const WORKBENCH_DROP_ONBOARDING_KEY =
-  "codexRemoteBridge.workbenchDropOnboardingFingerprint.v1";
+  "codexRemoteBridge.workbenchDropOnboardingFingerprint.v2";
 
 interface DiagnosticReport {
   generatedAt: string;
@@ -166,6 +166,7 @@ interface DiagnosticReport {
     officialExtensionCompatibility: OfficialExtensionCompatibilityResult | null;
     codexInlineMentionCompatibility: CodexInlineMentionCompatibilityResult | null;
     workbenchDropCompatibility: WorkbenchDropCompatibilityResult | null;
+    automaticDropAuthorizationEnabled: boolean;
     authorizedRoots: LocalRootDiagnostic[];
   };
   remote: {
@@ -742,20 +743,24 @@ export class BridgeController implements vscode.Disposable {
       );
     }
 
-    const confirmation = await vscode.window.showWarningMessage(
-      "Authorize the local folder containing the dropped resource for analysis from this Remote SSH Codex window?",
-      {
-        modal: true,
-        detail: [
-          ...unauthorized,
-          "",
-          "Dropped files and folders are inserted as @ references and are not copied to the remote host. Bridge exposes them only through the authorized local workspace tools.",
-        ].join("\n"),
-      },
-      "Authorize Local Path",
-    );
-    if (confirmation !== "Authorize Local Path") {
-      return false;
+    const automaticAuthorization =
+      this.#localRoots.automaticDropAuthorizationEnabled();
+    if (!automaticAuthorization) {
+      const confirmation = await vscode.window.showWarningMessage(
+        "Authorize the local folder containing the dropped resource for analysis from this Remote SSH Codex window?",
+        {
+          modal: true,
+          detail: [
+            ...unauthorized,
+            "",
+            "Dropped files and folders are inserted as @ references and are not copied to the remote host. Bridge exposes them only through the authorized local workspace tools.",
+          ].join("\n"),
+        },
+        "Authorize Local Path",
+      );
+      if (confirmation !== "Authorize Local Path") {
+        return false;
+      }
     }
 
     const authorized = new Map<string, WorkspaceRootConfig>();
@@ -772,6 +777,11 @@ export class BridgeController implements vscode.Disposable {
         rootRole: root.role,
         rootPath: root.path,
         target: root.target,
+        details: {
+          authorizationMode: automaticAuthorization
+            ? "drop-surface-consent"
+            : "per-path-confirmation",
+        },
       });
     }
     if (!this.#sessionConfig) {
@@ -861,7 +871,8 @@ export class BridgeController implements vscode.Disposable {
     await this.#context.globalState.update(WORKBENCH_DROP_ONBOARDING_KEY, fingerprint);
     if (
       workbench.status === "already-patched" &&
-      inlineMention.status === "already-patched"
+      inlineMention.status === "already-patched" &&
+      this.#localRoots.automaticDropAuthorizationEnabled()
     ) {
       this.#log("native Codex drop onboarding: compatibility layer already enabled");
       return;
@@ -875,7 +886,7 @@ export class BridgeController implements vscode.Disposable {
       [
         "This compatibility layer modifies the installed VS Code Workbench and official Codex Webview JavaScript assets.",
         "VS Code Explorer and system file manager drops will be inserted as native @ mentions at the current composer cursor.",
-        "In Remote SSH windows, local resources outside an authorized root require one explicit local path authorization.",
+        "In Remote SSH windows, every local file or folder you explicitly drop will automatically authorize its containing folder; paths you have not dropped remain inaccessible.",
         "Codex Bridge keeps SHA-256 verified backups and refuses to overwrite later changes.",
         "A VS Code or official Codex update may remove the patches and require a new compatibility check.",
       ].join("\n"),
@@ -884,6 +895,30 @@ export class BridgeController implements vscode.Disposable {
     );
     await this.#rememberWorkbenchDropOnboardingDecision();
     if (confirmation !== "Enable") {
+      return;
+    }
+    const automaticAuthorizationWasEnabled =
+      this.#localRoots.automaticDropAuthorizationEnabled();
+    try {
+      await this.#localRoots.setAutomaticDropAuthorizationEnabled(true);
+      await this.#audit.write({
+        operation: "local_root.automatic_drop_authorization.enable",
+        outcome: "succeeded",
+        details: { scope: "explicitly-dropped-local-resources" },
+      });
+    } catch (error) {
+      if (!automaticAuthorizationWasEnabled) {
+        try {
+          await this.#localRoots.setAutomaticDropAuthorizationEnabled(false);
+        } catch (rollbackError) {
+          this.#log(
+            `automatic local drop authorization state rollback failed: ${String(rollbackError)}`,
+          );
+        }
+      }
+      const bridgeError = asBridgeError(error, "COMMAND_DENIED");
+      this.#log(`automatic local drop authorization enable failed: ${bridgeError.message}`);
+      void vscode.window.showErrorMessage(`Codex Bridge: ${bridgeError.message}`);
       return;
     }
     let inlineMentionChanged = false;
@@ -919,6 +954,20 @@ export class BridgeController implements vscode.Disposable {
       }
       compatibilityChanged = workbench.changed || inlineMention.changed;
     } catch (error) {
+      if (!automaticAuthorizationWasEnabled) {
+        try {
+          await this.#localRoots.setAutomaticDropAuthorizationEnabled(false);
+          await this.#audit.write({
+            operation: "local_root.automatic_drop_authorization.rollback",
+            outcome: "succeeded",
+            details: { scope: "explicitly-dropped-local-resources" },
+          });
+        } catch (rollbackError) {
+          this.#log(
+            `automatic local drop authorization rollback failed: ${String(rollbackError)}`,
+          );
+        }
+      }
       if (inlineMentionChanged) {
         try {
           const installation = this.#officialCodexExtensionIdentity();
@@ -972,6 +1021,12 @@ export class BridgeController implements vscode.Disposable {
     }
     await this.#rememberWorkbenchDropOnboardingDecision();
     try {
+      await this.#localRoots.setAutomaticDropAuthorizationEnabled(false);
+      await this.#audit.write({
+        operation: "local_root.automatic_drop_authorization.disable",
+        outcome: "succeeded",
+        details: { scope: "explicitly-dropped-local-resources" },
+      });
       const workbench = await restoreWorkbenchDropCompatibility({
         appRoot: vscode.env.appRoot,
         stateDirectory: workbenchDropCompatibilityDir(),
@@ -1940,6 +1995,8 @@ export class BridgeController implements vscode.Disposable {
         officialExtensionCompatibility: this.#officialExtensionCompatibility,
         codexInlineMentionCompatibility,
         workbenchDropCompatibility,
+        automaticDropAuthorizationEnabled:
+          this.#localRoots.automaticDropAuthorizationEnabled(),
         authorizedRoots: await this.#localRootDiagnostics(config),
       },
       remote: {

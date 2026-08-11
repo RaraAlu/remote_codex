@@ -6,12 +6,13 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.73` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
+> 当前源码版本为 `0.3.74` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
 > 快照附件；官方输入区的原生 `@` 文件搜索通过当前 VS Code Remote SSH 工作区查询，
 > 不访问本机控制目录。可选兼容层不要求用户按住 `Shift`：VS Code Explorer 拖放转换为
 > 当前光标处的原生 `@` 引用；无论来自 VS Code Explorer 还是系统文件管理器，文件和
-> 目录都采用同一表示。Remote SSH 对话中的本机资源经一次明确目录授权后作为本地
-> 次级根 `@` 引用，分析过程不复制到远端；
+> 目录都采用同一表示。启用兼容层时可一次性同意自动授权之后明确拖入的本机资源；
+> Remote SSH 对话只把实际拖入资源的包含目录登记为本地次级根 `@` 引用，未拖入路径
+> 仍不可访问，分析过程不复制到远端；
 > 真实 VS Code/Remote SSH 完整验收仍在进行。
 > Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
 > `codex` 自动附着、显式 `codex-vscode.exe` TUI、外部 MCP、历史 thread 同步、无 rollout
@@ -73,13 +74,14 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 - 符合安全条件的 stdio MCP 可通过当前 VS Code Remote 通道在远端运行。
 - 本地 Codex CLI 可附着和介入活动 VS Code Codex thread。
 - 普通本地窗口按当前唯一文件工作区过滤任务列表；Remote SSH 窗口按主机和远程根隔离。
-- 本地次级根必须由用户显式授权，并可随时撤销。
+- 本地次级根来自用户手动选择，或启用拖放时一次性同意后明确拖入的资源；可随时撤销。
 - 本地结构化审计不记录文件正文、密码、私钥、Token 或完整环境变量。
 - 可选的原生 Codex 拖放接收面通过 VS Code Workbench 外层接收 Explorer 与系统文件
   管理器路径，再调用官方 `chatgpt.addFileToThread`。Bridge 为所有受管拖放路径携带标记，
   配套 Webview 补丁统一在当前光标处插入原生 `@` 引用；普通未标记的官方命令仍保持官方
-  行为。Remote SSH 对话中的本机文件会授权其所在目录，本机目录会授权其自身，随后由
-  当前 turn 热刷新根列表并通过本地 `workspace_*` 工具分析。扩展激活会按当前 VS Code
+  行为。Remote SSH 对话中的本机文件会自动授权其所在目录，本机目录会自动授权其自身；
+  只有实际拖入的路径触发授权，未拖入路径不会被预先开放。随后由当前 turn 热刷新根列表
+  并通过本地 `workspace_*` 工具分析。扩展激活会按当前 VS Code
   与官方 Codex 资产组合自动检查兼容性；首次可安全启用时只弹出一次明确确认，确认后
   自动请求所需系统文件权限并重载窗口。Bridge 会为 Workbench、
   `product.json` 和官方 Webview 资产保存带 SHA-256 的可恢复原件。
@@ -154,7 +156,8 @@ code --install-extension "dist/codex-remote-bridge-$version-win32-x64.vsix" --fo
 ### 启用和使用原生拖放
 
 1. 扩展激活后会自动检查当前 VS Code 与官方 Codex 资产。检测到兼容且尚未启用的原生
-   拖放接收面时，Bridge 只对该资产组合弹出一次确认；确认后自动请求所需文件权限，
+   拖放接收面时，Bridge 只对该资产组合弹出一次确认；该确认同时允许 Remote SSH 窗口
+   自动授权用户之后明确拖入的本机文件或目录。确认后自动请求所需系统文件权限，
    Linux 系统安装会出现 polkit 授权框，补丁成功后窗口自动重载。拒绝或关闭确认后不会
    对同一资产组合重复打扰，可随时从命令面板执行
    `Codex Bridge: Enable Native Codex Drop Surface` 手动重试。VS Code 或官方 Codex 扩展
@@ -162,9 +165,9 @@ code --install-extension "dist/codex-remote-bridge-$version-win32-x64.vsix" --fo
 2. 把 VS Code Explorer 或系统文件管理器中的文件、目录直接拖入官方 Codex 对话区域。
    所有 Bridge 捕获的拖放都在当前 Composer 光标处生成一个原生 `@` 引用，不需要按
    `Shift`，也不按拖动来源切换为附件。
-3. Remote SSH 窗口中的远端 Explorer 资源直接绑定远端主根。本机文件首次拖入时授权其
-   父目录，本机目录首次拖入时授权目录自身；确认后根列表会在下一轮热刷新，资源不会被
-   复制到远端。拒绝授权不会插入引用。
+3. Remote SSH 窗口中的远端 Explorer 资源直接绑定远端主根。本机文件拖入时自动授权其
+   父目录，本机目录拖入时自动授权目录自身，之后不再逐路径弹窗；根列表会在下一轮热刷新，
+   资源不会被复制到远端。该模式不会提前授权整个文件系统，只授权用户实际拖入的路径。
 4. 使用 `Codex Bridge: Revoke Local Root` 可撤销本地次级根。停用或卸载前先执行
    `Codex Bridge: Disable Native Codex Drop Surface`，让 Bridge 校验并恢复受管的
    Workbench、`product.json` 和官方 Webview 资产。
@@ -327,7 +330,11 @@ Remote SSH 实机验证。完整门禁和量化指标见
   未知代码形状、备份缺失、哈希不符和外部修改均失败关闭。当前 Linux 本地与 Remote SSH
   的统一 `@` 拖放
   已于 2026-08-10 完成实机验证；`0.3.73` 的自动权限请求、成功后自动重载、欢迎页无焦点
-  降级和 Remote SSH 窗口重载回归也已完成。剩余退出条件是执行禁用与逐字节恢复验收，
+  降级和 Remote SSH 窗口重载回归也已完成。`0.3.74` 候选把同一次启用确认扩展为之后
+  明确拖入路径的自动授权；退出条件是在真实 Remote SSH 窗口从两个此前未授权目录连续
+  拖入文件和目录，确认均无逐路径弹窗、审计模式为 `drop-surface-consent`、模型可读取，
+  禁用兼容层后诊断显示自动授权关闭且不再登记新根。剩余退出条件还包括执行禁用与逐字节
+  恢复验收，
   并在 VS Code 或官方扩展升级后重新探测和回归，不能沿用旧版本放行结果。
 
 ### Windows x64 与 0.4.0

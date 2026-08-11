@@ -6,6 +6,8 @@ import { BridgeError } from "../core/errors.js";
 import type { WorkspaceRootConfig } from "../core/types.js";
 
 const LOCAL_ROOTS_KEY = "codexRemoteBridge.localRoots.v1";
+const AUTOMATIC_DROP_AUTHORIZATION_KEY =
+  "codexRemoteBridge.automaticLocalDropAuthorization.v1";
 const MAX_LOCAL_ROOTS = 15;
 
 interface StoredLocalRoots {
@@ -142,6 +144,14 @@ export class LocalRootAuthority {
 
   availableSlots(): number {
     return MAX_LOCAL_ROOTS - this.roots().length;
+  }
+
+  automaticDropAuthorizationEnabled(): boolean {
+    return this.#state.get<boolean>(AUTOMATIC_DROP_AUTHORIZATION_KEY) === true;
+  }
+
+  async setAutomaticDropAuthorizationEnabled(enabled: boolean): Promise<void> {
+    await this.#state.update(AUTOMATIC_DROP_AUTHORIZATION_KEY, enabled || undefined);
   }
 
   async findContainingDirectory(

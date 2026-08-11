@@ -41,6 +41,8 @@ const mock = vi.hoisted(() => ({
     role: "secondary",
     target: "local",
   })),
+  localDropAutomaticAuthorization: vi.fn(() => false),
+  localDropAutomaticAuthorizationSet: vi.fn(async () => undefined),
   localRootContaining: vi.fn(async () => undefined as unknown),
   localRoots: vi.fn(() => [] as unknown[]),
   officialExtension: vi.fn<() => unknown>(() => {
@@ -59,6 +61,7 @@ const mock = vi.hoisted(() => ({
   settingsUpdate: vi.fn(async () => undefined),
   showErrorMessage: vi.fn(),
   showInformationMessage: vi.fn(),
+  showWarningMessage: vi.fn(async () => undefined as string | undefined),
   warningResponse: "Configure" as string | undefined,
   transportStart: vi.fn(async () => {
     throw new Error("transport must not start before reload");
@@ -127,7 +130,7 @@ vi.mock("vscode", () => ({
     showErrorMessage: mock.showErrorMessage,
     showInformationMessage: mock.showInformationMessage,
     showOpenDialog: mock.showOpenDialog,
-    showWarningMessage: vi.fn(async () => mock.warningResponse),
+    showWarningMessage: mock.showWarningMessage,
     setStatusBarMessage: vi.fn(),
   },
   workspace: {
@@ -151,12 +154,14 @@ vi.mock("../src/extension/codex-context-drop.js", () => ({
 vi.mock("../src/extension/local-root-authority.js", () => ({
   LocalRootAuthority: class {
     authorize = mock.localRootAuthorize;
+    automaticDropAuthorizationEnabled = mock.localDropAutomaticAuthorization;
     availableSlots = () => 15;
     diagnostics = vi.fn(async () => []);
     find = vi.fn(() => undefined);
     findContainingDirectory = mock.localRootContaining;
     revoke = vi.fn(async () => false);
     roots = mock.localRoots;
+    setAutomaticDropAuthorizationEnabled = mock.localDropAutomaticAuthorizationSet;
   },
 }));
 
@@ -266,6 +271,7 @@ describe("BridgeController restored-state configuration", () => {
     mock.settingsHasManaged.mockReturnValue(false);
     mock.settingsRepair.mockResolvedValue({ changed: false, reloadRequired: false });
     mock.warningResponse = "Configure";
+    mock.showWarningMessage.mockImplementation(async () => mock.warningResponse);
     mock.inlineMentionEnable.mockClear();
     mock.inlineMentionInspect.mockReset();
     mock.inlineMentionInspect.mockResolvedValue({
@@ -277,6 +283,10 @@ describe("BridgeController restored-state configuration", () => {
     mock.inlineMentionRestore.mockClear();
     mock.attachDrop.mockClear();
     mock.localRootAuthorize.mockClear();
+    mock.localDropAutomaticAuthorization.mockReset();
+    mock.localDropAutomaticAuthorization.mockReturnValue(false);
+    mock.localDropAutomaticAuthorizationSet.mockReset();
+    mock.localDropAutomaticAuthorizationSet.mockResolvedValue(undefined);
     mock.localRootContaining.mockReset();
     mock.localRootContaining.mockResolvedValue(undefined);
     mock.localRoots.mockReset();
@@ -401,6 +411,7 @@ describe("BridgeController restored-state configuration", () => {
     expect(mock.showInformationMessage).toHaveBeenCalledWith(
       expect.stringContaining("Reloading VS Code automatically"),
     );
+    expect(mock.localDropAutomaticAuthorizationSet).toHaveBeenCalledWith(true);
     expect(mock.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
   });
 
@@ -426,6 +437,27 @@ describe("BridgeController restored-state configuration", () => {
     expect(mock.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
   });
 
+  it("rolls back automatic local path consent when native drop enable fails", async () => {
+    mock.warningResponse = "Enable";
+    mock.officialExtension.mockReturnValue({
+      extensionPath: "/extensions/openai.chatgpt",
+      packageJSON: { version: "1.0.0" },
+    });
+    mock.workbenchEnable.mockRejectedValueOnce(new Error("patch failed"));
+    const controller = new BridgeController(context());
+
+    await controller.enableWorkbenchDrop();
+
+    expect(mock.localDropAutomaticAuthorizationSet.mock.calls).toEqual([
+      [true],
+      [false],
+    ]);
+    expect(mock.executeCommand).not.toHaveBeenCalled();
+    expect(mock.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining("patch failed"),
+    );
+  });
+
   it("does not repeat automatic native drop consent after dismissal", async () => {
     mock.warningResponse = undefined;
     mock.officialExtension.mockReturnValue({
@@ -443,7 +475,7 @@ describe("BridgeController restored-state configuration", () => {
     expect(mock.executeCommand).not.toHaveBeenCalled();
   });
 
-  it("does not request access when both native drop assets are already patched", async () => {
+  it("does not request access when both native drop assets and automatic path consent are already enabled", async () => {
     mock.workbenchInspect.mockResolvedValue({
       status: "already-patched",
       changed: false,
@@ -459,12 +491,50 @@ describe("BridgeController restored-state configuration", () => {
       extensionPath: "/extensions/openai.chatgpt",
       packageJSON: { version: "1.0.0" },
     });
+    mock.localDropAutomaticAuthorization.mockReturnValue(true);
     const controller = new BridgeController(context());
 
     await controller.offerWorkbenchDropOnboarding();
 
     expect(mock.workbenchEnable).not.toHaveBeenCalled();
     expect(mock.inlineMentionEnable).not.toHaveBeenCalled();
+    expect(mock.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("offers automatic local path consent when native drop assets are already patched", async () => {
+    mock.warningResponse = "Enable";
+    mock.workbenchInspect.mockResolvedValue({
+      status: "already-patched",
+      changed: false,
+      targetPath: "/opt/code/workbench.js",
+    });
+    mock.inlineMentionInspect.mockResolvedValue({
+      status: "already-patched",
+      changed: false,
+      extensionVersion: "1.0.0",
+      targetPath: "/extensions/openai.chatgpt/webview/assets/app.js",
+    });
+    mock.inlineMentionEnable.mockResolvedValueOnce({
+      status: "already-patched",
+      changed: false,
+      extensionVersion: "1.0.0",
+      targetPath: "/extensions/openai.chatgpt/webview/assets/app.js",
+    });
+    mock.workbenchEnable.mockResolvedValueOnce({
+      status: "already-patched",
+      changed: false,
+      targetPath: "/opt/code/workbench.js",
+    });
+    mock.officialExtension.mockReturnValue({
+      extensionPath: "/extensions/openai.chatgpt",
+      packageJSON: { version: "1.0.0" },
+    });
+    const controller = new BridgeController(context());
+
+    await controller.offerWorkbenchDropOnboarding();
+
+    expect(mock.showWarningMessage).toHaveBeenCalledOnce();
+    expect(mock.localDropAutomaticAuthorizationSet).toHaveBeenCalledWith(true);
     expect(mock.executeCommand).not.toHaveBeenCalled();
   });
 
@@ -487,6 +557,7 @@ describe("BridgeController restored-state configuration", () => {
         extensionVersion: "1.0.0",
       }),
     );
+    expect(mock.localDropAutomaticAuthorizationSet).toHaveBeenCalledWith(false);
   });
 
   it("opens local root authorization on the local filesystem in a remote window", async () => {
@@ -560,6 +631,35 @@ describe("BridgeController restored-state configuration", () => {
     expect(mock.localRootContaining).toHaveBeenCalledWith("/local/reference");
     expect(mock.localRootAuthorize).toHaveBeenCalledWith("/local/reference");
     expect(mock.attachDrop).not.toHaveBeenCalled();
+  });
+
+  it("automatically authorizes an explicitly dropped local path after drop-surface consent", async () => {
+    mock.warningResponse = undefined;
+    mock.localDropAutomaticAuthorization.mockReturnValue(true);
+    mock.workspaceStat.mockResolvedValue({ ctime: 0, mtime: 0, size: 12, type: 1 });
+    mock.parsedDrop.resources = [
+      {
+        authority: "",
+        fragment: "",
+        fsPath: "/local/reference/manual.pdf",
+        path: "/local/reference/manual.pdf",
+        scheme: "file",
+        toString: () => "file:///local/reference/manual.pdf",
+        with: () => ({ toString: () => "file:///local/reference/manual.pdf" }),
+      },
+    ];
+    const controller = new BridgeController(context());
+
+    await controller.addWorkbenchCodexContext({ schemaVersion: 1 });
+
+    expect(mock.showWarningMessage).not.toHaveBeenCalled();
+    expect(mock.localRootAuthorize).toHaveBeenCalledWith("/local/reference");
+    expect(mock.auditWrite).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "local_root.authorize_drop",
+        details: { authorizationMode: "drop-surface-consent" },
+      }),
+    );
   });
 
   it("adds an authorized local file through the uniform inline mention path", async () => {

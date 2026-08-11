@@ -43,6 +43,10 @@ describe("LocalRootAuthority", () => {
     const storage = state();
     const authority = new LocalRootAuthority(storage);
     expect(authority.availableSlots()).toBe(15);
+    expect(authority.automaticDropAuthorizationEnabled()).toBe(false);
+
+    await authority.setAutomaticDropAuthorizationEnabled(true);
+    expect(authority.automaticDropAuthorizationEnabled()).toBe(true);
 
     const root = await authority.authorize(selected);
     expect(root).toMatchObject({
@@ -62,10 +66,13 @@ describe("LocalRootAuthority", () => {
     ]);
 
     const restored = new LocalRootAuthority(storage);
+    expect(restored.automaticDropAuthorizationEnabled()).toBe(true);
     expect(restored.find(root.id)).toEqual(root);
     await expect(restored.revoke(root.id)).resolves.toBe(true);
     expect(restored.roots()).toEqual([]);
     await expect(restored.revoke(root.id)).resolves.toBe(false);
+    await restored.setAutomaticDropAuthorizationEnabled(false);
+    expect(restored.automaticDropAuthorizationEnabled()).toBe(false);
   });
 
   it("fails closed when persisted authorization is malformed", () => {

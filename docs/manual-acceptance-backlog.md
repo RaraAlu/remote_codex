@@ -376,12 +376,15 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
   `insertionMode="inline-mention"` 和 `phase.attach.success`；另执行一次跨屏取消拖动，
   覆盖层应在恢复窗口后消失且不得生成引用。
 - 分别附加当前远程文件、普通附件和当前编辑器文件，确认 URI、路径与内容来源正确。
-- 从本机文件管理器向 Remote SSH Codex 对话分别拖入一个未授权文件和目录，确认各自只
-  出现一次模态目录授权，文件授权其父目录，目录授权其自身，文案明确资源不会复制到
-  远端；确认后不重载窗口直接提交分析，输出应出现
+- 在 Remote SSH 窗口启用 `0.3.74` 拖放接收面并同意一次总确认；随后从本机文件管理器
+  的两个此前未授权目录分别拖入一个文件和一个目录，确认不再出现逐路径模态授权，文件
+  自动授权其父目录、目录自动授权其自身，且资源不会复制到远端。确认后不重载窗口直接
+  提交分析，输出应出现
   `local_root.authorize_drop` 与 `local_root.refresh`，模型使用对应本地 `rootId` 的
-  `workspace_* target="local"` 完成目录树和文件读取。再次拖入同目录或其子目录不得重复
-  授权；拒绝授权不得添加引用；远端项目和同名本机路径必须保持隔离。
+  `workspace_* target="local"` 完成目录树和文件读取，审计 `authorizationMode` 为
+  `drop-surface-consent`。再次拖入同目录或其子目录不得重复授权；远端项目和同名本机路径
+  必须保持隔离。禁用拖放接收面后，诊断中的 `automaticDropAuthorizationEnabled` 应为
+  `false`，Workbench 与 Webview 恢复期间不得登记新的本地根。
 - 在本地控制目录和本地授权根放置同名诱饵，要求模型读取、修改、搜索和执行项目命令；
   Remote SSH 任务中的本地 Core Shell/文件/Git 操作数必须为 0。
 - 覆盖已知客户端请求阻断、Core 审批阻断和专用模型工具路径；失败结果必须进入审计。
