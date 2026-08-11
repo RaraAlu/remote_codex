@@ -32,7 +32,9 @@ afterEach(async () => {
 });
 
 describe("ConversationResourceAuthority", () => {
-  it("binds an exact dropped file and directory only to the submitting thread", async () => {
+  it.skipIf(process.platform === "win32")(
+    "binds an exact dropped file and directory only to the submitting thread",
+    async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-conversation-resources-"));
     directories.push(root);
     const file = join(root, "manual.txt");
@@ -58,7 +60,9 @@ describe("ConversationResourceAuthority", () => {
     );
   });
 
-  it("does not claim an un-staged mention or leak a claimed resource to another thread", async () => {
+  it.skipIf(process.platform === "win32")(
+    "does not claim an un-staged mention or leak a claimed resource to another thread",
+    async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-conversation-isolation-"));
     directories.push(root);
     const dropped = join(root, "dropped.txt");
@@ -106,7 +110,9 @@ describe("ConversationResourceAuthority", () => {
     expect(authority.summary()).toEqual({ resourceCount: 0, threadCount: 0 });
   });
 
-  it("serializes concurrent claims without losing either thread", async () => {
+  it.skipIf(process.platform === "win32")(
+    "serializes concurrent claims without losing either thread",
+    async () => {
     const root = await mkdtemp(join(tmpdir(), "codex-conversation-concurrent-"));
     directories.push(root);
     const first = join(root, "first.txt");

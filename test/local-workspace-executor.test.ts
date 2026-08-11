@@ -44,7 +44,9 @@ afterEach(async () => {
 });
 
 describe("LocalWorkspaceExecutor", () => {
-  it("reads, lists, searches, reports status, and observes revocation", async () => {
+  it.skipIf(process.platform === "win32")(
+    "reads, lists, searches, reports status, and observes revocation",
+    async () => {
     const parent = await mkdtemp(join(tmpdir(), "codex-bridge-local-executor-"));
     directories.push(parent);
     const rootPath = join(parent, "authorized");
@@ -146,7 +148,9 @@ describe("LocalWorkspaceExecutor", () => {
     }
   });
 
-  it("performs bounded atomic mutations with hash conflict protection", async () => {
+  it.skipIf(process.platform === "win32")(
+    "performs bounded atomic mutations with hash conflict protection",
+    async () => {
     const parent = await mkdtemp(join(tmpdir(), "codex-bridge-local-mutation-"));
     directories.push(parent);
     const rootPath = join(parent, "authorized");

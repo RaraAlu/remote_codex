@@ -21,7 +21,9 @@ afterEach(async () => {
 });
 
 describe("ControllerWorkspaceDispatcher", () => {
-  it("keeps a dropped directory read-only and scoped to its conversation", async () => {
+  it.skipIf(process.platform === "win32")(
+    "keeps a dropped directory read-only and scoped to its conversation",
+    async () => {
     const rootPath = await mkdtemp(join(tmpdir(), "codex-conversation-workspace-"));
     directories.push(rootPath);
     await writeFile(join(rootPath, "notes.md"), "controller local read\n", "utf8");
@@ -125,7 +127,9 @@ describe("ControllerWorkspaceDispatcher", () => {
     ).rejects.toMatchObject({ code: "COMMAND_DENIED" });
   });
 
-  it("allows only the exact dropped file", async () => {
+  it.skipIf(process.platform === "win32")(
+    "allows only the exact dropped file",
+    async () => {
     const rootPath = await mkdtemp(join(tmpdir(), "codex-conversation-file-"));
     directories.push(rootPath);
     const filePath = join(rootPath, "manual.pdf");

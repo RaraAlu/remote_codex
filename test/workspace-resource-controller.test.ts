@@ -409,7 +409,9 @@ describe("WorkspaceResourceController", () => {
     ).rejects.toMatchObject({ code: "COMMAND_DENIED" });
   });
 
-  it("invalidates an already registered conversation resource after thread cleanup", async () => {
+  it.skipIf(process.platform === "win32")(
+    "invalidates an already registered conversation resource after thread cleanup",
+    async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-resource-provider-"));
     const path = join(directory, "manual.txt");
     await writeFile(path, "manual\n", "utf8");

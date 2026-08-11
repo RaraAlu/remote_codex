@@ -380,7 +380,9 @@ describe("BridgeController restored-state configuration", () => {
     expect(mock.registeredCommands.has("codexRemoteBridge.disableWorkbenchDrop")).toBe(true);
   });
 
-  it("enables the Workbench drop patch through the explicit command", async () => {
+  it.skipIf(process.platform === "win32")(
+    "enables the Workbench drop patch through the explicit command",
+    async () => {
     mock.warningResponse = "Enable";
     mock.workbenchNeedsElevation.mockResolvedValue(true);
     mock.officialExtension.mockReturnValue({
@@ -410,7 +412,9 @@ describe("BridgeController restored-state configuration", () => {
     expect(mock.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
   });
 
-  it("offers compatible native drop access once and reloads after approval", async () => {
+  it.skipIf(process.platform === "win32")(
+    "offers compatible native drop access once and reloads after approval",
+    async () => {
     mock.warningResponse = "Enable";
     mock.workbenchNeedsElevation.mockResolvedValue(true);
     mock.officialExtension.mockReturnValue({

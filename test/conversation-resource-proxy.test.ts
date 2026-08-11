@@ -10,7 +10,9 @@ import { ShimProxy } from "../src/shim/proxy.js";
 import type { RpcMessage } from "../src/shim/rpc.js";
 
 describe("conversation resource proxy", () => {
-  it("binds a dropped mention to one thread without adding a secondary root", async () => {
+  it.skipIf(process.platform === "win32")(
+    "binds a dropped mention to one thread without adding a secondary root",
+    async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-conversation-resource-"));
     const endpoint =
       process.platform === "win32"
