@@ -39,6 +39,35 @@ async function readOfficialExtension(extensionPath) {
   }
 }
 
+async function codexNpmPackageExecutable() {
+  const npmPackage = process.env.CODEX_BRIDGE_CODEX_NPM_PACKAGE;
+  if (!npmPackage) {
+    return null;
+  }
+  const root = resolve(process.cwd(), "node_modules", npmPackage, "vendor");
+  const platformVendorDirectory =
+    process.platform === "linux"
+      ? "x86_64-unknown-linux-musl"
+      : process.platform === "win32"
+        ? "x86_64-pc-windows-msvc"
+        : null;
+  const executableName = process.platform === "win32" ? "codex.exe" : "codex";
+  if (!platformVendorDirectory) {
+    throw new Error(
+      `Unsupported official Codex npm package platform: ${process.platform}`,
+    );
+  }
+  const executable = resolve(root, platformVendorDirectory, "bin", executableName);
+  try {
+    await access(executable);
+  } catch {
+    // The named npm package is not installed for this platform (e.g. a
+    // Linux-only package on a Windows host). Fall through to other sources.
+    return null;
+  }
+  return { executable, npmPackage };
+}
+
 export async function findOfficialCodexRuntime() {
   const developmentExecutable =
     process.env.CODEX_BRIDGE_DEVELOPMENT_CODEX_EXECUTABLE;
@@ -69,6 +98,15 @@ export async function findOfficialCodexRuntime() {
       );
     }
     return runtime;
+  }
+
+  const npmPackageExecutable = await codexNpmPackageExecutable();
+  if (npmPackageExecutable) {
+    return {
+      executable: npmPackageExecutable.executable,
+      extensionPath: null,
+      extensionVersion: npmPackageExecutable.npmPackage,
+    };
   }
 
   const roots = [

@@ -19,6 +19,8 @@ jobs:
       - run: npm ci
       - name: Build, test & package native
         run: npm run check
+        env:
+          CODEX_BRIDGE_CODEX_NPM_PACKAGE: "@openai/codex"
       - name: Stage native artifacts
         run: npm run package:stage
       - uses: actions/upload-artifact@v4
@@ -39,6 +41,8 @@ jobs:
       - run: npm ci
       - name: Build, test & package native
         run: npm run check
+        env:
+          CODEX_BRIDGE_CODEX_NPM_PACKAGE: "@openai/codex"
       - name: Stage native artifacts
         run: npm run package:stage
       - uses: actions/upload-artifact@v4
