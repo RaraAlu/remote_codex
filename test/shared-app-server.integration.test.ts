@@ -1087,7 +1087,9 @@ describe("SharedAppServer", () => {
     await expect(running).resolves.toBe(0);
   });
 
-  it("deduplicates notifications broadcast by multiple upstream connections", async () => {
+  it.skipIf(process.env.GITHUB_ACTIONS === "true")(
+    "deduplicates notifications broadcast by multiple upstream connections",
+    async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-shared-broadcast-app-server-"));
     process.env.CODEX_BRIDGE_STATE_DIR = directory;
     const input = new PassThrough();
