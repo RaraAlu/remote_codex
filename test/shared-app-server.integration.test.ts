@@ -214,7 +214,7 @@ function fakeWebSocketAppServer(
 
 async function waitFor<T>(
   probe: () => Promise<T | undefined> | T | undefined,
-  timeoutMs = 5_000,
+  timeoutMs = 30_000,
 ): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

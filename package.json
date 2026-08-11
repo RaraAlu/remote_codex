@@ -231,6 +231,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@openai/codex": "0.147.0",
     "@types/node": "^24.0.0",
     "@types/vscode": "^1.96.0",
     "@types/ws": "^8.18.1",
