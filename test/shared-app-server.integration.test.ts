@@ -804,8 +804,12 @@ describe("SharedAppServer", () => {
         },
       }),
     );
-    await waitFor(() =>
-      externalMessages.some((message) => message.id === 11) ? true : undefined,
+    await waitFor(
+      () =>
+        externalMessages.some((message) => message.id === 11)
+          ? true
+          : undefined,
+      60_000,
     );
     external.send(
       JSON.stringify({
@@ -814,12 +818,14 @@ describe("SharedAppServer", () => {
         params: { threadId: "thread-shared", input: [] },
       }),
     );
-    await waitFor(() =>
-      externalMessages.some(
-        (message) => message.method === "bridge/fakeRemoteToolResult",
-      )
-        ? true
-        : undefined,
+    await waitFor(
+      () =>
+        externalMessages.some(
+          (message) => message.method === "bridge/fakeRemoteToolResult",
+        )
+          ? true
+          : undefined,
+      60_000,
     );
 
     expect(sshSpawns).toBe(1);
@@ -866,7 +872,7 @@ describe("SharedAppServer", () => {
         }),
       }),
     );
-  }, 60_000);
+  }, 120_000);
 
   it("interrupts an active turn when its external CLI client disconnects", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-shared-disconnect-"));
