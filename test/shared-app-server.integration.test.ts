@@ -1133,14 +1133,21 @@ describe("SharedAppServer", () => {
     await waitFor(() =>
       externalMessages.some((message) => message.id === 11) ? true : undefined,
     );
-    await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
-
-    expect(
-      vscodeMessages.filter((message) => message.method === "thread/started"),
-    ).toHaveLength(initialVsCodeNotifications + 1);
-    expect(
-      externalMessages.filter((message) => message.method === "thread/started"),
-    ).toHaveLength(1);
+    // Do not rely on a fixed sleep: poll until the broadcast thread/started
+    // notification has reached both the VS Code transport and the external
+    // client. This keeps the test robust on slow or loaded CI runners.
+    await waitFor(() => {
+      const vsCodeCount = vscodeMessages.filter(
+        (message) => message.method === "thread/started",
+      ).length;
+      const externalCount = externalMessages.filter(
+        (message) => message.method === "thread/started",
+      ).length;
+      return vsCodeCount === initialVsCodeNotifications + 1 &&
+        externalCount === 1
+        ? true
+        : undefined;
+    });
 
     external.close();
     input.end();
