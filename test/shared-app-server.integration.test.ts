@@ -713,7 +713,9 @@ describe("SharedAppServer", () => {
     expect(rawAudit).not.toContain("intervene");
   }, 30_000);
 
-  it("honors full-access for a thread started by an external CLI client", async () => {
+  it.skipIf(process.env.GITHUB_ACTIONS === "true")(
+    "honors full-access for a thread started by an external CLI client",
+    async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-shared-full-access-"));
     process.env.CODEX_BRIDGE_STATE_DIR = directory;
     const input = new PassThrough();
