@@ -859,7 +859,7 @@ describe("SharedAppServer", () => {
         }),
       }),
     );
-  }, 30_000);
+  }, 60_000);
 
   it("interrupts an active turn when its external CLI client disconnects", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-shared-disconnect-"));

@@ -44,7 +44,6 @@ async function codexNpmPackageExecutable() {
   if (!npmPackage) {
     return null;
   }
-  const root = resolve(process.cwd(), "node_modules", npmPackage, "vendor");
   const platformVendorDirectory =
     process.platform === "linux"
       ? "x86_64-unknown-linux-musl"
@@ -57,15 +56,44 @@ async function codexNpmPackageExecutable() {
       `Unsupported official Codex npm package platform: ${process.platform}`,
     );
   }
-  const executable = resolve(root, platformVendorDirectory, "bin", executableName);
-  try {
-    await access(executable);
-  } catch {
-    // The named npm package is not installed for this platform (e.g. a
-    // Linux-only package on a Windows host). Fall through to other sources.
-    return null;
+  // The @openai/codex meta package pulls the native binary in through a
+  // platform-specific optional dependency (e.g. @openai/codex-linux-x64),
+  // which npm lays out under its own node_modules directory. Probe both the
+  // base package's vendor tree and the platform package's vendor tree.
+  const platformSuffix =
+    process.platform === "linux"
+      ? "linux-x64"
+      : process.platform === "win32"
+        ? "win32-x64"
+        : null;
+  const candidates = [
+    resolve(process.cwd(), "node_modules", npmPackage, "vendor"),
+  ];
+  if (
+    platformSuffix &&
+    !npmPackage.endsWith(`-${platformSuffix}`)
+  ) {
+    candidates.push(
+      resolve(
+        process.cwd(),
+        "node_modules",
+        `${npmPackage}-${platformSuffix}`,
+        "vendor",
+      ),
+    );
   }
-  return { executable, npmPackage };
+  for (const root of candidates) {
+    const executable = resolve(root, platformVendorDirectory, "bin", executableName);
+    try {
+      await access(executable);
+    } catch {
+      continue;
+    }
+    return { executable, npmPackage };
+  }
+  // The named npm package is not installed for this platform (e.g. a
+  // Linux-only package on a Windows host). Fall through to other sources.
+  return null;
 }
 
 export async function findOfficialCodexRuntime() {
