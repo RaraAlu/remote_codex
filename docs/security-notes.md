@@ -3,9 +3,9 @@
 ## 已强制执行
 
 - 项目身份由 `hostId + rootId + target + workspaceRoot + relativePath` 共同决定。
-- 配置 v2 必须且只能有一个 `remote/primary` 根；v1 的单远程根会迁移为该记录。
-  `workspaceRoot` 只是运行期兼容别名，不一致时失败关闭。本地根只能是
-  `local/secondary`，且在授权入口和本地执行器实现前无法被工具访问。
+- 活动 Remote SSH 配置必须且只能有一个 `remote/primary` 根；v1 的单远程根会迁移为
+  该记录。`workspaceRoot` 只是运行期兼容别名，不一致时失败关闭。旧配置中的
+  `local/secondary` 记录不会进入活动窗口会话。
 - `localExecution` 固定为 `deny`，配置无法改成允许。
 - 默认 `vscode-remote` 模式只调用当前 Remote SSH 窗口中的 Workspace Executor，不读取
   密码、私钥或 VS Code Remote SSH 的底层连接凭据，也不建立第二条 SSH 连接。
@@ -105,12 +105,14 @@
   字符串落在同名远端根下也不参与映射。远端 URI 与本机资源都生成原生内联 `@`；传给
   官方 `file:` 命令的受管编码会在 Webview 写入节点前恢复成远端 POSIX 路径，避免 Windows
   UI Host 把它改写为本机反斜杠路径。启用拖放接收面时的模态确认同时明确说明：Remote SSH
-  对话会自动授权用户之后实际拖入的本机资源。文件只授权其父目录，目录只授权其自身，
-  未拖入路径不会预先开放；禁用兼容层会关闭该自动策略。未同意该策略时仍使用包含精确
-  授权目录的逐路径模态确认，随后才登记为本地次级根。
-  运行中 Shim 只从当前窗口会话配置热刷新 `roots`，并要求 host、远端主根、transport 和
-  其余配置身份逐项不变；刷新失败会拒绝当前 thread/turn 请求。授权目录只经 Controller
-  本地执行器和显式 `target="local"`、`rootId` 访问，不复制到远端，也不开放本地 Core。
+  只接收用户之后实际拖入的本机资源。Controller 规范化并短暂暂存路径；只有匹配的原生
+  `mention` 随 `turn/start` 到达时，才把资源绑定到该 `threadId`。文件能力精确到单文件，
+  目录能力限制在自身子树，未拖入 mention、另一个 thread、相邻路径、文件系统根和符号
+  链接逃逸均失败关闭。资源不进入项目 `roots`，因此不设置本地次级根数量上限；单次拖放
+  仍受输入资源数和本机 IPC 帧大小限制。所有 conversation resource 只经 Controller
+  本地执行器和显式 `target="local"`、资源 ID 读取，写入和 Git 操作被 Shim 与 Controller
+  双重拒绝，不复制到远端，也不开放本地 Core。`thread/delete` 仅在官方操作成功后清理
+  对应持久化绑定；禁用兼容层会关闭对新拖入资源的接收同意。
 
 ## 尚未形成硬保证
 

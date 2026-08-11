@@ -32,6 +32,8 @@ export type BridgeErrorCode = (typeof BRIDGE_ERROR_CODES)[number];
 
 export type WorkspaceTarget = "local" | "remote";
 export type WorkspaceRootRole = "primary" | "secondary";
+export type WorkspaceAccessRole = WorkspaceRootRole | "conversation";
+export type ConversationResourceKind = "directory" | "file";
 
 export interface WorkspaceRootConfig {
   id: string;
@@ -40,6 +42,18 @@ export interface WorkspaceRootConfig {
   path: string;
   displayName: string;
 }
+
+export interface ConversationResourceConfig {
+  id: string;
+  target: "local";
+  role: "conversation";
+  kind: ConversationResourceKind;
+  path: string;
+  displayName: string;
+  threadId: string;
+}
+
+export type WorkspaceToolRoot = WorkspaceRootConfig | ConversationResourceConfig;
 
 export interface BridgeConfig {
   version: 2;
@@ -82,7 +96,7 @@ export interface ToolRequestContext {
   connectionId: string;
   hostId: string;
   rootId: string;
-  rootRole: WorkspaceRootRole;
+  rootRole: WorkspaceAccessRole;
   rootPath: string | null;
   target: WorkspaceTarget;
 }
@@ -214,7 +228,7 @@ export interface AuditEvent {
   workspaceRoot?: string;
   remoteCwd?: string;
   rootId?: string;
-  rootRole?: WorkspaceRootRole;
+  rootRole?: WorkspaceAccessRole;
   rootPath?: string;
   target?: WorkspaceTarget;
   operation: string;

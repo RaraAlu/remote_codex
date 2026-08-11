@@ -7,7 +7,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
-import { isDeepStrictEqual } from "node:util";
 import { AuditLog } from "../core/audit-log.js";
 import { normalizeRemotePath } from "../core/path-policy.js";
 import type {
@@ -18,6 +17,7 @@ import type {
 import type {
   BridgeClientIdentity,
   BridgeConfig,
+  ConversationResourceConfig,
 } from "../core/types.js";
 import { OpenSshExecutor, type SpawnProcess } from "../core/ssh-executor.js";
 import { VsCodeRemoteExecutor } from "../core/vscode-remote-executor.js";
@@ -71,7 +71,6 @@ export interface ShimProxyOptions {
   auditPath: string;
   codexExecutable: string;
   config: BridgeConfig | null;
-  configProvider?: () => Promise<BridgeConfig | null>;
   controlDir: string;
   input?: Readable;
   output?: Writable;
@@ -499,6 +498,11 @@ export class ShimProxy {
   readonly #remoteApprovalPolicies: RemoteApprovalPolicyTracker;
   readonly #remoteToolCalls: RemoteToolCallCoordinator;
   readonly #turnClients: RemoteTurnClientTracker;
+  readonly #conversationResources = new Map<
+    string,
+    ConversationResourceConfig[]
+  >();
+  readonly #pendingConversationDeletes = new Map<RpcId, string>();
   readonly #pendingApprovals = new Map<RpcId, PendingApproval>();
   readonly #remoteFuzzySearchSessions = new Map<string, RemoteFuzzySearchSession>();
   #child: ChildProcessWithoutNullStreams | null = null;
@@ -610,19 +614,18 @@ export class ShimProxy {
   ): Promise<void> {
     if (
       this.#options.config &&
-      this.#options.configProvider &&
       isRpcRequest(message) &&
-      ["thread/start", "thread/resume", "turn/start"].includes(message.method)
+      (message.method === "thread/resume" || message.method === "turn/start")
     ) {
       try {
-        await this.#refreshSessionRoots();
+        await this.#refreshConversationResources(message);
       } catch (error) {
         await this.#audit.write({
           ...this.#clientIdentity,
           operationId: String(message.id),
           hostId: this.#options.config.host,
           workspaceRoot: this.#options.config.workspaceRoot,
-          operation: "local_root.refresh",
+          operation: "conversation_resource.refresh",
           outcome: "failed",
           details: { error: error instanceof Error ? error.message : String(error) },
         });
@@ -630,7 +633,7 @@ export class ShimProxy {
           id: message.id,
           error: {
             code: -32003,
-            message: "Codex Remote Bridge could not refresh local root authorizations",
+            message: "Codex Remote Bridge could not resolve conversation resources",
           },
         });
         return;
@@ -818,41 +821,94 @@ export class ShimProxy {
             this.#options.controlDir,
             editorContext,
             this.#options.toolRouteInventory,
+            this.#conversationResourcesForMessage(scoped),
           );
+    if (
+      isRpcRequest(message) &&
+      message.method === "thread/delete" &&
+      isRecord(message.params) &&
+      typeof message.params.threadId === "string"
+    ) {
+      this.#pendingConversationDeletes.set(message.id, message.params.threadId);
+    }
     writeServer(rewritten);
   }
 
-  async #refreshSessionRoots(): Promise<void> {
-    const current = this.#options.config;
-    const provider = this.#options.configProvider;
-    if (!current || !provider) {
+  async #refreshConversationResources(message: RpcRequest): Promise<void> {
+    if (
+      !this.#options.config ||
+      !(this.#executor instanceof VsCodeRemoteExecutor) ||
+      !isRecord(message.params) ||
+      typeof message.params.threadId !== "string"
+    ) {
       return;
     }
-    const next = await provider();
-    if (!next) {
-      throw new TypeError("Active Bridge session configuration is unavailable");
+    const threadId = message.params.threadId;
+    const mentionPaths =
+      message.method === "turn/start" && Array.isArray(message.params.input)
+        ? message.params.input.flatMap((entry) =>
+            isRecord(entry) &&
+            entry.type === "mention" &&
+            typeof entry.path === "string"
+              ? [entry.path]
+              : [],
+          )
+        : [];
+    const primary = this.#options.config.roots.find(
+      (root) => root.target === "remote" && root.role === "primary",
+    );
+    if (!primary) {
+      throw new TypeError("Bridge configuration has no remote primary root");
     }
-    const currentIdentity = { ...current, roots: [] };
-    const nextIdentity = { ...next, roots: [] };
-    if (!isDeepStrictEqual(currentIdentity, nextIdentity)) {
-      throw new TypeError("Active Bridge session identity changed while refreshing roots");
+    const value = await this.#executor.requestControllerWorkspace<unknown>(
+      "resolveConversationResources",
+      primary.id,
+      { mentionPaths, threadId },
+    );
+    if (!Array.isArray(value)) {
+      throw new TypeError("Controller returned invalid conversation resources");
     }
-    if (isDeepStrictEqual(current.roots, next.roots)) {
-      return;
-    }
-    current.roots.splice(0, current.roots.length, ...next.roots.map((root) => ({ ...root })));
+    const resources = value.map((entry) => {
+      if (
+        !isRecord(entry) ||
+        typeof entry.id !== "string" ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(entry.id) ||
+        entry.target !== "local" ||
+        entry.role !== "conversation" ||
+        (entry.kind !== "file" && entry.kind !== "directory") ||
+        typeof entry.path !== "string" ||
+        !isAbsolute(entry.path) ||
+        typeof entry.displayName !== "string" ||
+        entry.threadId !== threadId
+      ) {
+        throw new TypeError("Controller returned an invalid conversation resource");
+      }
+      return entry as unknown as ConversationResourceConfig;
+    });
+    this.#conversationResources.set(threadId, resources);
     await this.#audit.write({
       ...this.#clientIdentity,
-      hostId: current.host,
-      workspaceRoot: current.workspaceRoot,
-      operation: "local_root.refresh",
+      operationId: String(message.id),
+      hostId: this.#options.config.host,
+      workspaceRoot: this.#options.config.workspaceRoot,
+      operation: "conversation_resource.refresh",
       outcome: "succeeded",
       details: {
-        localRootIds: current.roots
-          .filter((root) => root.target === "local" && root.role === "secondary")
-          .map((root) => root.id),
+        mentionCount: mentionPaths.length,
+        resourceCount: resources.length,
+        threadId,
       },
     });
+  }
+
+  #conversationResourcesForMessage(
+    message: RpcMessage,
+  ): readonly ConversationResourceConfig[] {
+    return "params" in message &&
+      isRecord(message.params) &&
+      typeof message.params.threadId === "string"
+      ? (this.#conversationResources.get(message.params.threadId) ?? [])
+      : [];
   }
 
   async #handleRemoteFuzzyFileSearch(
@@ -1149,10 +1205,18 @@ export class ShimProxy {
   ): Promise<void> {
     this.#remoteApprovalPolicies.observeServerMessage(message);
 
+    if (isRpcResponse(message)) {
+      await this.#completeConversationDelete(message);
+    }
+
     if (!isRpcRequest(message)) {
       writeClient(
         this.#remoteApprovalPolicies.projectServerMessage(
-          projectServerMessage(message, this.#options.config),
+          projectServerMessage(
+            message,
+            this.#options.config,
+            this.#conversationResourcesForMessage(message),
+          ),
         ),
       );
       return;
@@ -1192,6 +1256,16 @@ export class ShimProxy {
       try {
         const coordinationStartedAt = performance.now();
         const clientIdentity = this.#remoteToolClientIdentity(message);
+        const threadId = isRecord(message.params) && typeof message.params.threadId === "string"
+          ? message.params.threadId
+          : undefined;
+        const conversationContext = threadId
+          ? {
+              conversationResources:
+                this.#conversationResources.get(threadId) ?? [],
+              threadId,
+            }
+          : {};
         const result = await this.#remoteToolCalls.run(
           message,
           this.#options.remoteToolPriority ?? 0,
@@ -1203,6 +1277,7 @@ export class ShimProxy {
               if (signal.aborted) {
                 return await this.#router!.handle(message.id, message.params, {
                   clientIdentity,
+                  ...conversationContext,
                   idempotencyKey,
                   operationId: execContext.callId,
                   signal,
@@ -1251,6 +1326,7 @@ export class ShimProxy {
                 if (signal.aborted) {
                   return await this.#router!.handle(message.id, message.params, {
                     clientIdentity,
+                    ...conversationContext,
                     idempotencyKey,
                     operationId: execContext.callId,
                     signal,
@@ -1262,6 +1338,7 @@ export class ShimProxy {
                   "Remote command execution was declined by the user",
                   {
                     clientIdentity,
+                    ...conversationContext,
                     operationId: execContext.callId,
                   },
                 );
@@ -1287,6 +1364,7 @@ export class ShimProxy {
               if (signal.aborted) {
                 return await this.#router!.handle(message.id, message.params, {
                   clientIdentity,
+                  ...conversationContext,
                   idempotencyKey,
                   operationId: context.callId,
                   signal,
@@ -1306,6 +1384,7 @@ export class ShimProxy {
                 if (signal.aborted) {
                   return await this.#router!.handle(message.id, message.params, {
                     clientIdentity,
+                    ...conversationContext,
                     idempotencyKey,
                     operationId: context.callId,
                     signal,
@@ -1317,6 +1396,7 @@ export class ShimProxy {
                   "Workspace mutation was declined by the user",
                   {
                     clientIdentity,
+                    ...conversationContext,
                     operationId: context.callId,
                   },
                 );
@@ -1333,6 +1413,7 @@ export class ShimProxy {
 
             return await this.#router!.handle(message.id, message.params, {
               clientIdentity,
+              ...conversationContext,
               coordinationWaitMs: Math.round(performance.now() - coordinationStartedAt),
               idempotencyKey,
               operationId:
@@ -1387,7 +1468,58 @@ export class ShimProxy {
       return;
     }
 
-    writeClient(projectServerMessage(message, this.#options.config));
+    writeClient(
+      projectServerMessage(
+        message,
+        this.#options.config,
+        this.#conversationResourcesForMessage(message),
+      ),
+    );
+  }
+
+  async #completeConversationDelete(message: RpcResponse): Promise<void> {
+    const threadId = this.#pendingConversationDeletes.get(message.id);
+    if (!threadId) {
+      return;
+    }
+    this.#pendingConversationDeletes.delete(message.id);
+    if (message.error || !(this.#executor instanceof VsCodeRemoteExecutor)) {
+      return;
+    }
+    const primary = this.#options.config?.roots.find(
+      (root) => root.target === "remote" && root.role === "primary",
+    );
+    if (!primary) {
+      return;
+    }
+    try {
+      await this.#executor.requestControllerWorkspace(
+        "deleteConversationResources",
+        primary.id,
+        { threadId },
+      );
+      this.#conversationResources.delete(threadId);
+      await this.#audit.write({
+        ...this.#clientIdentity,
+        hostId: this.#options.config?.host,
+        workspaceRoot: this.#options.config?.workspaceRoot,
+        operation: "conversation_resource.delete_thread",
+        outcome: "succeeded",
+        details: { threadId },
+      });
+    } catch (error) {
+      await this.#audit.write({
+        ...this.#clientIdentity,
+        hostId: this.#options.config?.host,
+        workspaceRoot: this.#options.config?.workspaceRoot,
+        operation: "conversation_resource.delete_thread",
+        outcome: "failed",
+        details: {
+          error: error instanceof Error ? error.message : String(error),
+          threadId,
+        },
+      });
+    }
   }
 
   #remoteToolClientIdentity(request: RpcRequest): BridgeClientIdentity {

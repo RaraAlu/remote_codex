@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
+import type { ConversationResourceConfig } from "../src/core/types.js";
 import { projectServerMessage } from "../src/shim/native-tool-presentation.js";
 
 const config = parseBridgeConfig({
@@ -12,26 +13,17 @@ const localReferenceRoot =
   process.platform === "win32" ? String.raw`C:\local\reference` : "/local/reference";
 const localReferenceFile = join(localReferenceRoot, "notes.md");
 
-const dualConfig = parseBridgeConfig({
-  version: 2,
-  host: "training-gpu",
-  roots: [
-    {
-      id: "remote-primary",
-      target: "remote",
-      role: "primary",
-      path: "/remote/workspace",
-      displayName: "Remote workspace",
-    },
-    {
-      id: "local-reference",
-      target: "local",
-      role: "secondary",
-      path: localReferenceRoot,
-      displayName: "Local reference",
-    },
-  ],
-});
+const conversationResources: ConversationResourceConfig[] = [
+  {
+    id: "context-reference",
+    target: "local",
+    role: "conversation",
+    kind: "directory",
+    path: localReferenceRoot,
+    displayName: "Local reference",
+    threadId: "thread-1",
+  },
+];
 
 describe("native Codex tool presentation", () => {
   it("does not project a remote POSIX path as a local native file action", () => {
@@ -73,7 +65,7 @@ describe("native Codex tool presentation", () => {
     });
   });
 
-  it("projects an authorized local read with its local root identity and cwd", () => {
+  it("projects a conversation-scoped local read with its resource identity and cwd", () => {
     const projected = projectServerMessage(
       {
         method: "item/started",
@@ -84,14 +76,15 @@ describe("native Codex tool presentation", () => {
             tool: "workspace_read_file",
             arguments: {
               path: "notes.md",
-              rootId: "local-reference",
+              rootId: "context-reference",
               target: "local",
             },
             status: "inProgress",
           },
         },
       },
-      dualConfig,
+      config,
+      conversationResources,
     ) as unknown as {
       params: { item: Record<string, unknown> };
     };
@@ -99,7 +92,7 @@ describe("native Codex tool presentation", () => {
     expect(projected.params.item).toMatchObject({
       type: "commandExecution",
       command:
-        `codex-bridge read --target local --root 'local-reference' -- '${localReferenceFile}'`,
+        `codex-bridge read --target local --root 'context-reference' -- '${localReferenceFile}'`,
       cwd: localReferenceRoot,
       commandActions: [
         {

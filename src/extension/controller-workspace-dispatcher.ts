@@ -4,7 +4,7 @@ import {
   OperationLedger,
   type IdempotencyOutcome,
 } from "../core/operation-ledger.js";
-import type { BridgeConfig, WorkspaceRootConfig } from "../core/types.js";
+import type { BridgeConfig, WorkspaceToolRoot } from "../core/types.js";
 import type { ControllerWorkspaceRequest } from "../core/vscode-transport.js";
 import { LocalWorkspaceExecutor } from "./local-workspace-executor.js";
 
@@ -12,12 +12,16 @@ export class ControllerWorkspaceDispatcher {
   readonly #config: () => BridgeConfig | null;
   readonly #mutationLedger = new OperationLedger();
   readonly #resolveAuthorizedRoot: (
+    threadId: string,
     rootId: string,
-  ) => WorkspaceRootConfig | undefined;
+  ) => WorkspaceToolRoot | undefined;
 
   constructor(
     config: () => BridgeConfig | null,
-    resolveAuthorizedRoot: (rootId: string) => WorkspaceRootConfig | undefined,
+    resolveAuthorizedRoot: (
+      threadId: string,
+      rootId: string,
+    ) => WorkspaceToolRoot | undefined,
   ) {
     this.#config = config;
     this.#resolveAuthorizedRoot = resolveAuthorizedRoot;
@@ -35,28 +39,44 @@ export class ControllerWorkspaceDispatcher {
     if (typeof rootId !== "string" || rootId.length === 0) {
       throw new BridgeError("PROTOCOL_MISMATCH", "params.rootId must be a non-empty string");
     }
-    const configuredRoot = config.roots.find(
-      (root) =>
-        root.id === rootId &&
-        root.target === "local" &&
-        root.role === "secondary",
-    );
-    if (!configuredRoot) {
-      throw new BridgeError("COMMAND_DENIED", "The local root is not configured", {
+    const threadId = request.params.threadId;
+    if (typeof threadId !== "string" || threadId.length === 0) {
+      throw new BridgeError("PROTOCOL_MISMATCH", "params.threadId must be a non-empty string");
+    }
+    const authorizedRoot = this.#resolveAuthorizedRoot(threadId, rootId);
+    const conversationResource =
+      authorizedRoot?.target === "local" &&
+      authorizedRoot.role === "conversation" &&
+      authorizedRoot.threadId === threadId
+        ? authorizedRoot
+        : undefined;
+    if (!conversationResource) {
+      throw new BridgeError("COMMAND_DENIED", "The conversation resource is not authorized", {
         rootId,
+        threadId,
       });
+    }
+    if (
+      conversationResource &&
+      (request.operation === "localApplyPatch" ||
+        request.operation === "localCreateDirectory" ||
+        request.operation === "localDeletePath" ||
+        request.operation === "localGitStatus" ||
+        request.operation === "localRenamePath" ||
+        request.operation === "localWriteFile")
+    ) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Dropped conversation resources are read-only",
+        { rootId, threadId },
+      );
     }
     const executor = new LocalWorkspaceExecutor(
       rootId,
       (candidateId) => {
-        const authorized = this.#resolveAuthorizedRoot(candidateId);
-        const configured = config.roots.find(
-          (root) =>
-            root.id === candidateId &&
-            root.target === "local" &&
-            root.role === "secondary",
-        );
-        return authorized && configured && authorized.path === configured.path
+        const authorized = this.#resolveAuthorizedRoot(threadId, candidateId);
+        return authorized?.role === "conversation" &&
+          authorized.threadId === threadId
           ? authorized
           : undefined;
       },

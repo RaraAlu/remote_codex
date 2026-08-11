@@ -24,6 +24,7 @@ import type {
   TreeListing,
 } from "../core/ssh-executor.js";
 import type {
+  ConversationResourceConfig,
   RemoteCommandResult,
   RemoteFileRead,
   WorkspaceMutationResult,
@@ -50,7 +51,8 @@ export interface LocalWorkspaceExecutorOptions {
   maxSearchEntries?: number;
 }
 
-export type LocalRootResolver = (rootId: string) => WorkspaceRootConfig | undefined;
+export type LocalWorkspaceScope = WorkspaceRootConfig | ConversationResourceConfig;
+export type LocalRootResolver = (rootId: string) => LocalWorkspaceScope | undefined;
 
 function isPathInside(root: string, candidate: string): boolean {
   const path = relative(root, candidate);
@@ -141,10 +143,25 @@ export class LocalWorkspaceExecutor implements WorkspaceExecutor {
   }
 
   async canonicalPath(inputPath: string): Promise<string> {
-    const root = await this.#canonicalRoot();
     if (typeof inputPath !== "string" || inputPath.includes("\0")) {
       throw new BridgeError("PATH_OUTSIDE_ROOT", "Local path must be a NUL-free string");
     }
+    const scope = await this.#canonicalScope();
+    if (scope.resource.role === "conversation" && scope.resource.kind === "file") {
+      const lexicalPath =
+        inputPath === "" || inputPath === "."
+          ? scope.path
+          : resolve(dirname(scope.path), inputPath);
+      if (lexicalPath !== scope.path) {
+        throw new BridgeError(
+          "PATH_OUTSIDE_ROOT",
+          "Local path escapes the exact file shared with this conversation",
+          { path: inputPath, rootId: this.rootId },
+        );
+      }
+      return scope.path;
+    }
+    const root = scope.path;
     const lexicalPath = resolve(root, inputPath || ".");
     if (!isPathInside(root, lexicalPath)) {
       throw new BridgeError("PATH_OUTSIDE_ROOT", "Local path escapes the authorized root", {
@@ -819,30 +836,52 @@ export class LocalWorkspaceExecutor implements WorkspaceExecutor {
   }
 
   async #canonicalRoot(): Promise<string> {
+    const scope = await this.#canonicalScope();
+    if (scope.resource.role === "conversation" && scope.resource.kind !== "directory") {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "This conversation resource is an exact file, not a directory root",
+        { rootId: this.rootId },
+      );
+    }
+    return scope.path;
+  }
+
+  async #canonicalScope(): Promise<{
+    path: string;
+    resource: LocalWorkspaceScope;
+  }> {
     const root = this.#resolveRoot(this.rootId);
-    if (!root || root.target !== "local" || root.role !== "secondary") {
-      throw new BridgeError("COMMAND_DENIED", "The local root authorization was revoked", {
+    if (
+      !root ||
+      root.target !== "local" ||
+      (root.role !== "secondary" && root.role !== "conversation")
+    ) {
+      throw new BridgeError("COMMAND_DENIED", "The local workspace scope was revoked", {
         rootId: this.rootId,
       });
     }
     try {
       const canonicalRoot = await realpath(root.path);
       const metadata = await stat(canonicalRoot);
-      if (canonicalRoot !== root.path || !metadata.isDirectory()) {
+      const expectedKind = root.role === "conversation" ? root.kind : "directory";
+      const kindMatches =
+        expectedKind === "directory" ? metadata.isDirectory() : metadata.isFile();
+      if (canonicalRoot !== root.path || !kindMatches) {
         throw new BridgeError(
           "COMMAND_DENIED",
-          "The authorized local root no longer resolves to the selected directory",
+          "The authorized local workspace scope no longer resolves to the selected resource",
           { rootId: this.rootId },
         );
       }
-      return canonicalRoot;
+      return { path: canonicalRoot, resource: root };
     } catch (error) {
       if (error instanceof BridgeError) {
         throw error;
       }
       throw new BridgeError(
         "COMMAND_DENIED",
-        "The authorized local root is unavailable",
+        "The authorized local workspace scope is unavailable",
         { rootId: this.rootId },
         { cause: error },
       );

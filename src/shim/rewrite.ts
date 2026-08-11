@@ -1,4 +1,8 @@
-import type { BridgeConfig, WorkspaceRootConfig } from "../core/types.js";
+import type {
+  BridgeConfig,
+  ConversationResourceConfig,
+  WorkspaceRootConfig,
+} from "../core/types.js";
 import type { RemoteEditorContext } from "../core/vscode-transport.js";
 import { REMOTE_DYNAMIC_TOOLS, REMOTE_TOOL_NAMES } from "./dynamic-tools.js";
 import { REMOTE_PERMISSION_PROFILE_ID } from "./local-core-policy.js";
@@ -19,8 +23,8 @@ const REMOTE_INSTRUCTIONS = `Codex Remote Bridge execution policy:
 - After changing a text file, use workspace_show_diff with the complete pre-change content and hash returned by workspace_read_file when a visual review is useful.
 - Preserve and report the returned codex-bridge resourceUri as the stable workspace resource identity.
 - For workspace_* explicit-root routes, omitting target and rootId selects the remote primary root.
-- Access a local secondary root only through a workspace_* explicit-root route with target="local" and rootId.
-- A local directory dropped into a Remote SSH conversation is a local secondary-root reference. Match its absolute path to the authorized local root list, then analyze it with workspace_* using target="local" and that rootId; never pass it to remote_exec or interpret it relative to the remote primary root.
+- Files and directories dropped into a Remote SSH conversation are read-only resources scoped to that thread, not project roots. Access one only through workspace_* with target="local" and its conversation resource id; never pass it to remote_exec or interpret it relative to the remote primary root.
+- An exact-file conversation resource permits only that file. A directory conversation resource permits that directory subtree. Do not use mutation or Git tools on conversation resources.
 - For project overviews, prefer one workspace_list_tree call before focused directory listings.
 - At the start of every turn, remember that remote_exec is the project command runner.
 - Use remote_exec for all project commands. Its approval behavior follows the active Codex permission mode.
@@ -79,6 +83,7 @@ function codegraphPolicy(toolRoutes: ToolRouteInventory): string {
 function remotePolicy(
   config: BridgeConfig,
   toolRoutes: ToolRouteInventory,
+  conversationResources: readonly ConversationResourceConfig[],
 ): string {
   remotePrimaryRoot(config);
   const roots = [
@@ -89,11 +94,21 @@ function remotePolicy(
         `- Root id: ${root.id}; target: ${root.target}; role: ${root.role}; path: ${root.path}`,
     ),
   ].join("\n");
+  const resources = [
+    "Local resources explicitly shared with this conversation:",
+    ...(conversationResources.length === 0
+      ? ["- None"]
+      : conversationResources.map(
+          (resource) =>
+            `- Resource id: ${resource.id}; target: local; scope: conversation; kind: ${resource.kind}; path: ${resource.path}`,
+        )),
+  ].join("\n");
   return [
     REMOTE_INSTRUCTIONS,
     formatToolRouteInventory(toolRoutes),
     codegraphPolicy(toolRoutes),
     roots,
+    resources,
   ].join("\n\n");
 }
 
@@ -101,9 +116,10 @@ function mergeInstructions(
   existing: unknown,
   config: BridgeConfig,
   toolRoutes: ToolRouteInventory,
+  conversationResources: readonly ConversationResourceConfig[],
 ): string {
   return [
-    remotePolicy(config, toolRoutes),
+    remotePolicy(config, toolRoutes, conversationResources),
     typeof existing === "string" ? existing : "",
   ]
     .filter(Boolean)
@@ -115,6 +131,7 @@ function mergeAdditionalContext(
   config: BridgeConfig,
   editorContext: RemoteEditorContext | null,
   toolRoutes: ToolRouteInventory,
+  conversationResources: readonly ConversationResourceConfig[],
 ): Record<string, unknown> {
   const current = isRecord(existing) ? { ...existing } : {};
   delete current[REMOTE_EDITOR_CONTEXT_KEY];
@@ -123,7 +140,7 @@ function mergeAdditionalContext(
     ...current,
     [REMOTE_TURN_CONTEXT_KEY]: {
       kind: "application",
-      value: remotePolicy(config, toolRoutes),
+      value: remotePolicy(config, toolRoutes, conversationResources),
     },
     [TOOL_ROUTE_CONTEXT_KEY]: {
       kind: "application",
@@ -206,6 +223,7 @@ export function rewriteClientMessage(
   controlDir: string,
   editorContext: RemoteEditorContext | null = null,
   toolRouteInventory?: ToolRouteInventory,
+  conversationResources: readonly ConversationResourceConfig[] = [],
 ): RpcMessage {
   if (!("method" in message) || !isRecord(message.params)) {
     return message;
@@ -245,6 +263,7 @@ export function rewriteClientMessage(
                 message.params.developerInstructions,
                 config,
                 toolRoutes!,
+                conversationResources,
               ),
               dynamicTools: mergeDynamicTools(message.params.dynamicTools),
             }
@@ -267,6 +286,7 @@ export function rewriteClientMessage(
                 message.params.developerInstructions,
                 config,
                 toolRoutes!,
+                conversationResources,
               ),
             }
           : {}),
@@ -296,6 +316,7 @@ export function rewriteClientMessage(
                 config,
                 editorContext,
                 toolRoutes!,
+                conversationResources,
               ),
             }
           : {}),
@@ -326,6 +347,7 @@ export function rewriteClientMessage(
                 message.params.developerInstructions,
                 config,
                 toolRoutes!,
+                conversationResources,
               ),
             }
           : { sandbox: "read-only" }),

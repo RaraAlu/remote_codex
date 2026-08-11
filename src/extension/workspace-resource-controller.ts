@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
+import { realpath, stat } from "node:fs/promises";
+import { basename } from "node:path";
 import * as vscode from "vscode";
 import { BridgeError } from "../core/errors.js";
-import type { BridgeConfig, WorkspaceRootConfig } from "../core/types.js";
+import type { BridgeConfig, WorkspaceToolRoot } from "../core/types.js";
 import type {
   ControllerWorkspaceRequest,
   FuzzyFileSearchMatch,
@@ -28,14 +30,17 @@ const MAX_FUZZY_QUERY_LENGTH = 1_024;
 
 interface Snapshot {
   content: string;
+  resolved: ResolvedResource;
   size: number;
 }
 
 interface ResolvedResource {
   actualUri: vscode.Uri;
   identity: WorkspaceResourceIdentity;
+  localPath?: string;
   resourceUri: vscode.Uri;
-  root: WorkspaceRootConfig;
+  root: WorkspaceToolRoot;
+  threadId?: string;
 }
 
 function requiredString(params: Record<string, unknown>, key: string): string {
@@ -177,16 +182,20 @@ export class WorkspaceResourceController
 {
   readonly #config: () => BridgeConfig | null;
   readonly #resolveAuthorizedRoot: (
+    threadId: string,
     rootId: string,
-  ) => WorkspaceRootConfig | undefined;
-  readonly #resources = new Map<string, true>();
+  ) => WorkspaceToolRoot | undefined;
+  readonly #resources = new Map<string, ResolvedResource>();
   readonly #snapshots = new Map<string, Snapshot>();
   #pendingEditorContext: RemoteEditorContext | null = null;
   #snapshotBytes = 0;
 
   constructor(
     config: () => BridgeConfig | null,
-    resolveAuthorizedRoot: (rootId: string) => WorkspaceRootConfig | undefined,
+    resolveAuthorizedRoot: (
+      threadId: string,
+      rootId: string,
+    ) => WorkspaceToolRoot | undefined,
   ) {
     this.#config = config;
     this.#resolveAuthorizedRoot = resolveAuthorizedRoot;
@@ -211,7 +220,7 @@ export class WorkspaceResourceController
     if (identity.revision) {
       const snapshot = this.#snapshots.get(uri.toString());
       if (snapshot) {
-        this.#resolve(identity.rootId, identity.relativePath, identity);
+        await this.#assertStillAuthorized(snapshot.resolved);
         return snapshot.content;
       }
       throw new BridgeError(
@@ -219,13 +228,14 @@ export class WorkspaceResourceController
         "The requested Diff snapshot has expired",
       );
     }
-    if (!this.#resources.has(uri.toString())) {
+    const resolved = this.#resources.get(uri.toString());
+    if (!resolved) {
       throw new BridgeError(
         "COMMAND_DENIED",
         "The workspace resource was not registered by the active Bridge session",
       );
     }
-    const resolved = this.#resolve(identity.rootId, identity.relativePath, identity);
+    await this.#assertStillAuthorized(resolved);
     const metadata = await vscode.workspace.fs.stat(resolved.actualUri);
     if (metadata.size > MAX_LIVE_RESOURCE_BYTES) {
       throw new BridgeError(
@@ -248,7 +258,11 @@ export class WorkspaceResourceController
       return await this.#resolveFuzzyFileSearch(rootId, request.params);
     }
     const path = requiredString(request.params, "path");
-    const resolved = this.#resolve(rootId, path);
+    const threadId =
+      typeof request.params.threadId === "string"
+        ? request.params.threadId
+        : undefined;
+    const resolved = this.#resolve(rootId, path, undefined, threadId);
     if (request.operation === "registerWorkspaceResource") {
       this.#rememberResource(resolved);
       return this.#result("registered", resolved);
@@ -605,7 +619,12 @@ export class WorkspaceResourceController
     const text = decodeText(content, "Diff before snapshot");
     const snapshotIdentity = { ...resolved.identity, revision: beforeHash };
     const snapshotUri = vscode.Uri.parse(buildWorkspaceResourceUri(snapshotIdentity));
-    this.#rememberSnapshot(snapshotUri.toString(), text, content.byteLength);
+    this.#rememberSnapshot(
+      snapshotUri.toString(),
+      text,
+      content.byteLength,
+      resolved,
+    );
     this.#rememberResource(resolved);
 
     const requestedTitle = params.title;
@@ -643,6 +662,7 @@ export class WorkspaceResourceController
     rootId: string,
     candidatePath: string,
     expectedIdentity?: WorkspaceResourceIdentity,
+    threadId?: string,
   ): ResolvedResource {
     const config = this.#config();
     if (!config || config.connectionMode !== "vscode-remote") {
@@ -651,11 +671,25 @@ export class WorkspaceResourceController
         "Workspace resources require an active VS Code Remote session",
       );
     }
-    const root = config.roots.find((entry) => entry.id === rootId);
+    const root =
+      config.roots.find((entry) => entry.id === rootId) ??
+      (threadId ? this.#resolveAuthorizedRoot(threadId, rootId) : undefined);
     if (!root) {
       throw new BridgeError("COMMAND_DENIED", "The workspace resource root is not configured");
     }
-    const relativePath = workspaceRelativePath(root.path, candidatePath, root.target);
+    const relativePath =
+      root.role === "conversation" && root.kind === "file"
+        ? (() => {
+            const candidate = vscode.Uri.file(candidatePath).fsPath;
+            if (candidate !== root.path) {
+              throw new BridgeError(
+                "PATH_OUTSIDE_ROOT",
+                "Workspace resource is outside the exact file shared with this conversation",
+              );
+            }
+            return basename(root.path);
+          })()
+        : workspaceRelativePath(root.path, candidatePath, root.target);
     const identity: WorkspaceResourceIdentity = {
       host: config.host,
       relativePath,
@@ -692,31 +726,119 @@ export class WorkspaceResourceController
       }
       actualUri = vscode.Uri.joinPath(remote.workspaceUri, ...relativePath.split("/"));
     } else {
-      const authorized = this.#resolveAuthorizedRoot(root.id);
+      const authorized = threadId
+        ? this.#resolveAuthorizedRoot(threadId, root.id)
+        : undefined;
       if (
-        root.role !== "secondary" ||
+        root.role !== "conversation" ||
         !authorized ||
         authorized.target !== "local" ||
-        authorized.path !== root.path
+        authorized.path !== root.path ||
+        authorized.role !== "conversation" ||
+        authorized.threadId !== threadId
       ) {
         throw new BridgeError(
           "COMMAND_DENIED",
           "The local workspace resource authorization is no longer valid",
         );
       }
-      actualUri = vscode.Uri.joinPath(vscode.Uri.file(root.path), ...relativePath.split("/"));
+      actualUri =
+        root.kind === "file"
+          ? vscode.Uri.file(root.path)
+          : vscode.Uri.joinPath(vscode.Uri.file(root.path), ...relativePath.split("/"));
     }
     const resourceUri = vscode.Uri.parse(buildWorkspaceResourceUri(identity));
-    return { actualUri, identity, resourceUri, root };
+    return {
+      actualUri,
+      identity,
+      ...(root.target === "local" ? { localPath: candidatePath, threadId } : {}),
+      resourceUri,
+      root,
+    };
   }
 
-  #rememberSnapshot(uri: string, content: string, size: number): void {
+  async #assertStillAuthorized(resolved: ResolvedResource): Promise<void> {
+    const config = this.#config();
+    if (!config || config.connectionMode !== "vscode-remote") {
+      throw new BridgeError(
+        "REMOTE_TRANSPORT_DISCONNECTED",
+        "Workspace resources require an active VS Code Remote session",
+      );
+    }
+    if (resolved.root.target === "remote") {
+      const configured = config.roots.find(
+        (root) =>
+          root.id === resolved.root.id &&
+          root.target === "remote" &&
+          root.role === "primary" &&
+          root.path === resolved.root.path,
+      );
+      const remote = detectRemoteWorkspace();
+      if (
+        !configured ||
+        remote.host !== config.host ||
+        remote.workspaceRoot !== config.workspaceRoot
+      ) {
+        throw new BridgeError(
+          "COMMAND_DENIED",
+          "Workspace resource no longer matches the active Remote SSH workspace",
+        );
+      }
+      return;
+    }
+    const authorized = resolved.threadId
+      ? this.#resolveAuthorizedRoot(resolved.threadId, resolved.root.id)
+      : undefined;
+    if (
+      resolved.root.role !== "conversation" ||
+      !authorized ||
+      authorized.role !== "conversation" ||
+      authorized.threadId !== resolved.threadId ||
+      authorized.path !== resolved.root.path ||
+      authorized.kind !== resolved.root.kind ||
+      !resolved.localPath
+    ) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "The conversation resource authorization is no longer valid",
+      );
+    }
+    try {
+      const [canonicalPath, metadata] = await Promise.all([
+        realpath(resolved.localPath),
+        stat(resolved.localPath),
+      ]);
+      if (canonicalPath !== resolved.localPath || !metadata.isFile()) {
+        throw new BridgeError(
+          "COMMAND_DENIED",
+          "The conversation resource no longer resolves to the registered file",
+        );
+      }
+    } catch (error) {
+      if (error instanceof BridgeError) {
+        throw error;
+      }
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "The conversation resource is no longer available",
+        undefined,
+        { cause: error },
+      );
+    }
+  }
+
+  #rememberSnapshot(
+    uri: string,
+    content: string,
+    size: number,
+    resolved: ResolvedResource,
+  ): void {
     const previous = this.#snapshots.get(uri);
     if (previous) {
       this.#snapshotBytes -= previous.size;
       this.#snapshots.delete(uri);
     }
-    this.#snapshots.set(uri, { content, size });
+    this.#snapshots.set(uri, { content, resolved, size });
     this.#snapshotBytes += size;
     while (
       this.#snapshots.size > MAX_SNAPSHOT_COUNT ||
@@ -736,7 +858,7 @@ export class WorkspaceResourceController
   #rememberResource(resolved: ResolvedResource): void {
     const uri = resolved.resourceUri.toString();
     this.#resources.delete(uri);
-    this.#resources.set(uri, true);
+    this.#resources.set(uri, resolved);
     while (this.#resources.size > 256) {
       const oldest = this.#resources.keys().next().value as string | undefined;
       if (!oldest) {

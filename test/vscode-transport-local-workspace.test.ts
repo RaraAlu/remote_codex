@@ -57,6 +57,7 @@ describe("VS Code Controller workspace transport", () => {
         params: {
           path: "notes.md",
           rootId: "local-reference",
+          threadId: "thread-1",
         },
         policy: {
           commandTimeoutMs: 999_999,
@@ -79,6 +80,7 @@ describe("VS Code Controller workspace transport", () => {
       params: {
         path: "notes.md",
         rootId: "local-reference",
+        threadId: "thread-1",
       },
       policy: {
         commandTimeoutMs: 12_345,

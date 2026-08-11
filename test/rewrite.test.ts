@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
+import type { ConversationResourceConfig } from "../src/core/types.js";
 import { REMOTE_DYNAMIC_TOOLS } from "../src/shim/dynamic-tools.js";
 import { REMOTE_PERMISSION_PROFILE_ID } from "../src/shim/local-core-policy.js";
 import { isUnknownServerRequest } from "../src/shim/proxy.js";
@@ -21,15 +22,19 @@ const config = parseBridgeConfig({
       path: "/home/zkbot/work/train/MimicLite",
       displayName: "MimicLite",
     },
-    {
-      id: "local-reference",
-      target: "local",
-      role: "secondary",
-      path: "/home/zkbot/reference",
-      displayName: "Reference",
-    },
   ],
 });
+const conversationResources: ConversationResourceConfig[] = [
+  {
+    id: "context-reference",
+    target: "local",
+    role: "conversation",
+    kind: "directory",
+    path: "/home/zkbot/reference",
+    displayName: "Reference",
+    threadId: "thread_123",
+  },
+];
 const remoteCodegraphRoutes = createToolRouteInventory(config, {
   remoteMcpServers: ["codegraph"],
 });
@@ -127,7 +132,7 @@ describe("app-server request rewriting", () => {
       "Root id: remote-primary",
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
-      "Root id: local-reference; target: local; role: secondary",
+      "Local resources explicitly shared with this conversation:\n- None",
     );
     expect(String(rewritten.params.developerInstructions)).toContain(
       "remote_exec is the project command runner",
@@ -149,6 +154,35 @@ describe("app-server request rewriting", () => {
       "existing",
       ...REMOTE_DYNAMIC_TOOLS.map((tool) => tool.name),
     ]);
+  });
+
+  it("injects thread-scoped resources without adding them to runtime project roots", () => {
+    const rewritten = rewriteClientMessage(
+      {
+        id: 21,
+        method: "turn/start",
+        params: { threadId: "thread_123", input: [] },
+      },
+      config,
+      "/local/control",
+      null,
+      remoteCodegraphRoutes,
+      conversationResources,
+    ) as { params: Record<string, unknown> };
+
+    expect(rewritten.params.runtimeWorkspaceRoots).toEqual([
+      "/home/zkbot/work/train/MimicLite",
+    ]);
+    const context = (
+      rewritten.params.additionalContext as Record<
+        string,
+        { value: string }
+      >
+    )["codex-remote-bridge"]!.value;
+    expect(context).toContain(
+      "Resource id: context-reference; target: local; scope: conversation; kind: directory; path: /home/zkbot/reference",
+    );
+    expect(context).not.toContain("role: secondary");
   });
 
   it("uses a native Windows control root without losing the remote project policy", () => {

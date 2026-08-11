@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AuditLog } from "../src/core/audit-log.js";
 import { parseBridgeConfig } from "../src/core/config.js";
 import type { OpenSshExecutor } from "../src/core/ssh-executor.js";
+import type { ConversationResourceConfig } from "../src/core/types.js";
 import {
   DynamicToolRouter,
   REMOTE_DYNAMIC_TOOLS,
@@ -50,15 +51,17 @@ describe("dynamic tool root context", () => {
             path: "/remote/workspace",
             displayName: "Remote project",
           },
-          {
-            id: "local-reference",
-            target: "local",
-            role: "secondary",
-            path: "/local/reference",
-            displayName: "Local reference",
-          },
         ],
       });
+      const localResource: ConversationResourceConfig = {
+        id: "context-reference",
+        target: "local",
+        role: "conversation",
+        kind: "directory",
+        path: "/local/reference",
+        displayName: "Local reference",
+        threadId: "thread-1",
+      };
       const readFile = vi.fn(async () => ({
         canonicalPath: "/remote/workspace/README.md",
         contentBase64: "cmVhZG1l",
@@ -145,20 +148,20 @@ describe("dynamic tool root context", () => {
       const denied = await router.handle(3, {
         arguments: {
           path: "notes.md",
-          rootId: "local-reference",
+          rootId: "context-reference",
           target: "local",
         },
         callId: "call-local",
         tool: "remote_read_file",
-      });
+      }, { conversationResources: [localResource], threadId: "thread-1" });
       expect(denied).toMatchObject({ success: false });
       expect(parseResult(denied)).toMatchObject({
         error: { code: "COMMAND_DENIED" },
         ok: false,
         remoteCwd: null,
-        rootId: "local-reference",
+        rootId: "context-reference",
         rootPath: null,
-        rootRole: "secondary",
+        rootRole: "conversation",
         target: "local",
       });
       expect(readFile).toHaveBeenCalledTimes(2);
@@ -166,25 +169,25 @@ describe("dynamic tool root context", () => {
       const local = await router.handle(4, {
         arguments: {
           path: "notes.md",
-          rootId: "local-reference",
+          rootId: "context-reference",
           target: "local",
         },
         callId: "call-local-workspace",
         tool: "workspace_read_file",
-      });
+      }, { conversationResources: [localResource], threadId: "thread-1" });
       expect(local).toMatchObject({ success: true });
       expect(parseResult(local)).toMatchObject({
         ok: true,
         remoteCwd: null,
-        rootId: "local-reference",
+        rootId: "context-reference",
         rootPath: "/local/reference",
-        rootRole: "secondary",
+        rootRole: "conversation",
         target: "local",
       });
       expect(requestControllerWorkspace).toHaveBeenCalledWith(
         "localReadFile",
-        "local-reference",
-        { path: "notes.md" },
+        "context-reference",
+        { path: "notes.md", threadId: "thread-1" },
       );
 
       const remoteWrite = await router.handle(
@@ -222,29 +225,28 @@ describe("dynamic tool root context", () => {
           arguments: {
             contentBase64: "bmV3",
             path: "local.txt",
-            rootId: "local-reference",
+            rootId: "context-reference",
             target: "local",
           },
           callId: "call-local-write",
           tool: "workspace_write_file",
         },
-        { idempotencyKey: "local-write-key" },
+        {
+          conversationResources: [localResource],
+          idempotencyKey: "local-write-key",
+          threadId: "thread-1",
+        },
       );
       expect(parseResult(localWrite)).toMatchObject({
-        ok: true,
-        data: { operation: "write", bytesWritten: 3 },
-        rootId: "local-reference",
+        ok: false,
+        error: { code: "COMMAND_DENIED" },
+        rootId: "context-reference",
         target: "local",
       });
-      expect(requestControllerWorkspace).toHaveBeenCalledWith(
+      expect(requestControllerWorkspace).not.toHaveBeenCalledWith(
         "localWriteFile",
-        "local-reference",
-        {
-          contentBase64: "bmV3",
-          idempotencyKey: "local-write-key",
-          path: "local.txt",
-          signal: undefined,
-        },
+        expect.anything(),
+        expect.anything(),
       );
 
       const events = (await readFileText(auditPath)).map((line) => JSON.parse(line));
@@ -253,8 +255,8 @@ describe("dynamic tool root context", () => {
           expect.objectContaining({
             operation: "workspace_read_file",
             outcome: "succeeded",
-            rootId: "local-reference",
-            rootRole: "secondary",
+            rootId: "context-reference",
+            rootRole: "conversation",
             rootPath: "/local/reference",
             target: "local",
           }),
@@ -269,8 +271,8 @@ describe("dynamic tool root context", () => {
           expect.objectContaining({
             operation: "remote_read_file",
             outcome: "failed",
-            rootId: "local-reference",
-            rootRole: "secondary",
+            rootId: "context-reference",
+            rootRole: "conversation",
             rootPath: "/local/reference",
             target: "local",
           }),

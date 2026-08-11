@@ -21,10 +21,16 @@ import type {
 export class ControllerWorkspaceExecutor implements WorkspaceExecutor {
   readonly #client: ControllerWorkspaceClient;
   readonly #rootId: string;
+  readonly #threadId: string;
 
-  constructor(rootId: string, client: ControllerWorkspaceClient) {
+  constructor(
+    rootId: string,
+    client: ControllerWorkspaceClient,
+    threadId: string,
+  ) {
     this.#rootId = rootId;
     this.#client = client;
+    this.#threadId = threadId;
   }
 
   async canonicalPath(inputPath: string): Promise<string> {
@@ -135,7 +141,7 @@ export class ControllerWorkspaceExecutor implements WorkspaceExecutor {
     return await this.#client.requestControllerWorkspace<T>(
       operation,
       this.#rootId,
-      params,
+      { ...params, threadId: this.#threadId },
     );
   }
 }

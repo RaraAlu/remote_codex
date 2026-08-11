@@ -340,9 +340,6 @@ async function main(): Promise<number> {
     auditPath,
     codexExecutable,
     config,
-    configProvider: configPath
-      ? async () => await loadOptionalConfig(configPath, audit)
-      : undefined,
     controlDir,
     extensionHostPid,
     localWorkspaceContextPath: localWorkspaceContextFile,

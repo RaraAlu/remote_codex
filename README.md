@@ -6,14 +6,15 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.74` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
+> 当前源码版本为 `0.3.75` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
 > 快照附件；官方输入区的原生 `@` 文件搜索通过当前 VS Code Remote SSH 工作区查询，
 > 不访问本机控制目录。可选兼容层不要求用户按住 `Shift`：VS Code Explorer 拖放转换为
 > 当前光标处的原生 `@` 引用；无论来自 VS Code Explorer 还是系统文件管理器，文件和
-> 目录都采用同一表示。启用兼容层时可一次性同意自动授权之后明确拖入的本机资源；
-> Remote SSH 对话只把实际拖入资源的包含目录登记为本地次级根 `@` 引用，未拖入路径
-> 仍不可访问，分析过程不复制到远端；
-> 真实 VS Code/Remote SSH 完整验收仍在进行。
+> 目录都采用同一表示。启用兼容层时可一次性同意接收之后明确拖入的本机资源；
+> Remote SSH 会话始终只有一个远程项目主根。本机拖入项按当前 Codex thread 单独绑定：
+> 文件只开放该文件，目录只开放该目录子树，均为只读且不会复制到远端。Linux x64
+> Remote SSH 已验证单次 14 个本机资源可全部进入原生 `@` 输入，不再受旧次级根数量上限
+> 阻断；会话声明、跨对话隔离和删除清理仍按文末 TODO 完成安全验收。
 > Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
 > `codex` 自动附着、显式 `codex-vscode.exe` TUI、外部 MCP、历史 thread 同步、无 rollout
 > 冷启动降级、停用恢复和 npm 升级恢复实测；官方 Remote SSH git watcher 的路径误判
@@ -74,14 +75,15 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 - 符合安全条件的 stdio MCP 可通过当前 VS Code Remote 通道在远端运行。
 - 本地 Codex CLI 可附着和介入活动 VS Code Codex thread。
 - 普通本地窗口按当前唯一文件工作区过滤任务列表；Remote SSH 窗口按主机和远程根隔离。
-- 本地次级根来自用户手动选择，或启用拖放时一次性同意后明确拖入的资源；可随时撤销。
+- 本机拖入资源不再写入项目根配置，而是按当前 Codex thread 形成独立只读能力；不同对话
+  相互隔离，不设置次级根数量上限，删除对话时同步清理其绑定。
 - 本地结构化审计不记录文件正文、密码、私钥、Token 或完整环境变量。
 - 可选的原生 Codex 拖放接收面通过 VS Code Workbench 外层接收 Explorer 与系统文件
   管理器路径，再调用官方 `chatgpt.addFileToThread`。Bridge 为所有受管拖放路径携带标记，
   配套 Webview 补丁统一在当前光标处插入原生 `@` 引用；普通未标记的官方命令仍保持官方
-  行为。Remote SSH 对话中的本机文件会自动授权其所在目录，本机目录会自动授权其自身；
-  只有实际拖入的路径触发授权，未拖入路径不会被预先开放。随后由当前 turn 热刷新根列表
-  并通过本地 `workspace_*` 工具分析。扩展激活会按当前 VS Code
+  行为。Remote SSH 对话中的本机文件和目录会在提交该 `@` 引用时绑定到当前 thread；
+  文件不扩大到父目录，目录只允许读取自身子树，未拖入路径不会被预先开放。随后由本地
+  `workspace_*` 只读工具分析。扩展激活会按当前 VS Code
   与官方 Codex 资产组合自动检查兼容性；首次可安全启用时只弹出一次明确确认，确认后
   自动请求所需系统文件权限并重载窗口。Bridge 会为 Workbench、
   `product.json` 和官方 Webview 资产保存带 SHA-256 的可恢复原件。
@@ -92,6 +94,8 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 - 远端目标为 VS Code Remote SSH 打开的 Linux x64 工作区。
 - 自动初始化只接受当前窗口中唯一的远程工作区根，不猜测多根工作区。
 - 默认模式不会建立第二条 SSH 认证链路。
+- Remote SSH 对话中的本机拖入资源只支持默认 `vscode-remote` transport；显式 OpenSSH
+  回退没有 Controller 本地资源通道，因此会失败关闭。
 - `remote_exec` 限制启动目录但不是远端文件系统沙箱；批准命令前仍需检查完整参数。
 - 选择“完全访问”会取消逐次审批，但不会开放本地项目目录。
 - Windows、Linux 和 OpenSSH 的构包或运行结果不能互相替代。
@@ -165,10 +169,11 @@ code --install-extension "dist/codex-remote-bridge-$version-win32-x64.vsix" --fo
 2. 把 VS Code Explorer 或系统文件管理器中的文件、目录直接拖入官方 Codex 对话区域。
    所有 Bridge 捕获的拖放都在当前 Composer 光标处生成一个原生 `@` 引用，不需要按
    `Shift`，也不按拖动来源切换为附件。
-3. Remote SSH 窗口中的远端 Explorer 资源直接绑定远端主根。本机文件拖入时自动授权其
-   父目录，本机目录拖入时自动授权目录自身，之后不再逐路径弹窗；根列表会在下一轮热刷新，
-   资源不会被复制到远端。该模式不会提前授权整个文件系统，只授权用户实际拖入的路径。
-4. 使用 `Codex Bridge: Revoke Local Root` 可撤销本地次级根。停用或卸载前先执行
+3. Remote SSH 窗口中的远端 Explorer 资源仍使用唯一远端主根。本机资源先暂存，只有在
+   对应原生 `@` 随 turn 提交时才绑定到该 Codex thread；文件能力精确到单文件，目录能力
+   只覆盖其子树，均为只读，不写入 `roots`、不复制到远端，也不与其他对话共享。这里没有
+   本地次级根数量上限；单次拖放载荷仍受现有输入资源数量和传输大小边界约束。
+4. 删除 Codex 对话会同步清理该 thread 的本机资源绑定。停用或卸载前先执行
    `Codex Bridge: Disable Native Codex Drop Surface`，让 Bridge 校验并恢复受管的
    Workbench、`product.json` 和官方 Webview 资产。
 
@@ -190,8 +195,6 @@ Extension Host，避免它们占用远端 Extension Host；两项 `remote.extens
 | `Codex Bridge: Stop`                              | 停止当前 Bridge 会话               |
 | `Codex Bridge: Run Diagnostics`                   | 显示脱敏后的组件、连接和能力状态   |
 | `Codex Bridge: Show Audit Log`                    | 打开本地审计日志                   |
-| `Codex Bridge: Authorize Local Root`              | 授权一个本地次级根                 |
-| `Codex Bridge: Revoke Local Root`                 | 撤销本地次级根授权                 |
 | `Codex Bridge: Add Remote File to Next Turn`      | 为下一轮显式加入当前远程文件       |
 | `Codex Bridge: Add Remote Selection to Next Turn` | 为下一轮显式加入当前远程选区       |
 | `Codex Bridge: Enable Automatic CLI Integration`  | 启用本地 Codex CLI 自动附着        |
@@ -330,11 +333,13 @@ Remote SSH 实机验证。完整门禁和量化指标见
   未知代码形状、备份缺失、哈希不符和外部修改均失败关闭。当前 Linux 本地与 Remote SSH
   的统一 `@` 拖放
   已于 2026-08-10 完成实机验证；`0.3.73` 的自动权限请求、成功后自动重载、欢迎页无焦点
-  降级和 Remote SSH 窗口重载回归也已完成。`0.3.74` 候选把同一次启用确认扩展为之后
-  明确拖入路径的自动授权；退出条件是在真实 Remote SSH 窗口从两个此前未授权目录连续
-  拖入文件和目录，确认均无逐路径弹窗、审计模式为 `drop-surface-consent`、模型可读取，
-  禁用兼容层后诊断显示自动授权关闭且不再登记新根。剩余退出条件还包括执行禁用与逐字节
-  恢复验收，
+  降级和 Remote SSH 窗口重载回归也已完成。`0.3.75` 已把本机拖入项从全局
+  `local/secondary` 根改为当前 Codex thread 的只读资源能力；2026-08-10 在真实 Remote SSH
+  窗口连续两轮拖入 14 个互不依赖的本机资源，均完成 `stage_drop` 和原生 `@` 插入，不再
+  出现次级根数量错误。剩余退出条件是在提交本机文件和目录后确认
+  `conversation_resource.claim`，模型可读取精确文件和目录子树但不能读取相邻路径、写入或
+  获取 Git 状态；另一个对话不得继承这些资源，配置与诊断仍只显示唯一远端主根，删除对话
+  后出现 `conversation_resource.delete_thread`。还需执行禁用与逐字节恢复验收，
   并在 VS Code 或官方扩展升级后重新探测和回归，不能沿用旧版本放行结果。
 
 ### Windows x64 与 0.4.0

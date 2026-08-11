@@ -2,7 +2,7 @@
   "name": "codex-vscode-remote-bridge",
   "displayName": "Codex Remote Bridge",
   "description": "Keep Codex local while routing approved project operations to a VS Code Remote SSH workspace.",
-  "version": "0.3.74",
+  "version": "0.3.75",
   "private": true,
   "publisher": "zkbot",
   "license": "MIT",
@@ -33,8 +33,6 @@
     "onCommand:codexRemoteBridge.stop",
     "onCommand:codexRemoteBridge.diagnostics",
     "onCommand:codexRemoteBridge.showAuditLog",
-    "onCommand:codexRemoteBridge.authorizeLocalRoot",
-    "onCommand:codexRemoteBridge.revokeLocalRoot",
     "onCommand:codexRemoteBridge.addRemoteFileContext",
     "onCommand:codexRemoteBridge.addRemoteSelectionContext",
     "onCommand:codexRemoteBridge.enableExternalCliMcp",
@@ -64,14 +62,6 @@
       {
         "command": "codexRemoteBridge.showAuditLog",
         "title": "Codex Bridge: Show Audit Log"
-      },
-      {
-        "command": "codexRemoteBridge.authorizeLocalRoot",
-        "title": "Codex Bridge: Authorize Local Root"
-      },
-      {
-        "command": "codexRemoteBridge.revokeLocalRoot",
-        "title": "Codex Bridge: Revoke Local Root"
       },
       {
         "command": "codexRemoteBridge.addRemoteFileContext",

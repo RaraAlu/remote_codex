@@ -167,3 +167,5 @@ Windows Remote SSH 冷启动就绪阶段、Executor 能力探测耗时和慢启�
 `docs/acceptance/2026-08-02-release-0.3.67-windows-proxy-remediation.md`。
 Windows 内置 Copilot Chat 本机 UI 放置、三次稳定重载和低于 2 秒的就绪结果见
 `docs/acceptance/2026-08-02-release-0.3.69-windows-copilot-ui-placement.md`。
+Linux x64 Remote SSH 的 `0.3.75` 对话资源暂存、14 项无次级根上限拖放和当前剩余门禁见
+`docs/acceptance/2026-08-10-release-0.3.75-conversation-resource-staging.md`。

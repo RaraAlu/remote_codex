@@ -5,7 +5,11 @@ import {
   resolve,
   sep,
 } from "node:path";
-import type { BridgeConfig, WorkspaceRootConfig } from "../core/types.js";
+import type {
+  BridgeConfig,
+  ConversationResourceConfig,
+  WorkspaceToolRoot,
+} from "../core/types.js";
 import { normalizeRemotePath } from "../core/path-policy.js";
 import { workspaceRelativePath } from "../core/workspace-resource-uri.js";
 import {
@@ -184,7 +188,8 @@ function selectedRoot(
   config: BridgeConfig,
   tool: string,
   args: Record<string, unknown>,
-): WorkspaceRootConfig {
+  conversationResources: readonly ConversationResourceConfig[],
+): WorkspaceToolRoot {
   const primary = config.roots.find(
     (root) => root.target === "remote" && root.role === "primary",
   );
@@ -198,11 +203,14 @@ function selectedRoot(
   const rootId = typeof args.rootId === "string" ? args.rootId : primary.id;
   return (
     config.roots.find((root) => root.id === rootId && root.target === target) ??
+    conversationResources.find(
+      (resource) => resource.id === rootId && resource.target === target,
+    ) ??
     primary
   );
 }
 
-function displayPath(root: WorkspaceRootConfig, value: unknown): string {
+function displayPath(root: WorkspaceToolRoot, value: unknown): string {
   if (typeof value !== "string") {
     return root.path;
   }
@@ -229,7 +237,7 @@ function shellQuote(value: string): string {
 }
 
 function workspaceCommand(
-  root: WorkspaceRootConfig,
+  root: WorkspaceToolRoot,
   operation: string,
   values: readonly string[] = [],
 ): string {
@@ -248,10 +256,11 @@ function commandPresentation(
   tool: string,
   rawArguments: unknown,
   config: BridgeConfig,
+  conversationResources: readonly ConversationResourceConfig[],
 ): NativeCommandPresentation {
   const args = toolArguments(rawArguments);
   const normalizedTool = normalizeWorkspaceToolName(tool);
-  const root = selectedRoot(config, tool, args);
+  const root = selectedRoot(config, tool, args, conversationResources);
   const path = displayPath(root, args.path);
 
   switch (normalizedTool) {
@@ -660,9 +669,15 @@ function projectDynamicToolItem(
   item: Record<string, unknown>,
   config: BridgeConfig,
   interruptedTurn: boolean,
+  conversationResources: readonly ConversationResourceConfig[],
 ): Record<string, unknown> {
   const tool = item.tool as string;
-  const presentation = commandPresentation(tool, item.arguments, config);
+  const presentation = commandPresentation(
+    tool,
+    item.arguments,
+    config,
+    conversationResources,
+  );
   const interrupted = interruptedTurn && item.status === "inProgress";
   const completed = item.status !== "inProgress";
   const commandState = completed ? completedCommandState(tool, item) : null;
@@ -694,11 +709,17 @@ function projectValue(
   value: unknown,
   config: BridgeConfig,
   interruptedTurn = false,
+  conversationResources: readonly ConversationResourceConfig[] = [],
 ): unknown {
   if (Array.isArray(value)) {
     let changed = false;
     const projected = value.map((entry) => {
-      const next = projectValue(entry, config, interruptedTurn);
+      const next = projectValue(
+        entry,
+        config,
+        interruptedTurn,
+        conversationResources,
+      );
       changed ||= next !== entry;
       return next;
     });
@@ -713,7 +734,12 @@ function projectValue(
     typeof value.tool === "string" &&
     REMOTE_TOOL_NAMES.has(value.tool)
   ) {
-    return projectDynamicToolItem(value, config, interruptedTurn);
+    return projectDynamicToolItem(
+      value,
+      config,
+      interruptedTurn,
+      conversationResources,
+    );
   }
 
   const nestedInterruptedTurn =
@@ -724,16 +750,25 @@ function projectValue(
     const next =
       value.type === "agentMessage" && key === "text" && typeof entry === "string"
         ? projectAgentMessageLinks(entry, config)
-        : projectValue(entry, config, nestedInterruptedTurn);
+        : projectValue(
+            entry,
+            config,
+            nestedInterruptedTurn,
+            conversationResources,
+          );
     projected[key] = next;
     changed ||= next !== entry;
   }
   return changed ? projected : value;
 }
 
-export function projectServerMessage<T>(message: T, config: BridgeConfig | null): T {
+export function projectServerMessage<T>(
+  message: T,
+  config: BridgeConfig | null,
+  conversationResources: readonly ConversationResourceConfig[] = [],
+): T {
   if (!config) {
     return message;
   }
-  return projectValue(message, config) as T;
+  return projectValue(message, config, false, conversationResources) as T;
 }

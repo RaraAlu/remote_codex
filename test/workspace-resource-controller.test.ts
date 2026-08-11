@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type * as vscodeTypes from "vscode";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BridgeConfig, WorkspaceRootConfig } from "../src/core/types.js";
+import type {
+  BridgeConfig,
+  ConversationResourceConfig,
+  WorkspaceRootConfig,
+} from "../src/core/types.js";
 import type { ControllerWorkspaceRequest } from "../src/core/vscode-transport.js";
 
 const mock = vi.hoisted(() => ({
@@ -53,6 +60,10 @@ vi.mock("vscode", () => {
 
     get scheme(): string {
       return new URL(this.value).protocol.slice(0, -1);
+    }
+
+    get fsPath(): string {
+      return this.path;
     }
 
     toString(): string {
@@ -130,12 +141,14 @@ const remoteRoot: WorkspaceRootConfig = {
   target: "remote",
 };
 
-const localRoot: WorkspaceRootConfig = {
+const localResource: ConversationResourceConfig = {
   displayName: "notes",
-  id: "local-notes",
+  id: "context-notes",
+  kind: "directory",
   path: "/tmp/bridge-notes",
-  role: "secondary",
+  role: "conversation",
   target: "local",
+  threadId: "thread-1",
 };
 
 function config(roots: WorkspaceRootConfig[] = [remoteRoot]): BridgeConfig {
@@ -365,16 +378,20 @@ describe("WorkspaceResourceController", () => {
     ).resolves.toMatchObject({ action: "diffed", beforeHash });
   });
 
-  it("requires a still-authorized local root before opening it", async () => {
+  it("requires a still-authorized resource in the same conversation before opening it", async () => {
     let authorized = true;
     const controller = new WorkspaceResourceController(
-      () => config([remoteRoot, localRoot]),
-      (rootId) => (authorized && rootId === localRoot.id ? localRoot : undefined),
+      () => config(),
+      (threadId, rootId) =>
+        authorized && threadId === "thread-1" && rootId === localResource.id
+          ? localResource
+          : undefined,
     );
 
     await controller.execute(
-      request("openWorkspaceResource", localRoot.id, {
-        path: `${localRoot.path}/todo.md`,
+      request("openWorkspaceResource", localResource.id, {
+        path: `${localResource.path}/todo.md`,
+        threadId: "thread-1",
       }),
     );
     expect(mock.openTextDocument).toHaveBeenCalledWith(
@@ -384,11 +401,52 @@ describe("WorkspaceResourceController", () => {
     authorized = false;
     await expect(
       controller.execute(
-        request("openWorkspaceResource", localRoot.id, {
-          path: `${localRoot.path}/todo.md`,
+        request("openWorkspaceResource", localResource.id, {
+          path: `${localResource.path}/todo.md`,
+          threadId: "thread-1",
         }),
       ),
     ).rejects.toMatchObject({ code: "COMMAND_DENIED" });
+  });
+
+  it("invalidates an already registered conversation resource after thread cleanup", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-resource-provider-"));
+    const path = join(directory, "manual.txt");
+    await writeFile(path, "manual\n", "utf8");
+    const resource: ConversationResourceConfig = {
+      id: "context-manual",
+      target: "local",
+      role: "conversation",
+      kind: "file",
+      path,
+      displayName: "manual.txt",
+      threadId: "thread-1",
+    };
+    let authorized = true;
+    const controller = new WorkspaceResourceController(
+      () => config(),
+      (threadId, rootId) =>
+        authorized && threadId === resource.threadId && rootId === resource.id
+          ? resource
+          : undefined,
+    );
+
+    try {
+      const registered = (await controller.execute(
+        request("registerWorkspaceResource", resource.id, {
+          path,
+          threadId: resource.threadId,
+        }),
+      )) as { resourceUri: string };
+      authorized = false;
+      await expect(
+        controller.provideTextDocumentContent(
+          vscode.Uri.parse(registered.resourceUri),
+        ),
+      ).rejects.toMatchObject({ code: "COMMAND_DENIED" });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 
   it("refuses a resource URI after its host identity changes", async () => {

@@ -10,6 +10,8 @@ export const REMOTE_OUTPUT_COMMAND = "codexRemoteBridge.transport.output";
 export const REMOTE_STDIO_MAX_FRAME_BYTES = 256 * 1024;
 
 export const CONTROLLER_WORKSPACE_OPERATIONS = [
+  "deleteConversationResources",
+  "resolveConversationResources",
   "resolveEditorContext",
   "resolveFuzzyFileSearch",
   "localApplyPatch",

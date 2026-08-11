@@ -5,9 +5,10 @@ import type { OpenSshExecutor } from "../core/ssh-executor.js";
 import type {
   BridgeClientIdentity,
   BridgeConfig,
+  ConversationResourceConfig,
   ToolRequestContext,
   ToolResult,
-  WorkspaceRootConfig,
+  WorkspaceToolRoot,
 } from "../core/types.js";
 import type { ControllerWorkspaceClient } from "../core/vscode-transport.js";
 import type { WorkspaceExecutor } from "../core/workspace-executor.js";
@@ -497,11 +498,13 @@ interface DynamicToolCall {
 
 export interface DynamicToolObserver {
   clientIdentity?: BridgeClientIdentity;
+  conversationResources?: readonly ConversationResourceConfig[];
   coordinationWaitMs?: number;
   idempotencyKey?: string;
   onOutput?: (chunk: string) => void;
   operationId?: string;
   signal?: AbortSignal;
+  threadId?: string;
 }
 
 function parseToolCall(value: unknown): DynamicToolCall {
@@ -568,7 +571,7 @@ export class DynamicToolRouter {
       throw new BridgeError("COMMAND_DENIED", `Unknown remote tool: ${call.tool}`);
     }
     const args = argumentObject(call.arguments);
-    const root = this.#requestedRoot(args);
+    const root = this.#requestedRoot(args, observer.conversationResources);
     const context = this.#toolContext(root, false);
 
     const requestId = call.callId || `req_${randomUUID()}`;
@@ -606,6 +609,7 @@ export class DynamicToolRouter {
         call.tool,
         await this.#execute(call.tool, args, root, observer),
         root,
+        observer.threadId,
       );
       if (observer.signal?.aborted) {
         throw new BridgeError("CANCELLED", "Workspace tool call was cancelled");
@@ -733,7 +737,7 @@ export class DynamicToolRouter {
   ): Promise<unknown> {
     const call = parseToolCall(rawParams);
     const args = argumentObject(call.arguments);
-    const root = this.#requestedRoot(args);
+    const root = this.#requestedRoot(args, observer.conversationResources);
     const context = this.#toolContext(root, false);
     const requestId = call.callId || `req_${randomUUID()}`;
     const error = new BridgeError("COMMAND_DENIED", reason);
@@ -771,7 +775,7 @@ export class DynamicToolRouter {
   async #execute(
     tool: string,
     args: Record<string, unknown>,
-    root: WorkspaceRootConfig,
+    root: WorkspaceToolRoot,
     observer: DynamicToolObserver,
   ): Promise<unknown> {
     if (tool === "remote_background_start") {
@@ -838,7 +842,17 @@ export class DynamicToolRouter {
     if (legacyResult) {
       this.#assertRemotePrimaryRoot(root);
     }
-    const executor = this.#workspaceExecutor(root);
+    if (
+      root.role === "conversation" &&
+      WORKSPACE_MUTATION_TOOL_NAMES.has(normalizedTool)
+    ) {
+      throw new BridgeError(
+        "COMMAND_DENIED",
+        "Resources shared with the active conversation are read-only",
+        { rootId: root.id, threadId: observer.threadId },
+      );
+    }
+    const executor = this.#workspaceExecutor(root, observer.threadId);
     switch (normalizedTool) {
       case "workspace_open_file": {
         const controller = this.#controllerWorkspace;
@@ -854,6 +868,7 @@ export class DynamicToolRouter {
           root.id,
           {
             path,
+            ...(observer.threadId ? { threadId: observer.threadId } : {}),
             ...(["line", "column", "endLine", "endColumn"] as const).reduce<
               Record<string, unknown>
             >((params, key) => {
@@ -890,6 +905,7 @@ export class DynamicToolRouter {
             beforeContentBase64: args.beforeContentBase64,
             beforeHash: args.beforeHash,
             path,
+            ...(observer.threadId ? { threadId: observer.threadId } : {}),
             ...(args.title === undefined ? {} : { title: args.title }),
           },
         );
@@ -1053,7 +1069,10 @@ export class DynamicToolRouter {
     }
   }
 
-  #requestedRoot(args: Record<string, unknown>): WorkspaceRootConfig {
+  #requestedRoot(
+    args: Record<string, unknown>,
+    conversationResources: readonly ConversationResourceConfig[] = [],
+  ): WorkspaceToolRoot {
     const target = args.target ?? "remote";
     if (target !== "local" && target !== "remote") {
       throw new BridgeError("PROTOCOL_MISMATCH", "target must be local or remote");
@@ -1071,9 +1090,14 @@ export class DynamicToolRouter {
     if (typeof rootId !== "string" || rootId.length === 0) {
       throw new BridgeError("PROTOCOL_MISMATCH", "rootId must be a non-empty string");
     }
-    const root = this.#config.roots.find(
-      (candidate) => candidate.id === rootId && candidate.target === target,
-    );
+    const root =
+      target === "remote"
+        ? this.#config.roots.find(
+            (candidate) => candidate.id === rootId && candidate.target === "remote",
+          )
+        : conversationResources.find(
+            (candidate) => candidate.id === rootId && candidate.target === "local",
+          );
     if (!root) {
       throw new BridgeError("COMMAND_DENIED", "The requested workspace root is not configured", {
         rootId,
@@ -1083,15 +1107,18 @@ export class DynamicToolRouter {
     return root;
   }
 
-  #workspaceExecutor(root: WorkspaceRootConfig): WorkspaceExecutor {
+  #workspaceExecutor(
+    root: WorkspaceToolRoot,
+    threadId: string | undefined,
+  ): WorkspaceExecutor {
     if (root.target === "remote") {
       this.#assertRemotePrimaryRoot(root);
       return this.#executor;
     }
-    if (root.role !== "secondary") {
+    if (root.role !== "conversation") {
       throw new BridgeError(
         "COMMAND_DENIED",
-        "Local workspace tools can access only an authorized secondary root",
+        "Local workspace tools can access only a resource shared with the active conversation",
         { rootId: root.id },
       );
     }
@@ -1102,10 +1129,21 @@ export class DynamicToolRouter {
         { rootId: root.id },
       );
     }
-    return new ControllerWorkspaceExecutor(root.id, this.#controllerWorkspace);
+    if (!threadId) {
+      throw new BridgeError(
+        "PROTOCOL_MISMATCH",
+        "Local workspace access requires the active conversation thread ID",
+        { rootId: root.id },
+      );
+    }
+    return new ControllerWorkspaceExecutor(
+      root.id,
+      this.#controllerWorkspace,
+      threadId,
+    );
   }
 
-  #assertRemotePrimaryRoot(root: WorkspaceRootConfig): void {
+  #assertRemotePrimaryRoot(root: WorkspaceToolRoot): void {
     if (!this.#isRemotePrimaryRoot(root)) {
       throw new BridgeError(
         "COMMAND_DENIED",
@@ -1148,7 +1186,8 @@ export class DynamicToolRouter {
   async #attachWorkspaceResource(
     tool: string,
     data: unknown,
-    root: WorkspaceRootConfig,
+    root: WorkspaceToolRoot,
+    threadId: string | undefined,
   ): Promise<unknown> {
     if (!isRecord(data) || typeof data.resourceUri === "string") {
       return data;
@@ -1176,7 +1215,10 @@ export class DynamicToolRouter {
     }
     const resource = await this.#controllerWorkspace.requestControllerWorkspace<
       Record<string, unknown>
-    >("registerWorkspaceResource", root.id, { path: canonicalPath });
+    >("registerWorkspaceResource", root.id, {
+      path: canonicalPath,
+      ...(threadId ? { threadId } : {}),
+    });
     return typeof resource.resourceUri === "string"
       ? {
           ...data,
@@ -1231,7 +1273,7 @@ export class DynamicToolRouter {
   }
 
   #toolContext(
-    root: WorkspaceRootConfig,
+    root: WorkspaceToolRoot,
     revealLocalPath: boolean,
   ): Omit<ToolRequestContext, "requestId"> {
     return {
@@ -1245,7 +1287,7 @@ export class DynamicToolRouter {
     };
   }
 
-  #isRemotePrimaryRoot(root: WorkspaceRootConfig): boolean {
+  #isRemotePrimaryRoot(root: WorkspaceToolRoot): boolean {
     return (
       root.target === "remote" &&
       root.role === "primary" &&

@@ -64,18 +64,23 @@ describe("remote editor context proxy", () => {
         "vscode-remote://ssh-remote%2Bremote-host/remote/workspace/context.txt",
     };
     const observed: TransportRequest[] = [];
+    let editorContexts = 0;
     const server = createServer((socket) => {
       const lines = createInterface({ input: socket });
       lines.once("line", (line) => {
         const request = JSON.parse(line) as TransportRequest;
         observed.push(request);
+        const result =
+          request.operation === "resolveConversationResources"
+            ? []
+            : {
+                ...queued,
+                contextId: `context-${++editorContexts}`,
+              };
         socket.end(
           `${JSON.stringify({
             id: request.id,
-            result: {
-              ...queued,
-              contextId: `context-${observed.length}`,
-            },
+            result,
             type: "response",
           })}\n`,
         );
@@ -131,11 +136,20 @@ describe("remote editor context proxy", () => {
     }
 
     expect(rejected).toEqual([]);
-    expect(observed).toHaveLength(2);
+    expect(observed).toHaveLength(4);
     expect(observed[0]).toMatchObject({
+      operation: "resolveConversationResources",
+      params: { mentionPaths: [], threadId: "thread-1" },
+    });
+    expect(observed[1]).toMatchObject({
       operation: "resolveEditorContext",
       params: { rootId: "remote-primary" },
     });
+    expect(observed[2]).toMatchObject({
+      operation: "resolveConversationResources",
+      params: { mentionPaths: [], threadId: "thread-1" },
+    });
+    expect(observed[3]).toMatchObject({ operation: "resolveEditorContext" });
     const firstContext = (
       forwarded[0]?.params as {
         additionalContext: Record<string, { value: string }>;
