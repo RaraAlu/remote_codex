@@ -14,6 +14,7 @@ import WebSocket, { WebSocketServer, type RawData } from "ws";
 import { AuditLog } from "../core/audit-log.js";
 import { chmodIfSupported } from "../core/file-permissions.js";
 import { loadLocalWorkspaceContext } from "../core/local-workspace-context.js";
+import { renameReplacingFileWithRetry } from "../extension/shim-executable.js";
 import {
   bridgeExternalCliDir,
   bridgeExternalCliSessionPath,
@@ -1110,7 +1111,7 @@ export class SharedAppServer {
         mode: 0o600,
       });
       await chmodIfSupported(temporaryPath, 0o600);
-      await rename(temporaryPath, this.#sessionPath);
+      await renameReplacingFileWithRetry(temporaryPath, this.#sessionPath);
     });
     await this.#descriptorQueue;
   }
