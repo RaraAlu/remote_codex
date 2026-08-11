@@ -406,7 +406,8 @@ async function collectStages(stageArguments) {
       `controller-${versions.controllerVersion}-${target}`,
     ),
   );
-  const directories = stageArguments.length === 0 ? defaults : stageArguments.map(resolve);
+  const directories =
+    stageArguments.length === 0 ? defaults : stageArguments.map((stage) => resolve(stage));
   if (directories.length !== CONTROLLER_TARGETS.length) {
     throw new Error("Collect requires exactly one Linux and one Windows stage directory");
   }
