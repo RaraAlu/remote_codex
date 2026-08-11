@@ -260,34 +260,36 @@ function collectJsonLines(
 }
 
 describe("SharedAppServer", () => {
-  it("replaces stdio transport and stale websocket credentials", () => {
-    expect(
-      withSharedWebSocketTransport(
-        [
-          "-c",
-          "feature=true",
-          "app-server",
-          "--listen",
-          "stdio://",
-          "--ws-auth",
-          "signed-bearer-token",
-          "--ws-shared-secret-file",
-          "/tmp/old",
-        ],
+  it(
+    "replaces stdio transport and stale websocket credentials",
+    () => {
+      expect(
+        withSharedWebSocketTransport(
+          [
+            "-c",
+            "feature=true",
+            "app-server",
+            "--listen",
+            "stdio://",
+            "--ws-auth",
+            "signed-bearer-token",
+            "--ws-shared-secret-file",
+            "/tmp/old",
+          ],
+          "ws://127.0.0.1:3456",
+          "/tmp/new-token",
+        ),
+      ).toEqual([
+        "-c",
+        "feature=true",
+        "app-server",
+        "--listen",
         "ws://127.0.0.1:3456",
+        "--ws-auth",
+        "capability-token",
+        "--ws-token-file",
         "/tmp/new-token",
-      ),
-    ).toEqual([
-      "-c",
-      "feature=true",
-      "app-server",
-      "--listen",
-      "ws://127.0.0.1:3456",
-      "--ws-auth",
-      "capability-token",
-      "--ws-token-file",
-      "/tmp/new-token",
-    ]);
+      ]);
   });
 
   it(
