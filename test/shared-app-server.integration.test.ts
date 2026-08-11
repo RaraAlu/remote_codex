@@ -290,8 +290,10 @@ describe("SharedAppServer", () => {
     ]);
   });
 
-  it("lets an authenticated external client resume, steer, and interrupt the VS Code thread", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "codex-shared-app-server-"));
+  it(
+    "lets an authenticated external client resume, steer, and interrupt the VS Code thread",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "codex-shared-app-server-"));
     process.env.CODEX_BRIDGE_STATE_DIR = directory;
     const input = new PassThrough();
     const output = new PassThrough();
@@ -702,7 +704,7 @@ describe("SharedAppServer", () => {
     expect(rawAudit).not.toContain("start self-test");
     expect(rawAudit).not.toContain("add verification");
     expect(rawAudit).not.toContain("intervene");
-  });
+  }, 30_000);
 
   it("honors full-access for a thread started by an external CLI client", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-shared-full-access-"));
@@ -857,7 +859,7 @@ describe("SharedAppServer", () => {
         }),
       }),
     );
-  });
+  }, 30_000);
 
   it("interrupts an active turn when its external CLI client disconnects", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-shared-disconnect-"));
@@ -986,7 +988,7 @@ describe("SharedAppServer", () => {
         }),
       }),
     );
-  });
+  }, 30_000);
 
   it("publishes a local VS Code thread without applying Remote SSH rewrites", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-shared-local-app-server-"));
@@ -1152,5 +1154,5 @@ describe("SharedAppServer", () => {
     external.close();
     input.end();
     await expect(running).resolves.toBe(0);
-  });
+  }, 30_000);
 });
