@@ -1,0 +1,94 @@
+name: Build VSIX
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  package-linux:
+    name: Package Linux x64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build, test & package native
+        run: npm run check
+      - name: Stage native artifacts
+        run: npm run package:stage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-linux-x64
+          path: artifacts/controller-*-linux-x64
+          if-no-files-found: error
+
+  package-windows:
+    name: Package Windows x64
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Build, test & package native
+        run: npm run check
+      - name: Stage native artifacts
+        run: npm run package:stage
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stage-win32-x64
+          path: artifacts/controller-*-win32-x64
+          if-no-files-found: error
+
+  collect:
+    name: Collect & verify dual-platform VSIX
+    needs: [package-linux, package-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: stage-linux-x64
+          path: stages/linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: stage-win32-x64
+          path: stages/windows
+      - name: Collect & verify both platform stages
+        run: npm run package:collect -- stages/linux stages/windows
+      - name: Verify collected dist artifacts
+        run: npm run package:verify
+      - name: Read version
+        id: version
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: |
+            dist/codex-remote-bridge-*-linux-x64.vsix
+            dist/codex-remote-bridge-*-win32-x64.vsix
+            dist/codex-remote-bridge-executor.vsix
+          if-no-files-found: error
+      - name: Create GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/codex-remote-bridge-*.vsix \
+            --title "Codex Remote Bridge ${{ steps.version.outputs.version }}" \
+            --generate-notes
