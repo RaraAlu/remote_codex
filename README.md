@@ -117,7 +117,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 2. 在 VS Code 扩展视图右上角菜单选择 `Install from VSIX...`；也可在本机终端执行：
 
    ```bash
-   code --install-extension /absolute/path/to/codex-remote-bridge-<version>-<target>.vsix --force
+   code --install-extension "/absolute/path/to/codex-remote-bridge-<version>-<target>.vsix" --force
    ```
 
    Controller 必须安装到本机 UI Extension Host，不要在远端主机上单独执行安装命令。
@@ -248,7 +248,7 @@ Windows 只在 PATH 解析到同一 npm 目录中的 `codex`、`codex.cmd` 和 `
 ## 开发与验证
 
 ```bash
-npm install
+npm ci
 npm run check
 ```
 
