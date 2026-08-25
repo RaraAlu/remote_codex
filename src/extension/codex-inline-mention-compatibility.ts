@@ -295,6 +295,30 @@ async function discoverTarget(extensionPath: string): Promise<
   return candidates[0]!;
 }
 
+async function inspectUnmanagedTarget(
+  options: CodexInlineMentionCompatibilityOptions,
+): Promise<CodexInlineMentionCompatibilityResult> {
+  const discovered = await discoverTarget(options.extensionPath);
+  if (discovered.status === "patchable") {
+    return {
+      status: "disabled",
+      changed: false,
+      extensionVersion: options.extensionVersion,
+      targetPath: discovered.path,
+    };
+  }
+  return {
+    status: discovered.status === "compatible" ? "conflict" : discovered.status,
+    changed: false,
+    extensionVersion: options.extensionVersion,
+    targetPath: discovered.status === "compatible" ? discovered.path : null,
+    detail:
+      discovered.status === "compatible"
+        ? "official Codex Webview contains an unmanaged inline mention patch"
+        : discovered.detail,
+  };
+}
+
 async function restoreMetadataTarget(
   stateDirectory: string,
   metadata: PatchMetadata,
@@ -590,34 +614,63 @@ export async function inspectCodexInlineMentionCompatibility(
       };
     }
     if (!stored) {
-      const discovered = await discoverTarget(options.extensionPath);
-      if (discovered.status === "patchable") {
-        return {
-          status: "disabled",
-          changed: false,
-          extensionVersion: options.extensionVersion,
-          targetPath: discovered.path,
-        };
-      }
-      return {
-        status: discovered.status === "compatible" ? "conflict" : discovered.status,
-        changed: false,
-        extensionVersion: options.extensionVersion,
-        targetPath: discovered.status === "compatible" ? discovered.path : null,
-        detail:
-          discovered.status === "compatible"
-            ? "official Codex Webview contains an unmanaged inline mention patch"
-            : discovered.detail,
-      };
+      return await inspectUnmanagedTarget(options);
     }
     if (resolve(stored.extensionPath) !== resolve(options.extensionPath)) {
-      return {
-        status: "conflict",
-        changed: false,
-        extensionVersion: options.extensionVersion,
-        targetPath: stored.targetPath,
-        detail: "managed inline mention patch belongs to another extension installation",
-      };
+      if (!isSafeSiblingInstallation(stored.extensionPath, options.extensionPath)) {
+        return {
+          status: "conflict",
+          changed: false,
+          extensionVersion: options.extensionVersion,
+          targetPath: stored.targetPath,
+          detail: "managed inline mention patch belongs to another extension installation",
+        };
+      }
+      const backup = await readManagedBackup(options.stateDirectory, stored);
+      if (!backup) {
+        return {
+          status: "conflict",
+          changed: false,
+          extensionVersion: options.extensionVersion,
+          targetPath: stored.targetPath,
+          detail: "managed inline mention backup is missing or invalid",
+        };
+      }
+      const previous = await readFile(stored.targetPath).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return null;
+        }
+        throw error;
+      });
+      if (previous) {
+        const previousSha256 = sha256(previous);
+        if (
+          previousSha256 !== stored.originalSha256 &&
+          previousSha256 !== stored.patchedSha256
+        ) {
+          return {
+            status: "conflict",
+            changed: false,
+            extensionVersion: options.extensionVersion,
+            targetPath: stored.targetPath,
+            detail: "official Codex Webview asset changed after the managed inline mention patch",
+          };
+        }
+        if (previousSha256 === stored.originalSha256) {
+          await clearManagedState(options.stateDirectory);
+        }
+      } else {
+        await clearManagedState(options.stateDirectory);
+      }
+      const current = await inspectUnmanagedTarget(options);
+      return current.status === "disabled"
+        ? {
+            ...current,
+            detail: previous
+              ? "a newer official Codex installation is ready for compatibility patching"
+              : "removed stale compatibility state from a replaced official Codex installation",
+          }
+        : current;
     }
     const backup = await readManagedBackup(options.stateDirectory, stored);
     if (!backup) {

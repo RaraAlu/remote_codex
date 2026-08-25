@@ -15,7 +15,7 @@ const ADD_CONTEXT_FILE_HANDLER = new RegExp(
   "g",
 );
 const INSERT_MENTION_METHOD = new RegExp(
-  `insertMentionNodeInRange\\((${IDENTIFIER}),(${IDENTIFIER}),(${IDENTIFIER}),(${IDENTIFIER})(?:,(${IDENTIFIER})=[^)]*)?\\)\\{`,
+  `insertMentionNodeInRange\\((${IDENTIFIER}),(${IDENTIFIER}),(${IDENTIFIER}),(${IDENTIFIER})(?:,${IDENTIFIER}(?:=[^,)]*)?){0,4}\\)\\{`,
   "g",
 );
 const INSERT_AT_MENTION_METHOD = new RegExp(

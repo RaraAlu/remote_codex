@@ -20,6 +20,15 @@ const SOURCE = [
 const execFileAsync = promisify(execFile);
 
 describe("official Codex inline file mention patch", () => {
+  it("accepts the six-parameter composer insertion method used by newer Codex builds", () => {
+    const source = SOURCE.replace(
+      "insertMentionNodeInRange(e,t,n,r,i=!1)",
+      "insertMentionNodeInRange(e,t,n,r,i=!1,a=!1)",
+    );
+
+    expect(inspectCodexInlineMentionSource(source).status).toBe("patchable");
+  });
+
   it("routes marked add-context-file events into an inline mention at the current selection", () => {
     const inspected = inspectCodexInlineMentionSource(SOURCE);
     expect(inspected.status).toBe("patchable");

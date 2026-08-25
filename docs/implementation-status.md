@@ -529,6 +529,20 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
   两轮均为 `attached=14`、`failed=0`，审计逐项记录 `conversation_resource.stage_drop`，证明
   拖放暂存和原生 `@` 输入不再受次级根数量限制。提交后的 thread 声明、跨对话隔离、只读
   拒绝和删除清理仍保留为下一段真实模型验收，不从暂存日志推断通过。
+- `0.3.76` 候选处理 VS Code 与官方 Codex 同时升级后的拖放兼容状态迁移。此前探针看到
+  旧版本托管元数据指向已删除的官方扩展目录，或看到 Workbench / `product.json` 被新
+  VS Code 安装整体替换时，一律返回 `conflict`，导致自动引导跳过；官方
+  `openai.chatgpt@26.5810.41047` 又把 `insertMentionNodeInRange` 从五个参数扩展为六个，
+  旧能力正则因此不能识别。新实现仅在旧官方扩展与当前扩展属于同一受控兄弟安装，或
+  `product.json` 的版本和提交均可识别为另一安装、当前 Workbench 校验和自洽且代码形状
+  可补丁时清理旧状态；同版本外部改写、未知形状、备份损坏和校验和不符继续失败关闭。
+  Composer 探针允许现有能力的可选尾参数扩展，不依赖具体版本值。针对升级状态、旧目录
+  已删除、六参数方法和外部修改的 28 项定向测试通过；真实安装后的自动确认、提权、重载、
+  本地及 Remote SSH 拖放和禁用恢复仍按根 README TODO 验收。首次安装实测还发现 VS Code
+  模态确认关闭后立即请求 polkit 时，GNOME Shell 可能因前一个 modal grab 尚未释放而记录
+  `Failed to show modal dialog` 并把请求作为 `Request dismissed` 结束。候选现于每次
+  `pkexec` 前等待 500 ms，让 VS Code 对话框完成关闭；真正由用户取消的授权仍终止操作，
+  不自动重复弹窗，错误信息也不再展开完整特权命令行。
 
 活动实施项及其退出条件统一保存在根 `README.md` 最末尾的 `TODO` 中；本节只保留已完成
 的能力探针结论。

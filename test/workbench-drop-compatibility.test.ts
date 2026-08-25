@@ -23,6 +23,10 @@ const SOURCE = [
   'var Final=class extends Disposable{constructor(){super()}static{this.ID="workbench.contrib.systemWideKeybindings"}sync(){}};Final=decorate([param(0,nativeHost)],Final);register(Final.ID,Final,Lifecycle.AfterRestored);',
   'export{mainValue as main};',
 ].join("");
+const UPDATED_SOURCE = SOURCE.replace(
+  "this.element={dataset:{}}",
+  "this.element={dataset:{}},this.updated=!0",
+);
 
 const roots: string[] = [];
 const execFileAsync = promisify(execFile);
@@ -49,7 +53,11 @@ async function fixture(): Promise<{
   const targetPath = workbenchDropTargetPath(appRoot);
   const productPath = workbenchProductPath(appRoot);
   const productSource = `${JSON.stringify(
-    { checksums: { "vs/workbench/workbench.desktop.main.js": checksum(SOURCE) } },
+    {
+      version: "1.0.0",
+      commit: "commit-1",
+      checksums: { "vs/workbench/workbench.desktop.main.js": checksum(SOURCE) },
+    },
     null,
     2,
   )}\n`;
@@ -234,6 +242,47 @@ describe("managed VS Code Workbench drop compatibility", () => {
       changed: false,
     });
     expect(await readFile(current.targetPath, "utf8")).toBe(external);
+  });
+
+  it("reconciles verified VS Code upgrade assets before patching the new build", async () => {
+    const current = await fixture();
+    const options = {
+      appRoot: current.appRoot,
+      stateDirectory: current.stateDirectory,
+    };
+    await enableWorkbenchDropCompatibility(options);
+    const updatedProduct = `${JSON.stringify(
+      {
+        version: "1.1.0",
+        commit: "commit-2",
+        checksums: {
+          "vs/workbench/workbench.desktop.main.js": checksum(UPDATED_SOURCE),
+        },
+      },
+      null,
+      2,
+    )}\n`;
+    await Promise.all([
+      writeFile(current.targetPath, UPDATED_SOURCE, "utf8"),
+      writeFile(current.productPath, updatedProduct, "utf8"),
+    ]);
+
+    await expect(inspectWorkbenchDropCompatibility(options)).resolves.toMatchObject({
+      status: "disabled",
+      changed: false,
+      detail: "removed stale compatibility state after a verified VS Code upgrade",
+    });
+    expect(await readdir(current.stateDirectory)).toEqual([]);
+    await expect(enableWorkbenchDropCompatibility(options)).resolves.toMatchObject({
+      status: "patched",
+      changed: true,
+    });
+    await expect(restoreWorkbenchDropCompatibility(options)).resolves.toMatchObject({
+      status: "restored",
+      changed: true,
+    });
+    expect(await readFile(current.targetPath, "utf8")).toBe(UPDATED_SOURCE);
+    expect(await readFile(current.productPath, "utf8")).toBe(updatedProduct);
   });
 
   it("fails closed without managed state when the Workbench shape is unknown", async () => {

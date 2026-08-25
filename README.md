@@ -6,7 +6,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.75` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
+> 当前源码版本为 `0.3.76` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
 > 快照附件；官方输入区的原生 `@` 文件搜索通过当前 VS Code Remote SSH 工作区查询，
 > 不访问本机控制目录。可选兼容层不要求用户按住 `Shift`：VS Code Explorer 拖放转换为
 > 当前光标处的原生 `@` 引用；无论来自 VS Code Explorer 还是系统文件管理器，文件和
@@ -86,7 +86,9 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
   `workspace_*` 只读工具分析。扩展激活会按当前 VS Code
   与官方 Codex 资产组合自动检查兼容性；首次可安全启用时只弹出一次明确确认，确认后
   自动请求所需系统文件权限并重载窗口。Bridge 会为 Workbench、
-  `product.json` 和官方 Webview 资产保存带 SHA-256 的可恢复原件。
+  `product.json` 和官方 Webview 资产保存带 SHA-256 的可恢复原件。VS Code 或官方 Codex
+  正常升级替换旧资产后，Bridge 会以安装身份、当前产品校验和、代码能力和旧备份共同确认
+  升级边界，清理过期托管状态并对新资产重新请求一次兼容确认；同版本外部改写仍失败关闭。
 
 ## 支持边界
 
@@ -165,7 +167,8 @@ code --install-extension "dist/codex-remote-bridge-$version-win32-x64.vsix" --fo
    Linux 系统安装会出现 polkit 授权框，补丁成功后窗口自动重载。拒绝或关闭确认后不会
    对同一资产组合重复打扰，可随时从命令面板执行
    `Codex Bridge: Enable Native Codex Drop Surface` 手动重试。VS Code 或官方 Codex 扩展
-   升级后会重新探测；哈希或代码形状不匹配时 Bridge 会拒绝修改。
+   升级后会重新探测；经产品身份和当前校验和确认的正常升级会丢弃旧托管状态，再对新资产
+   请求一次确认；无法证明属于升级的哈希或代码形状变化会拒绝修改。
 2. 把 VS Code Explorer 或系统文件管理器中的文件、目录直接拖入官方 Codex 对话区域。
    所有 Bridge 捕获的拖放都在当前 Composer 光标处生成一个原生 `@` 引用，不需要按
    `Shift`，也不按拖动来源切换为附件。
@@ -340,7 +343,14 @@ Remote SSH 实机验证。完整门禁和量化指标见
   `conversation_resource.claim`，模型可读取精确文件和目录子树但不能读取相邻路径、写入或
   获取 Git 状态；另一个对话不得继承这些资源，配置与诊断仍只显示唯一远端主根，删除对话
   后出现 `conversation_resource.delete_thread`。还需执行禁用与逐字节恢复验收，
-  并在 VS Code 或官方扩展升级后重新探测和回归，不能沿用旧版本放行结果。
+  并在 VS Code 或官方扩展升级后重新探测和回归，不能沿用旧版本放行结果。2026-08-13
+  升级到 VS Code `1.133.0` 与 `openai.chatgpt@26.5810.41047` 后已复现旧托管元数据被误判
+  为冲突、官方 Composer 新增第六参数而导致统一 `@` 拖放未启用；`0.3.76` 候选已增加
+  可验证升级状态迁移和六参数能力探针。退出条件是安装该候选后只出现一次新资产确认，
+  且 VS Code 模态确认完全关闭后再显示 polkit 授权框，完成权限请求与自动重载；Bridge
+  输出不再记录 `workbench=conflict`、`inlineMention=conflict` 或因 GNOME modal grab
+  冲突导致的 `Request dismissed`，本地窗口及 Remote SSH 窗口从 Explorer 和系统文件管理器直接
+  拖入文件/目录均在当前光标生成唯一 `@` 且 turn 可读取，并完成禁用后的逐字节恢复。
 
 ### Windows x64 与 0.4.0
 

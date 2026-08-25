@@ -386,6 +386,18 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
   和目录子树；读取相邻文件、写入、Git 状态及在另一个对话复用同一 ID 均必须失败关闭。
   删除对话后应出现 `conversation_resource.delete_thread` 且计数下降。禁用拖放接收面后
   不再暂存新资源，Workbench 与 Webview 仍需完成逐字节恢复验证。
+- 待验证（2026-08-13，`0.3.76`）：VS Code `1.133.0` 与
+  `openai.chatgpt@26.5810.41047` 升级后，旧版 Workbench 和 Webview 托管元数据曾分别
+  记录 `conflict`，统一 `@` 拖放因而未加载。安装候选后应只对该新资产组合确认一次，
+  首轮自动引导已进入 Webview `patched`，但 GNOME Shell 在 VS Code 模态框刚关闭时无法
+  显示 polkit 对话框，以 `Request dismissed` 结束；Bridge 已恢复 Webview 和暂存状态，
+  系统 Workbench / `product.json` 哈希保持升级后的原值。加入 500 ms modal-grab 释放等待
+  后，需从命令面板手动重试启用，完成 polkit 和自动重载；Bridge 输出应记录两个新资产为
+  `patched` / `already-patched`，
+  不再出现 onboarding skipped conflict。随后在普通本地窗口和真实 Remote SSH 窗口分别
+  从 Explorer 与系统文件管理器拖入文件、目录，确认当前光标只生成一个原生 `@` 且 turn
+  能读取；最后执行禁用并以 SHA-256 核对 VS Code Workbench、`product.json` 和官方
+  Webview 与本轮新版本原始备份逐字节一致。
 - 在本地控制目录和本地授权根放置同名诱饵，要求模型读取、修改、搜索和执行项目命令；
   Remote SSH 任务中的本地 Core Shell/文件/Git 操作数必须为 0。
 - 覆盖已知客户端请求阻断、Core 审批阻断和专用模型工具路径；失败结果必须进入审计。

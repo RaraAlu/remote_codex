@@ -30,6 +30,7 @@ const LOCK_FILE = ".workbench-drop.lock";
 const LOCK_STALE_MS = 30_000;
 const LOCK_RETRY_MS = 100;
 const LOCK_ATTEMPTS = 50;
+const PRIVILEGE_DIALOG_SETTLE_MS = 500;
 
 interface PatchMetadata {
   schemaVersion: 1;
@@ -240,6 +241,112 @@ function patchProductChecksum(
   return Buffer.from(patched, "utf8");
 }
 
+interface ProductIdentity {
+  version: string;
+  commit: string;
+}
+
+function productIdentity(source: Buffer): ProductIdentity | null {
+  try {
+    const parsed: unknown = JSON.parse(source.toString("utf8"));
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    const { version, commit } = parsed as {
+      version?: unknown;
+      commit?: unknown;
+    };
+    return typeof version === "string" &&
+      version.length > 0 &&
+      typeof commit === "string" &&
+      commit.length > 0
+      ? { version, commit }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isSafeInstalledWorkbenchUpgrade(
+  stored: PatchMetadata,
+  originalProduct: Buffer,
+  current: Buffer,
+  currentProduct: Buffer,
+): boolean {
+  const currentSha256 = sha256(current);
+  const currentProductSha256 = sha256(currentProduct);
+  if (
+    [stored.originalSha256, stored.patchedSha256].includes(currentSha256) ||
+    [stored.productOriginalSha256, stored.productPatchedSha256].includes(
+      currentProductSha256,
+    )
+  ) {
+    return false;
+  }
+  const previousIdentity = productIdentity(originalProduct);
+  const currentIdentity = productIdentity(currentProduct);
+  if (
+    !previousIdentity ||
+    !currentIdentity ||
+    (previousIdentity.version === currentIdentity.version &&
+      previousIdentity.commit === currentIdentity.commit)
+  ) {
+    return false;
+  }
+  const inspected = inspectWorkbenchDropSource(current.toString("utf8"));
+  if (inspected.status !== "patchable") {
+    return false;
+  }
+  return Buffer.isBuffer(
+    patchProductChecksum(
+      currentProduct,
+      current,
+      Buffer.from(inspected.patchedSource, "utf8"),
+    ),
+  );
+}
+
+function inspectUnmanagedWorkbench(
+  targetPath: string,
+  productPath: string,
+  source: Buffer,
+  productSource: Buffer,
+): WorkbenchDropCompatibilityResult {
+  const inspected = inspectWorkbenchDropSource(source.toString("utf8"));
+  if (inspected.status === "compatible") {
+    return {
+      status: "conflict",
+      changed: false,
+      targetPath,
+      productPath,
+      detail: "Workbench contains a drop patch without matching Bridge restore metadata",
+    };
+  }
+  if (inspected.status === "unsupported") {
+    return {
+      status: "unsupported",
+      changed: false,
+      targetPath,
+      productPath,
+      detail: inspected.detail,
+    };
+  }
+  const productPatch = patchProductChecksum(
+    productSource,
+    source,
+    Buffer.from(inspected.patchedSource, "utf8"),
+  );
+  return Buffer.isBuffer(productPatch)
+    ? { status: "disabled", changed: false, targetPath, productPath }
+    : {
+        status: "unsupported",
+        changed: false,
+        targetPath,
+        productPath,
+        detail: productPatch.detail,
+      };
+}
+
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }
@@ -358,10 +465,28 @@ export async function replaceWorkbenchAssetWithPkexec(
   if (process.platform !== "linux") {
     throw new Error("Elevated Workbench replacement is currently available only on Linux");
   }
-  await execFileAsync("/usr/bin/pkexec", privilegedWorkbenchReplacementArguments(replacement), {
-    maxBuffer: 1024 * 1024,
-    timeout: 120_000,
-  });
+  // The VS Code modal confirmation can briefly retain GNOME's modal grab after
+  // it resolves. Let it close before polkit tries to display its own dialog.
+  await sleep(PRIVILEGE_DIALOG_SETTLE_MS);
+  try {
+    await execFileAsync(
+      "/usr/bin/pkexec",
+      privilegedWorkbenchReplacementArguments(replacement),
+      {
+        maxBuffer: 1024 * 1024,
+        timeout: 120_000,
+      },
+    );
+  } catch (error) {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    if (typeof stderr === "string" && stderr.includes("Request dismissed")) {
+      throw new Error(
+        "The system authorization request was dismissed before the privileged file update could start",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 }
 
 export function privilegedWorkbenchReplacementArguments(
@@ -454,6 +579,12 @@ async function enableLocked(
         productPath,
         detail: "managed Workbench or product backup/staged patch is missing or invalid",
       };
+    }
+    if (
+      isSafeInstalledWorkbenchUpgrade(stored, originalProduct, current, currentProduct)
+    ) {
+      await clearManagedState(options.stateDirectory);
+      return await enableLocked(options);
     }
     const desiredInspection = inspectWorkbenchDropSource(original.toString("utf8"));
     if (desiredInspection.status !== "patchable") {
@@ -567,27 +698,6 @@ async function enableLocked(
     }
     throw error;
   }
-  const inspected = inspectWorkbenchDropSource(source.toString("utf8"));
-  if (inspected.status === "compatible") {
-    return {
-      status: "conflict",
-      changed: false,
-      targetPath,
-      productPath,
-      detail: "Workbench contains a drop patch without matching Bridge restore metadata",
-    };
-  }
-  if (inspected.status === "unsupported") {
-    return {
-      status: "unsupported",
-      changed: false,
-      targetPath,
-      productPath,
-      detail: inspected.detail,
-    };
-  }
-
-  const patched = Buffer.from(inspected.patchedSource, "utf8");
   let productSource: Buffer;
   try {
     productSource = await readFile(productPath);
@@ -603,6 +713,20 @@ async function enableLocked(
     }
     throw error;
   }
+  const unmanaged = inspectUnmanagedWorkbench(
+    targetPath,
+    productPath,
+    source,
+    productSource,
+  );
+  if (unmanaged.status !== "disabled") {
+    return unmanaged;
+  }
+  const inspected = inspectWorkbenchDropSource(source.toString("utf8"));
+  if (inspected.status !== "patchable") {
+    throw new Error("Workbench inspection changed while preparing the drop patch");
+  }
+  const patched = Buffer.from(inspected.patchedSource, "utf8");
   const patchedProduct = patchProductChecksum(productSource, source, patched);
   if (!Buffer.isBuffer(patchedProduct)) {
     return {
@@ -758,10 +882,12 @@ async function restoreLocked(
       detail: "managed Workbench or product backup is missing or invalid",
     };
   }
-  const [currentSha256, currentProductSha256] = await Promise.all([
-    readFile(targetPath).then(sha256),
-    readFile(productPath).then(sha256),
+  const [current, currentProduct] = await Promise.all([
+    readFile(targetPath),
+    readFile(productPath),
   ]);
+  const currentSha256 = sha256(current);
+  const currentProductSha256 = sha256(currentProduct);
   if (
     currentSha256 === stored.originalSha256 &&
     currentProductSha256 === stored.productOriginalSha256
@@ -776,6 +902,23 @@ async function restoreLocked(
       patchedSha256: stored.patchedSha256,
       productOriginalSha256: stored.productOriginalSha256,
       productPatchedSha256: stored.productPatchedSha256,
+    };
+  }
+  if (
+    isSafeInstalledWorkbenchUpgrade(
+      stored,
+      originalProduct,
+      current,
+      currentProduct,
+    )
+  ) {
+    await clearManagedState(options.stateDirectory);
+    return {
+      status: "already-restored",
+      changed: false,
+      targetPath,
+      productPath,
+      detail: "a newer VS Code installation already replaced the managed Workbench assets",
     };
   }
   if (
@@ -864,41 +1007,9 @@ export async function inspectWorkbenchDropCompatibility(
       }
       throw error;
     }
+    const productSource = await readFile(productPath);
     if (!stored) {
-      const inspected = inspectWorkbenchDropSource(source.toString("utf8"));
-      if (inspected.status === "compatible") {
-        return {
-          status: "conflict",
-          changed: false,
-          targetPath,
-          productPath,
-          detail: "Workbench contains a drop patch without matching Bridge restore metadata",
-        };
-      }
-      if (inspected.status === "unsupported") {
-        return {
-          status: "unsupported",
-          changed: false,
-          targetPath,
-          productPath,
-          detail: inspected.detail,
-        };
-      }
-      const productSource = await readFile(productPath);
-      const productPatch = patchProductChecksum(
-        productSource,
-        source,
-        Buffer.from(inspected.patchedSource, "utf8"),
-      );
-      return Buffer.isBuffer(productPatch)
-        ? { status: "disabled", changed: false, targetPath, productPath }
-        : {
-            status: "unsupported",
-            changed: false,
-            targetPath,
-            productPath,
-            detail: productPatch.detail,
-          };
+      return inspectUnmanagedWorkbench(targetPath, productPath, source, productSource);
     }
     if (resolve(stored.appRoot) !== resolve(options.appRoot)) {
       return {
@@ -909,10 +1020,8 @@ export async function inspectWorkbenchDropCompatibility(
         detail: "managed Workbench drop state belongs to another VS Code installation",
       };
     }
-    const [currentSha256, currentProductSha256] = await Promise.all([
-      Promise.resolve(sha256(source)),
-      readFile(productPath).then(sha256),
-    ]);
+    const currentSha256 = sha256(source);
+    const currentProductSha256 = sha256(productSource);
     const common = {
       changed: false,
       targetPath,
@@ -936,6 +1045,30 @@ export async function inspectWorkbenchDropCompatibility(
         status: "already-restored",
         ...common,
         detail: "managed state is available to reapply the patch",
+      };
+    }
+    const originalProduct = await readManagedFile(
+      productBackupPath(options.stateDirectory),
+      stored.productOriginalSha256,
+    );
+    if (
+      originalProduct &&
+      isSafeInstalledWorkbenchUpgrade(
+        stored,
+        originalProduct,
+        source,
+        productSource,
+      )
+    ) {
+      await clearManagedState(options.stateDirectory);
+      return {
+        ...inspectUnmanagedWorkbench(
+          targetPath,
+          productPath,
+          source,
+          productSource,
+        ),
+        detail: "removed stale compatibility state after a verified VS Code upgrade",
       };
     }
     return {
