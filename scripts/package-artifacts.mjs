@@ -398,6 +398,28 @@ async function loadStage(directory, target, versions) {
   return { controller, manifest, paths };
 }
 
+async function findManifestDirectory(directory) {
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const candidate = resolve(directory, entry.name);
+    try {
+      const manifest = JSON.parse(
+        await readFile(resolve(candidate, "manifest.json"), "utf8"),
+      );
+      if (!manifest || typeof manifest.target !== "string") {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    return candidate;
+  }
+  return null;
+}
+
 async function collectStages(stageArguments) {
   const versions = await readVersions();
   const defaults = CONTROLLER_TARGETS.map((target) =>
@@ -406,19 +428,29 @@ async function collectStages(stageArguments) {
       `controller-${versions.controllerVersion}-${target}`,
     ),
   );
-  const directories = stageArguments.length === 0 ? defaults : stageArguments.map(resolve);
+  const directories =
+    stageArguments.length === 0 ? defaults : stageArguments.map((stage) => resolve(stage));
   if (directories.length !== CONTROLLER_TARGETS.length) {
     throw new Error("Collect requires exactly one Linux and one Windows stage directory");
   }
   const directoriesByTarget = new Map();
   for (const directory of directories) {
+    let stageDirectory = directory;
     let manifest;
     try {
       manifest = JSON.parse(
-        await readFile(resolve(directory, "manifest.json"), "utf8"),
+        await readFile(resolve(stageDirectory, "manifest.json"), "utf8"),
       );
     } catch {
-      throw new Error(`Native artifact stage is missing or invalid: ${directory}`);
+      // The stage may be nested under a single artifact-upload directory.
+      const nested = await findManifestDirectory(directory);
+      if (!nested) {
+        throw new Error(`Native artifact stage is missing or invalid: ${directory}`);
+      }
+      stageDirectory = nested;
+      manifest = JSON.parse(
+        await readFile(resolve(stageDirectory, "manifest.json"), "utf8"),
+      );
     }
     if (
       !CONTROLLER_TARGETS.includes(manifest.target) ||
@@ -426,7 +458,7 @@ async function collectStages(stageArguments) {
     ) {
       throw new Error("Collect requires one distinct Linux and Windows stage");
     }
-    directoriesByTarget.set(manifest.target, directory);
+    directoriesByTarget.set(manifest.target, stageDirectory);
   }
   const loaded = await Promise.all(
     CONTROLLER_TARGETS.map((target) =>

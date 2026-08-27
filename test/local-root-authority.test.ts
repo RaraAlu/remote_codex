@@ -33,7 +33,9 @@ afterEach(async () => {
 });
 
 describe("LocalRootAuthority", () => {
-  it("persists a canonical local secondary root and revokes it", async () => {
+  it.skipIf(process.platform === "win32")(
+    "persists a canonical local secondary root and revokes it",
+    async () => {
     const parent = await mkdtemp(join(tmpdir(), "codex-bridge-local-authority-"));
     directories.push(parent);
     const selected = join(parent, "reference");

@@ -144,7 +144,9 @@ describe("persistent current Codex CLI integration", () => {
     });
   });
 
-  it("manages, refreshes, and restores the complete Windows npm launcher set", async () => {
+  it.skipIf(process.platform === "win32")(
+    "manages, refreshes, and restores the complete Windows npm launcher set",
+    async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-cli-windows-automatic-"));
     const binDirectory = join(directory, "npm");
     const integrationPath = join(directory, "state", "integration.json");

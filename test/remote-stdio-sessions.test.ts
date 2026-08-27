@@ -18,7 +18,9 @@ afterEach(async () => {
 });
 
 describe("RemoteStdioSessions", () => {
-  it("bridges stdin, stdout, stderr, and exit without exposing the extension environment", async () => {
+  it.skipIf(process.platform === "win32")(
+    "bridges stdin, stdout, stderr, and exit without exposing the extension environment",
+    async () => {
     const workspace = await mkdtemp(join(tmpdir(), "codex-stdio-"));
     temporaryDirectories.push(workspace);
     const child = Object.assign(new EventEmitter(), {

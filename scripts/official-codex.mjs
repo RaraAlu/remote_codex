@@ -39,6 +39,63 @@ async function readOfficialExtension(extensionPath) {
   }
 }
 
+async function codexNpmPackageExecutable() {
+  const npmPackage = process.env.CODEX_BRIDGE_CODEX_NPM_PACKAGE;
+  if (!npmPackage) {
+    return null;
+  }
+  const platformVendorDirectory =
+    process.platform === "linux"
+      ? "x86_64-unknown-linux-musl"
+      : process.platform === "win32"
+        ? "x86_64-pc-windows-msvc"
+        : null;
+  const executableName = process.platform === "win32" ? "codex.exe" : "codex";
+  if (!platformVendorDirectory) {
+    throw new Error(
+      `Unsupported official Codex npm package platform: ${process.platform}`,
+    );
+  }
+  // The @openai/codex meta package pulls the native binary in through a
+  // platform-specific optional dependency (e.g. @openai/codex-linux-x64),
+  // which npm lays out under its own node_modules directory. Probe both the
+  // base package's vendor tree and the platform package's vendor tree.
+  const platformSuffix =
+    process.platform === "linux"
+      ? "linux-x64"
+      : process.platform === "win32"
+        ? "win32-x64"
+        : null;
+  const candidates = [
+    resolve(process.cwd(), "node_modules", npmPackage, "vendor"),
+  ];
+  if (
+    platformSuffix &&
+    !npmPackage.endsWith(`-${platformSuffix}`)
+  ) {
+    candidates.push(
+      resolve(
+        process.cwd(),
+        "node_modules",
+        `${npmPackage}-${platformSuffix}`,
+        "vendor",
+      ),
+    );
+  }
+  for (const root of candidates) {
+    const executable = resolve(root, platformVendorDirectory, "bin", executableName);
+    try {
+      await access(executable);
+    } catch {
+      continue;
+    }
+    return { executable, npmPackage };
+  }
+  // The named npm package is not installed for this platform (e.g. a
+  // Linux-only package on a Windows host). Fall through to other sources.
+  return null;
+}
+
 export async function findOfficialCodexRuntime() {
   const developmentExecutable =
     process.env.CODEX_BRIDGE_DEVELOPMENT_CODEX_EXECUTABLE;
@@ -69,6 +126,15 @@ export async function findOfficialCodexRuntime() {
       );
     }
     return runtime;
+  }
+
+  const npmPackageExecutable = await codexNpmPackageExecutable();
+  if (npmPackageExecutable) {
+    return {
+      executable: npmPackageExecutable.executable,
+      extensionPath: null,
+      extensionVersion: npmPackageExecutable.npmPackage,
+    };
   }
 
   const roots = [

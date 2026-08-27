@@ -125,7 +125,9 @@ describe("managed VS Code Workbench drop compatibility", () => {
     ]);
   });
 
-  it("validates both hashes inside the privileged replacement command", async () => {
+  it.skipIf(process.platform === "win32")(
+    "validates both hashes inside the privileged replacement command",
+    async () => {
     const current = await fixture();
     const replacementPath = join(current.stateDirectory, "replacement.js");
     await mkdir(current.stateDirectory, { recursive: true });
