@@ -1,5 +1,6 @@
 import { posix, win32 } from "node:path";
 import { BridgeError } from "./errors.js";
+import { FULL_LOCAL_ACCESS_ROOT_ID } from "./full-local-access.js";
 import type { BridgeConfig, WorkspaceRootConfig } from "./types.js";
 
 const DEFAULTS = {
@@ -45,13 +46,17 @@ function normalizedRemoteRoot(value: unknown, name: string): string {
   return path;
 }
 
-function normalizedLocalRoot(value: unknown, name: string): string {
+function normalizedLocalRoot(
+  value: unknown,
+  name: string,
+  allowFilesystemRoot = false,
+): string {
   const path = requiredString(value, name);
   const pathApi = /^[A-Za-z]:[\\/]|^\\\\/.test(path) ? win32 : posix;
   if (
     !pathApi.isAbsolute(path) ||
     pathApi.normalize(path) !== path ||
-    pathApi.parse(path).root === path
+    (!allowFilesystemRoot && pathApi.parse(path).root === path)
   ) {
     throw new BridgeError(
       "INVALID_CONFIG",
@@ -103,7 +108,11 @@ function parseWorkspaceRoot(value: unknown, index: number): WorkspaceRootConfig 
   const path =
     input.target === "remote"
       ? normalizedRemoteRoot(input.path, `${name}.path`)
-      : normalizedLocalRoot(input.path, `${name}.path`);
+      : normalizedLocalRoot(
+          input.path,
+          `${name}.path`,
+          id === FULL_LOCAL_ACCESS_ROOT_ID && input.role === "secondary",
+        );
   return {
     id,
     target: input.target,
@@ -193,8 +202,12 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
   const sourceVersion = input.version === 2 ? 2 : 1;
   const { roots, workspaceRoot } = parseWorkspaceRoots(input, sourceVersion);
 
-  if (input.localExecution !== undefined && input.localExecution !== "deny") {
-    throw new BridgeError("INVALID_CONFIG", "localExecution is fixed to deny");
+  if (
+    input.localExecution !== undefined &&
+    input.localExecution !== "deny" &&
+    input.localExecution !== "allow"
+  ) {
+    throw new BridgeError("INVALID_CONFIG", "localExecution must be allow");
   }
   if (
     input.connectionMode !== undefined &&
@@ -305,7 +318,7 @@ export function parseBridgeConfig(value: unknown): BridgeConfig {
     roots,
     workspaceRoot,
     connectionMode,
-    localExecution: "deny",
+    localExecution: "allow",
     remoteHelper: connectionMode === "vscode-remote" ? "vscode-extension" : "none",
     ...(sshUser ? { sshUser } : {}),
     ...(sshPort ? { sshPort } : {}),

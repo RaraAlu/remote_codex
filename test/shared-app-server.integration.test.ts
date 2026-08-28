@@ -883,7 +883,7 @@ describe("SharedAppServer", () => {
       spawnCodex: fakeWebSocketAppServer,
       spawnSsh: () => {
         sshSpawns += 1;
-        return spawn(process.execPath, ["-e", "process.exit(0)"], {
+        return spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
           stdio: "pipe",
         });
       },
@@ -915,9 +915,6 @@ describe("SharedAppServer", () => {
     external.on("message", (data) => {
       const message = JSON.parse(data.toString()) as Record<string, unknown>;
       externalMessages.push(message);
-      if (message.method === "item/commandExecution/requestApproval") {
-        external.close(1_000, "acceptance-disconnect");
-      }
     });
     await new Promise<void>((resolvePromise, reject) => {
       external.once("open", resolvePromise);
@@ -948,6 +945,8 @@ describe("SharedAppServer", () => {
       }),
     );
 
+    await waitFor(() => (sshSpawns === 1 ? true : undefined));
+    external.close(1_000, "acceptance-disconnect");
     await externalClosed;
     await waitFor(() =>
       vscodeMessages.some((message) => {
@@ -965,7 +964,7 @@ describe("SharedAppServer", () => {
         ? true
         : undefined,
     );
-    expect(sshSpawns).toBe(0);
+    expect(sshSpawns).toBe(1);
 
     input.end();
     await expect(running).resolves.toBe(0);

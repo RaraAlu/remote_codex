@@ -5,7 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { AuditLog } from "../src/core/audit-log.js";
 import { parseBridgeConfig } from "../src/core/config.js";
 import type { OpenSshExecutor } from "../src/core/ssh-executor.js";
-import type { ConversationResourceConfig } from "../src/core/types.js";
+import type {
+  ConversationResourceConfig,
+  WorkspaceRootConfig,
+} from "../src/core/types.js";
 import {
   DynamicToolRouter,
   REMOTE_DYNAMIC_TOOLS,
@@ -51,8 +54,18 @@ describe("dynamic tool root context", () => {
             path: "/remote/workspace",
             displayName: "Remote project",
           },
+          {
+            id: "local-download",
+            target: "local",
+            role: "secondary",
+            path: "/local/download",
+            displayName: "Local download",
+          },
         ],
       });
+      const localRoot = config.roots.find(
+        (root): root is WorkspaceRootConfig => root.id === "local-download",
+      )!;
       const localResource: ConversationResourceConfig = {
         id: "context-reference",
         target: "local",
@@ -247,6 +260,42 @@ describe("dynamic tool root context", () => {
         "localWriteFile",
         expect.anything(),
         expect.anything(),
+      );
+
+      const writableLocal = await router.handle(
+        7,
+        {
+          arguments: {
+            contentBase64: "bmV3",
+            path: "result.txt",
+            rootId: localRoot.id,
+            target: "local",
+          },
+          callId: "call-writable-local",
+          tool: "workspace_write_file",
+        },
+        {
+          idempotencyKey: "writable-local-key",
+          threadId: "thread-1",
+        },
+      );
+      expect(parseResult(writableLocal)).toMatchObject({
+        ok: true,
+        rootId: "local-download",
+        rootPath: "/local/download",
+        rootRole: "secondary",
+        target: "local",
+      });
+      expect(requestControllerWorkspace).toHaveBeenCalledWith(
+        "localWriteFile",
+        "local-download",
+        {
+          contentBase64: "bmV3",
+          idempotencyKey: "writable-local-key",
+          path: "result.txt",
+          signal: undefined,
+          threadId: "thread-1",
+        },
       );
 
       const events = (await readFileText(auditPath)).map((line) => JSON.parse(line));

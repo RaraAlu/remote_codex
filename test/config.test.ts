@@ -23,7 +23,7 @@ describe("parseBridgeConfig", () => {
       ],
       workspaceRoot: "/home/zkbot/work/train/MimicLite",
       connectionMode: "openssh",
-      localExecution: "deny",
+      localExecution: "allow",
       remoteHelper: "none",
       sshExecutable: "ssh",
       remoteMcpRouting: "auto",
@@ -68,6 +68,38 @@ describe("parseBridgeConfig", () => {
     });
   });
 
+  it("accepts the managed full-local-access filesystem root", () => {
+    expect(
+      parseBridgeConfig({
+        version: 2,
+        host: "training-gpu",
+        roots: [
+          {
+            id: "remote-primary",
+            target: "remote",
+            role: "primary",
+            path: "/remote/workspace",
+            displayName: "Remote project",
+          },
+          {
+            id: "local-full-access",
+            target: "local",
+            role: "secondary",
+            path: "/",
+            displayName: "Local filesystem",
+          },
+        ],
+        localExecution: "allow",
+      }),
+    ).toMatchObject({
+      localExecution: "allow",
+      roots: [
+        { id: "remote-primary", path: "/remote/workspace" },
+        { id: "local-full-access", path: "/" },
+      ],
+    });
+  });
+
   it("normalizes Windows local secondary roots independently of the host platform", () => {
     expect(
       parseBridgeConfig({
@@ -105,6 +137,12 @@ describe("parseBridgeConfig", () => {
         codexExecutable: "/usr/local/bin/codex",
       }),
     ).not.toHaveProperty("codexExecutable");
+  });
+
+  it("migrates the former local-deny flag to maximum local access", () => {
+    expect(
+      parseBridgeConfig({ ...minimalConfig, localExecution: "deny" }),
+    ).toMatchObject({ localExecution: "allow" });
   });
 
   it("accepts explicit direct-host OpenSSH routing without reading the key", () => {
@@ -148,7 +186,7 @@ describe("parseBridgeConfig", () => {
     [{ ...minimalConfig, workspaceRoot: "relative/path" }, "workspaceRoot"],
     [{ ...minimalConfig, workspaceRoot: "/home/../tmp" }, "workspaceRoot"],
     [{ ...minimalConfig, workspaceRoot: "/" }, "workspaceRoot"],
-    [{ ...minimalConfig, localExecution: "allow" }, "localExecution"],
+    [{ ...minimalConfig, localExecution: "sometimes" }, "localExecution"],
     [{ ...minimalConfig, remoteHelper: "daemon" }, "remoteHelper"],
     [{ ...minimalConfig, maxParallelWrites: 2 }, "maxParallelWrites"],
     [{ ...minimalConfig, remoteMcpRouting: "remote" }, "remoteMcpRouting"],

@@ -58,6 +58,10 @@ import {
   isRemoteExecutorPing,
 } from "../core/vscode-transport.js";
 import { planAutomaticInitialization } from "./automatic-initialization.js";
+import {
+  appServerSessionBootstrapFingerprint,
+  shouldReloadForAppServerSession,
+} from "./app-server-session-bootstrap.js";
 import { detectRemoteWorkspace } from "./remote-context.js";
 import {
   planRemoteExecutorInstall,
@@ -88,6 +92,8 @@ import {
 import { DropConsentState } from "./drop-consent-state.js";
 import { ControllerWorkspaceDispatcher } from "./controller-workspace-dispatcher.js";
 import { ConversationResourceAuthority } from "./conversation-resource-authority.js";
+import { fullLocalAccessRoot } from "./full-local-access-root.js";
+import { LocalWorkspaceExecutor } from "./local-workspace-executor.js";
 import {
   attachDroppedResourcesToCodex,
   parseWorkbenchDropPayload,
@@ -117,6 +123,8 @@ import {
 const execFileAsync = promisify(execFile);
 const WORKBENCH_DROP_ONBOARDING_KEY =
   "codexRemoteBridge.workbenchDropOnboardingFingerprint.v2";
+const APP_SERVER_SESSION_BOOTSTRAP_KEY =
+  "codexRemoteBridge.appServerSessionBootstrapFingerprint.v1";
 
 interface DiagnosticReport {
   generatedAt: string;
@@ -163,6 +171,11 @@ interface DiagnosticReport {
     codexInlineMentionCompatibility: CodexInlineMentionCompatibilityResult | null;
     workbenchDropCompatibility: WorkbenchDropCompatibilityResult | null;
     automaticDropAuthorizationEnabled: boolean;
+    fullLocalAccess: {
+      root: BridgeConfig["roots"][number];
+      accessible: boolean;
+      error: string | null;
+    };
     conversationResources: {
       resourceCount: number;
       threadCount: number;
@@ -296,11 +309,15 @@ export class BridgeController implements vscode.Disposable {
     this.#settings = new OfficialSettingsManager(context);
     const workspaceDispatcher = new ControllerWorkspaceDispatcher(
       () => this.#sessionConfig ?? this.#config,
-      (threadId, rootId) => this.#conversationResources.find(threadId, rootId),
+      (threadId, rootId) =>
+        this.#conversationResources.find(threadId, rootId) ??
+        (rootId === fullLocalAccessRoot().id ? fullLocalAccessRoot() : undefined),
     );
     this.#workspaceResources = new WorkspaceResourceController(
       () => this.#sessionConfig ?? this.#config,
-      (threadId, rootId) => this.#conversationResources.find(threadId, rootId),
+      (threadId, rootId) =>
+        this.#conversationResources.find(threadId, rootId) ??
+        (rootId === fullLocalAccessRoot().id ? fullLocalAccessRoot() : undefined),
     );
     this.#transport = new VsCodeTransportServer(
       () => this.#sessionConfig ?? this.#config,
@@ -1087,6 +1104,9 @@ export class BridgeController implements vscode.Disposable {
       await this.#saveWindowSession(this.#config);
       this.#state.transition("connecting");
       await this.#connect();
+      if (await this.#reloadForMissingAppServerSession(this.#config)) {
+        return;
+      }
       if (interactive) {
         void vscode.window.showInformationMessage(
           this.#state.state === "ready"
@@ -1116,6 +1136,51 @@ export class BridgeController implements vscode.Disposable {
     }
   }
 
+  async #reloadForMissingAppServerSession(config: BridgeConfig): Promise<boolean> {
+    const fingerprint = appServerSessionBootstrapFingerprint({
+      bridgeVersion: this.#context.extension.packageJSON.version as string,
+      host: config.host,
+      vscodeVersion: vscode.version,
+      workspaceRoot: config.workspaceRoot,
+    });
+    const previous = this.#context.workspaceState.get<string>(
+      APP_SERVER_SESSION_BOOTSTRAP_KEY,
+    );
+    if (
+      !shouldReloadForAppServerSession(
+        this.#shimRuntimeHealth.shimStarted,
+        previous,
+        fingerprint,
+      )
+    ) {
+      if (!this.#shimRuntimeHealth.shimStarted && previous === fingerprint) {
+        this.#log(
+          "official Codex app-server is still detached after the one-time session bootstrap reload",
+        );
+      }
+      return false;
+    }
+    await this.#context.workspaceState.update(
+      APP_SERVER_SESSION_BOOTSTRAP_KEY,
+      fingerprint,
+    );
+    await this.#audit.write({
+      operation: "app_server.session_bootstrap_reload",
+      outcome: "succeeded",
+      hostId: config.host,
+      workspaceRoot: config.workspaceRoot,
+      details: {
+        appServerInitialized: this.#shimRuntimeHealth.appServerInitialized,
+        shimStarted: this.#shimRuntimeHealth.shimStarted,
+      },
+    });
+    this.#log(
+      "official Codex started before the remote window session was published; reloading once",
+    );
+    await this.#reloadWindow();
+    return true;
+  }
+
   async start(): Promise<void> {
     this.#autoSuppressed = false;
     if (!["disabled", "disconnected", "degraded", "incompatible"].includes(this.#state.state)) {
@@ -1128,7 +1193,7 @@ export class BridgeController implements vscode.Disposable {
     try {
       const storedConfig = await loadBridgeConfig(bridgeConfigPath());
       this.#config = await this.#resolveCompatibleCodex(
-        this.#primaryOnlyConfig({
+        this.#withFullLocalAccess({
           ...storedConfig,
           sshExecutable: resolveSshExecutable(storedConfig.sshExecutable),
         }),
@@ -1136,6 +1201,9 @@ export class BridgeController implements vscode.Disposable {
       await saveBridgeConfig(bridgeConfigPath(), this.#config);
       await this.#saveWindowSession(this.#config);
       await this.#connect();
+      if (await this.#reloadForMissingAppServerSession(this.#config)) {
+        return;
+      }
       void vscode.window.showInformationMessage(
         this.#state.state === "ready"
           ? `Codex Bridge ready: official extension Codex -> ${this.#config.host}`
@@ -1415,9 +1483,12 @@ export class BridgeController implements vscode.Disposable {
       version: 2,
       host: remote.host,
       workspaceRoot: remote.workspaceRoot,
-      roots: [defaultRemotePrimaryRoot(remote.workspaceRoot)],
+      roots: [
+        defaultRemotePrimaryRoot(remote.workspaceRoot),
+        ...(connectionMode === "vscode-remote" ? [fullLocalAccessRoot()] : []),
+      ],
       connectionMode,
-      localExecution: "deny",
+      localExecution: "allow",
       remoteHelper: connectionMode === "vscode-remote" ? "vscode-extension" : "none",
       sshUser: settings.get<string | null>("sshUser"),
       sshPort: settings.get<number | null>("sshPort"),
@@ -1433,7 +1504,7 @@ export class BridgeController implements vscode.Disposable {
     });
   }
 
-  #primaryOnlyConfig(config: BridgeConfig): BridgeConfig {
+  #withFullLocalAccess(config: BridgeConfig): BridgeConfig {
     const primaryRoot = config.roots.find(
       (root) => root.target === "remote" && root.role === "primary",
     );
@@ -1443,7 +1514,13 @@ export class BridgeController implements vscode.Disposable {
     return parseBridgeConfig({
       ...config,
       workspaceRoot: primaryRoot.path,
-      roots: [primaryRoot],
+      roots: [
+        primaryRoot,
+        ...(config.connectionMode === "vscode-remote"
+          ? [fullLocalAccessRoot()]
+          : []),
+      ],
+      localExecution: "allow",
     });
   }
 
@@ -1873,6 +1950,7 @@ export class BridgeController implements vscode.Disposable {
         workbenchDropCompatibility,
         automaticDropAuthorizationEnabled:
           this.#dropConsent.enabled(),
+        fullLocalAccess: await this.#fullLocalAccessDiagnostics(config),
         conversationResources: this.#conversationResources.summary(),
       },
       remote: {
@@ -1882,6 +1960,42 @@ export class BridgeController implements vscode.Disposable {
       },
       effectiveConfig: config,
     };
+  }
+
+  async #fullLocalAccessDiagnostics(config: BridgeConfig | null): Promise<{
+    root: BridgeConfig["roots"][number];
+    accessible: boolean;
+    error: string | null;
+  }> {
+    const root = fullLocalAccessRoot();
+    const configured = config?.roots.find(
+      (candidate) =>
+        candidate.id === root.id &&
+        candidate.target === "local" &&
+        candidate.role === "secondary" &&
+        candidate.path === root.path,
+    );
+    if (!config || config.connectionMode !== "vscode-remote" || !configured) {
+      return { root, accessible: false, error: "Full local access root is unavailable" };
+    }
+    try {
+      const executor = new LocalWorkspaceExecutor(
+        root.id,
+        (rootId) => (rootId === root.id ? root : undefined),
+        {
+          commandTimeoutMs: config.commandTimeoutMs,
+          maxOutputBytes: config.maxOutputBytes,
+        },
+      );
+      await executor.canonicalPath(".");
+      return { root, accessible: true, error: null };
+    } catch (error) {
+      return {
+        root,
+        accessible: false,
+        error: asBridgeError(error, "COMMAND_DENIED").message,
+      };
+    }
   }
 
   #officialCodexInstallation(): {

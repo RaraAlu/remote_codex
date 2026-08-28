@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseBridgeConfig } from "../src/core/config.js";
-import type { ConversationResourceConfig } from "../src/core/types.js";
+import type {
+  ConversationResourceConfig,
+  WorkspaceRootConfig,
+} from "../src/core/types.js";
 import type {
   ControllerWorkspaceOperation,
   ControllerWorkspaceRequest,
@@ -21,6 +24,97 @@ afterEach(async () => {
 });
 
 describe("ControllerWorkspaceDispatcher", () => {
+  it("allows bounded writes only inside an explicitly configured writable local root", async () => {
+    const rootPath = await mkdtemp(join(tmpdir(), "codex-writable-local-workspace-"));
+    directories.push(rootPath);
+    const localRoot: WorkspaceRootConfig = {
+      id: "local-download",
+      target: "local",
+      role: "secondary",
+      path: rootPath,
+      displayName: "download",
+    };
+    const config = parseBridgeConfig({
+      version: 2,
+      host: "remote-host",
+      roots: [
+        {
+          id: "remote-primary",
+          target: "remote",
+          role: "primary",
+          path: "/remote/workspace",
+          displayName: "remote",
+        },
+        localRoot,
+      ],
+      connectionMode: "vscode-remote",
+      remoteHelper: "vscode-extension",
+    });
+    let authorized = true;
+    const dispatcher = new ControllerWorkspaceDispatcher(
+      () => config,
+      (_threadId, rootId) =>
+        authorized && rootId === localRoot.id ? localRoot : undefined,
+    );
+    const request = (
+      operation: ControllerWorkspaceOperation,
+      params: Record<string, unknown>,
+    ): ControllerWorkspaceRequest => ({
+      hostId: config.host,
+      id: `${operation}-request`,
+      operation,
+      params: { ...params, rootId: localRoot.id, threadId: "thread-1" },
+      policy: {
+        commandTimeoutMs: config.commandTimeoutMs,
+        maxOutputBytes: config.maxOutputBytes,
+      },
+      workspaceRoot: config.workspaceRoot,
+    });
+
+    await expect(
+      dispatcher.execute(
+        request("localWriteFile", {
+          contentBase64: Buffer.from("downloaded\n").toString("base64"),
+          idempotencyKey: "download-write-1",
+          path: "downloads/result.txt",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_ROOT" });
+    await dispatcher.execute(
+      request("localCreateDirectory", {
+        idempotencyKey: "download-directory-1",
+        path: "downloads",
+      }),
+    );
+    await expect(
+      dispatcher.execute(
+        request("localWriteFile", {
+          contentBase64: Buffer.from("downloaded\n").toString("base64"),
+          idempotencyKey: "download-write-2",
+          path: "downloads/result.txt",
+        }),
+      ),
+    ).resolves.toMatchObject({ operation: "write", bytesWritten: 11 });
+    await expect(
+      dispatcher.execute(
+        request("localReadFile", { path: "downloads/result.txt" }),
+      ),
+    ).resolves.toMatchObject({
+      canonicalPath: join(rootPath, "downloads", "result.txt"),
+      size: 11,
+    });
+    await expect(
+      dispatcher.execute(request("localReadFile", { path: "../outside.txt" })),
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_ROOT" });
+
+    authorized = false;
+    await expect(
+      dispatcher.execute(
+        request("localReadFile", { path: "downloads/result.txt" }),
+      ),
+    ).rejects.toMatchObject({ code: "COMMAND_DENIED" });
+  });
+
   it("keeps a dropped directory read-only and scoped to its conversation", async () => {
     const rootPath = await mkdtemp(join(tmpdir(), "codex-conversation-workspace-"));
     directories.push(rootPath);

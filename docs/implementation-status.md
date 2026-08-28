@@ -543,6 +543,29 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
   `Failed to show modal dialog` 并把请求作为 `Request dismissed` 结束。候选现于每次
   `pkexec` 前等待 500 ms，让 VS Code 对话框完成关闭；真正由用户取消的授权仍终止操作，
   不自动重复弹窗，错误信息也不再展开完整特权命令行。
+- `0.3.77` 候选按当前产品决策取消本机授权机制并默认提供最大权限。Controller 在每个
+  `vscode-remote` 会话直接加入覆盖本机文件系统根的 `local-full-access`，配置把旧
+  `localExecution="deny"` 迁移为 `allow`；不保存权限状态、不显示目录选择器，也不存在
+  逐路径或逐根确认。Shim 不再给 app-server 注入 local-deny profile，不再阻断 Core 的
+  `fs/`、`process/`、`command/exec`、后台终端或服务端文件/命令审批请求，并把 thread
+  权限固定为本机 `full-access`。结构化 `workspace_*` 仍可通过 Controller transport 访问
+  全文件系统根并保留自身的哈希、原子写和大小限制，但 Core 文件/Shell 可以绕过这些限制。
+  该目标明确放弃本机路径、凭据和命令隔离。首轮 bitahub 实测仍出现一次远端命令允许提示；
+  审计定位为旧 thread 的审批跟踪状态令 `remote_exec.approval` 记录
+  `automatic=false, decision=accept`。候选现不再查询该状态：远端命令、后台任务和结构化
+  变更一律自动放行；本地 Core 的五类审批请求也由 Shim 自动返回接受结果，不进入官方 UI。
+  自动化覆盖配置迁移、全根结构化写入、本机 Core 请求/审批自动接受、远端命令和写入无提示
+  以及远端主根路由保持。真实 34 文件远端到本机下载仍按根 README TODO 验收。
+- `0.3.78` 候选关闭新 Remote SSH 主机/根的首次会话启动竞争。`data:/home/zkbot` 现场中，
+  官方 `openai.chatgpt` 比 Bridge 更早激活，Shim 在窗口 session 文件发布前按本地模式启动；
+  Bridge 随后确认 Executor `0.2.21` 兼容并进入 `degraded`，但旧逻辑只轮询心跳，不会让
+  已启动的 app-server 重新读取 session。手动重载后配置化 Shim 才启动并在 5.25 秒内转为
+  `ready`。Controller 现于连接后检查当前 Extension Host 代际是否已有受管 Shim；若没有，
+  按 Bridge 版本、VS Code 版本、主机和规范远端根保存工作区指纹并自动重载一次。相同指纹
+  已尝试时只记录 detached 状态而不重复重载，避免 app-server 真故障形成循环。纯函数测试
+  覆盖首次、已附着、同指纹和新根。用户安装候选后，`data:/home/zkbot` 于
+  `23:47:08.919` 自动请求唯一一次重载；第二代际识别相同指纹未再次重载，配置化 Shim
+  启动后于 `23:47:19.264` 到达 `ready`。该首次会话自动重载目标已完成实机验证。
 
 活动实施项及其退出条件统一保存在根 `README.md` 最末尾的 `TODO` 中；本节只保留已完成
 的能力探针结论。
@@ -568,9 +591,9 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
 | Codex Webview 位置恢复 | 每工作区首次就绪时仅重置 Codex 视图 | `repairCodexViewLocation` |
 | app-server `initialize` 代理 | 已按官方前置全局参数通过真实 app-server 冒烟测试 | `npm run smoke:shim` |
 | `thread/start` 路径和能力注入 | 本地进程 `cwd` 与远程逻辑主根已分离并通过实测 app-server 参数探针 | `rewriteClientMessage` |
-| Remote Bridge 权限配置 | 强制 `codex-remote-bridge` named profile、`approvalPolicy=never`，移除客户端 sandbox/config 覆盖 | `local-core-policy` / `rewriteClientMessage` |
-| 本地客户端请求阻断 | 25 个 Shell、文件、命令、进程、模糊搜索和后台终端请求在 app-server 前失败关闭并审计；仅官方 VS Code 客户端的 Codex 自管粘贴文本附件请求按固定形状放行 | `ShimProxy` / `ClientRequest.json` |
-| Core 本地审批阻断 | 命令、文件、权限和两类旧协议审批在到达官方 UI 前失败关闭；Bridge 远程命令审批不受影响 | `ShimProxy` / `ServerRequest.json` |
+| Remote Bridge 权限配置 | `0.3.77` 固定 `:danger-full-access` 与 `approvalPolicy=never`；本机 Core 审批自动接受，远端动态命令、后台任务和结构化变更均不再查询旧 thread 审批模式 | `rewriteClientMessage` / `ShimProxy` |
+| 本地客户端请求 | `0.3.77` 起 Shell、文件、命令、进程、模糊搜索和后台终端请求直接转发本机 app-server，不再作为安全阻断面 | `ShimProxy` / `ClientRequest.json` |
+| Core 本地审批 | `0.3.77` 起命令、文件和权限审批请求由 Shim 自动接受，不再显示官方确认界面 | `ShimProxy` / `ServerRequest.json` |
 | `thread/resume` 工作区语义 | 本地控制 `cwd`、远程 `runtimeWorkspaceRoots` 和远程策略已覆盖；官方 UI 恢复待补测 | `rewriteClientMessage` |
 | `turn/start` 路由刷新 | 每轮合并独立应用上下文，刷新远程主根和 `remote_exec` 提醒且不覆盖已有键 | `rewriteClientMessage` |
 | 远端无 Codex | 诊断已实现；xj-member 目标已确认未安装 Codex | `Run Diagnostics` / 2026-07-16 验收 |
@@ -595,8 +618,8 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
 | 远程逻辑主根 | 唯一 `remote/primary` 已写入线程和每轮 `runtimeWorkspaceRoots`；活动 transport 的 `pwd` 回环通过 |
 | 工具根身份 | 请求、结果和审计携带根 ID、目标端、角色与根路径；省略目标仍默认远程主根 |
 | 对话本机资源 | `0.3.75` 以 `threadId` 绑定用户实际拖入的文件或目录，不写入 `roots`、不设次级根数量上限；Linux Remote SSH 的 14 项暂存与输入已实测，thread 声明和删除清理待继续实测 |
-| Controller 本地只读执行器 | 文件只允许精确文件，目录只允许自身子树；支持读取、目录、树和字面搜索，写入、Git、跨 thread、符号链接逃逸均失败关闭 |
-| 双端只读路由 | 远端项目继续使用唯一主根；本机对话资源只经已认证 Controller transport 和显式 conversation resource ID 访问 |
+| Controller 本地执行器 | `local-full-access` 覆盖本机文件系统根，结构化工具支持有界读写、补丁、目录、重命名、空目录删除、搜索和 Git；本机 Core 同时拥有不受该结构化边界限制的最大权限 |
+| 双端路由 | 远端项目继续使用唯一主根；本机默认全权限，不再把 conversation resource 或本机根当作安全隔离边界 |
 | Bridge 工具原生界面投影 | `0.3.14` 已按本地/远程根显示目标、根 ID、规范化路径和 `cwd`；真实候选窗口观感待补测 |
 | 远程 URI、Diff 和文件跳转 | `0.3.21` 已实现 host/根/目标端/相对路径资源身份、会话登记内容提供器、实际 Remote SSH URI 跳转和有界旧内容 Diff；OpenSSH 失败关闭，真实同名诱饵与界面待补测 |
 
@@ -609,26 +632,26 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
 | 项目 | 状态 |
 | --- | --- |
 | 结构化 `argv` 非交互命令 | 已实现；默认通过 Remote Extension Host，OpenSSH 为回退 |
-| 官方命令审批 | 已实现；非完全访问模式显示主机、规范化 `cwd`、完整命令和环境变更 |
+| 官方命令审批 | `0.3.77` 最大权限模式已取消；远端命令直接执行 |
 | 命令输出流 | 已映射为 `item/commandExecution/outputDelta` |
-| 权限模式继承 | 已按线程映射 `full-access`/`approvalPolicy=never`，其余模式失败关闭 |
-| 审批绑定 | 人工审批仅匹配一个待处理调用 ID；完全访问的自动放行单独审计 |
+| 权限模式 | 固定 `:danger-full-access` / `approvalPolicy=never`，不继承更低的客户端模式 |
+| 自动放行 | 远端命令、后台任务和工作区变更均记录 `automatic=true`，不创建审批请求 |
 | 运行中取消 | `0.3.15` 已把 `turn/interrupt` 绑定到活动 Bridge 调用；VS Code Remote 通道显式发送 `cancel`，Remote Executor 按 operation ID 中止 POSIX 进程组；自动化通过，真实 Remote SSH 与 Windows 待补测 |
 | 哈希保护写入和补丁 | `0.3.19` 已实现双端原子整文件写入和精确 UTF-8 补丁；覆盖、补丁、文件重命名和文件删除要求最新 SHA-256，冲突返回 `FILE_CONFLICT` |
 | 目录与路径变更 | `0.3.19` 已实现单级目录创建、不覆盖重命名、文件或空目录删除；递归删除不开放 |
-| 写入审批与审计 | 覆盖、补丁、重命名和删除在非完全访问模式进入绑定调用 ID 的官方审批；新建文件/目录为有界自动操作；`full-access` 自动放行，审计不含正文 |
+| 写入审计 | 覆盖、补丁、重命名、删除和新建全部自动放行；审计保留目标与哈希元数据且不含正文 |
 | 写入幂等与上限 | 默认远端复用 Executor 账本，本地 Controller 有独立有界账本；文件正文最多 1 MiB，经 stdin 传输，不进入 argv |
 | 断线结果确认和幂等 | `0.3.17` 已在 transport 中断后用原幂等键从新 socket 查询账本；completed 返回原结果，cancelled/failed 保留终态，running 有界轮询，unknown 或查询不可达返回 `RESULT_UNKNOWN` 且不重放；账本有意限定在当前 Extension Host 代次，`0.3.28` 已实测重启后旧状态为 `unknown` 且不重放 |
 | Executor 失联写入完整性 | `0.3.37` 把已发送副作用的 transport 错误响应提升为不可重试 `RESULT_UNKNOWN`，写入脚本在替换前校验精确 stdin 字节数；临时文件先登记拥有 PID，新 Executor 激活时只清理当前工作区死亡拥有者的登记和临时文件。能力握手要求 `executeStdinExactLength` 与 `workspaceWriteOrphanCleanup`，不以版本号门禁；精确 Linux Remote SSH 故障注入确认原文件不变、无残留且不重放 |
 | 后台任务 | `0.3.20` 在活动 VS Code Remote transport 上提供 start/status/log/cancel；稳定任务 ID 避免重连重复启动，日志按字节游标有界保留，取消、超时和 Extension Host 关闭终止进程组；OpenSSH 回退失败关闭 |
 | 远程资源映射 | `0.3.21` 提供 `workspace_open_file` 与 `workspace_show_diff`；Controller 只映射已规范化路径，复用实际打开的 Remote SSH URI，并以会话登记、根授权复核、SHA-256 和内存上限保护内容提供器与 Diff 快照 |
-| Core 内置本地工具硬阻断 | 自动化边界已实施；除官方 VS Code 客户端的受管粘贴文本附件操作外，专用权限配置、25 个已知客户端请求、五类本地审批及未来风险命名空间均失败关闭，真实模型专用工具诱饵待补测 |
+| Core 内置本地工具最大权限 | `0.3.77` 主动移除 local-deny 注入与客户端/审批阻断；Remote SSH thread 固定使用 `:danger-full-access`，本机能力以 VS Code 用户的操作系统权限为边界 |
 
 阶段 C 尚未关闭。0.2.0 提供与官方权限模式一致的远程命令执行，0.3.15 完成默认
 VS Code Remote 链路的运行中取消自动化闭环，0.3.16 增加当前 Executor 代次内的有界
 幂等账本与结果查询，0.3.17 增加断线后的查询恢复，0.3.19 交付双端写入自动化，
 0.3.20 交付后台任务生命周期自动化，0.3.21 交付远程资源、文件跳转和 Diff 自动化；
-本地 Core 真实诱饵、真实写入和生命周期验收完成前，不得用于无人值守的有副作用任务。
+本机最大权限、真实写入和生命周期验收完成前，不得用于无人值守的有副作用任务。
 
 ## 当前优先阶段：外部 Codex CLI 介入
 

@@ -320,7 +320,7 @@ describe("ShimProxy JSONL integration", () => {
     });
   });
 
-  it("rejects local Core approval requests without showing them to the client", async () => {
+  it("auto-accepts local Core approval requests under maximum local access", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-local-approval-"));
     const auditPath = join(directory, "audit.jsonl");
     const input = new PassThrough();
@@ -385,20 +385,69 @@ describe("ShimProxy JSONL integration", () => {
       result: {
         receivedApprovalResponse: {
           id: "local-core-approval",
-          error: {
-            code: -32003,
-            message:
-              "Codex Remote Bridge blocked local Core approval: item/commandExecution/requestApproval",
-          },
+          result: { decision: "accept" },
         },
       },
     });
     const audit = await readFile(auditPath, "utf8");
-    expect(audit).toContain('"operation":"local_core_approval.blocked"');
+    expect(audit).toContain('"operation":"local_core_approval.auto_accepted"');
     expect(audit).not.toContain("/tmp/local-project-decoy");
   });
 
-  it("blocks every reviewed local Core request before app-server and audits only the method", async () => {
+  it("auto-accepts every Core approval method without a client prompt", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "codex-bridge-auto-approval-"));
+    const auditPath = join(directory, "audit.jsonl");
+    const proxy = new ShimProxy({
+      appServerArgs: ["app-server", "--stdio"],
+      auditPath,
+      codexExecutable: "fake-codex",
+      config: parseBridgeConfig({
+        host: "training-gpu",
+        workspaceRoot: "/remote/workspace",
+      }),
+      controlDir: join(directory, "control"),
+    });
+    const serverMessages: Array<Record<string, unknown>> = [];
+    const clientMessages: Array<Record<string, unknown>> = [];
+    const methods = [
+      "item/commandExecution/requestApproval",
+      "item/fileChange/requestApproval",
+      "item/permissions/requestApproval",
+      "applyPatchApproval",
+      "execCommandApproval",
+    ];
+
+    for (const [index, method] of methods.entries()) {
+      await proxy.handleServerMessage(
+        {
+          id: `approval-${index}`,
+          method,
+          params: {
+            ...(index === 0
+              ? { availableDecisions: ["accept", "acceptForSession", "decline"] }
+              : {}),
+            path: "/sensitive/path-not-for-audit",
+          },
+        },
+        (message) => serverMessages.push(message as Record<string, unknown>),
+        (message) => clientMessages.push(message as Record<string, unknown>),
+      );
+    }
+
+    expect(clientMessages).toEqual([]);
+    expect(serverMessages).toEqual([
+      { id: "approval-0", result: { decision: "acceptForSession" } },
+      { id: "approval-1", result: { decision: "accept" } },
+      { id: "approval-2", result: { decision: "accept" } },
+      { id: "approval-3", result: { decision: "approved_for_session" } },
+      { id: "approval-4", result: { decision: "approved_for_session" } },
+    ]);
+    const audit = await readFile(auditPath, "utf8");
+    expect(audit.match(/local_core_approval\.auto_accepted/g)).toHaveLength(5);
+    expect(audit).not.toContain("/sensitive/path-not-for-audit");
+  });
+
+  it("forwards reviewed local Core requests under maximum local access", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-local-core-"));
     const auditPath = join(directory, "audit.jsonl");
     const input = new PassThrough();
@@ -452,14 +501,9 @@ describe("ShimProxy JSONL integration", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as Record<string, unknown>);
-    const blockedResponses = messages.filter((message) => {
-      const error = message.error;
-      return isRecord(error) && error.code === -32003;
-    });
-    expect(blockedResponses).toHaveLength(blockedMethods.length);
     const forwarded = messages.filter((message) => isRecord(message.result));
-    expect(forwarded).toHaveLength(1);
-    expect(forwarded[0]).toMatchObject({
+    expect(forwarded).toHaveLength(blockedMethods.length + 1);
+    expect(forwarded.at(-1)).toMatchObject({
       id: 999,
       result: {
         received: {
@@ -469,24 +513,7 @@ describe("ShimProxy JSONL integration", () => {
       },
     });
 
-    const audit = await readFile(auditPath, "utf8");
-    const auditEvents = audit
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line) as Record<string, unknown>);
-    const blockedAuditEvents = auditEvents.filter(
-      (event) => event.operation === "local_core_request.blocked",
-    );
-    expect(blockedAuditEvents).toHaveLength(blockedMethods.length);
-    expect(blockedAuditEvents).toContainEqual(
-      expect.objectContaining({
-        details: {
-          knownMethod: false,
-          method: "fs/futureMutation",
-        },
-      }),
-    );
-    expect(audit).not.toContain("/tmp/local-project-decoy");
+    await expect(readFile(auditPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("forwards managed pasted-text requests from the VS Code client", async () => {
@@ -532,10 +559,11 @@ describe("ShimProxy JSONL integration", () => {
     expect(audit).not.toContain("c2Vuc2l0aXZlIHBhc3RlZA==");
   });
 
-  it("does not expose managed attachment writes to non-VS Code clients", async () => {
+  it("forwards managed attachment writes for non-VS Code clients under full access", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-external-attachment-"));
     const attachmentRoot = join(directory, ".codex", "attachments");
     const clientMessages: Array<Record<string, unknown>> = [];
+    const serverMessages: Array<Record<string, unknown>> = [];
     const proxy = new ShimProxy({
       appServerArgs: ["app-server", "--stdio"],
       auditPath: join(directory, "audit.jsonl"),
@@ -562,14 +590,13 @@ describe("ShimProxy JSONL integration", () => {
           ),
         },
       },
-      () => undefined,
+      (message) => serverMessages.push(message as Record<string, unknown>),
       (message) => clientMessages.push(message as Record<string, unknown>),
     );
 
-    expect(clientMessages[0]).toMatchObject({
-      id: "paste-2",
-      error: { code: -32003 },
-    });
+    expect(serverMessages).toHaveLength(1);
+    expect(serverMessages[0]).toMatchObject({ id: "paste-2", method: "fs/writeFile" });
+    expect(clientMessages).toEqual([]);
   });
 
   it("rewrites initialize and thread placement before forwarding to app-server", async () => {
@@ -633,7 +660,7 @@ describe("ShimProxy JSONL integration", () => {
     });
   });
 
-  it("keeps the local Core policy hidden behind official permission modes", async () => {
+  it("uses full local access while retaining compatibility projection for old internal profiles", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-permissions-"));
     const proxy = new ShimProxy({
       appServerArgs: ["app-server", "--stdio"],
@@ -663,7 +690,7 @@ describe("ShimProxy JSONL integration", () => {
       expect(serverMessages[0]).toMatchObject({
         params: {
           approvalPolicy: "never",
-          permissions: REMOTE_PERMISSION_PROFILE_ID,
+          permissions: ":danger-full-access",
         },
       });
 
@@ -775,20 +802,14 @@ describe("ShimProxy JSONL integration", () => {
     }
   });
 
-  it("requires native approval, streams output, and projects remote execution", async () => {
+  it("auto-runs remote commands even when the incoming thread requested approval", async () => {
     const { messages, sshSpawns } = await exerciseRemoteExecApproval("accept");
     expect(sshSpawns).toBe(1);
-    expect(messages).toContainEqual(
-      expect.objectContaining({
-        method: "item/commandExecution/requestApproval",
-        params: expect.objectContaining({
-          itemId: "remote-item-1",
-          command: "printf hello",
-          cwd: "/remote/workspace/src",
-          availableDecisions: ["accept", "decline"],
-        }),
-      }),
-    );
+    expect(
+      messages.some(
+        (message) => message.method === "item/commandExecution/requestApproval",
+      ),
+    ).toBe(false);
     expect(messages).toContainEqual(
       expect.objectContaining({
         method: "item/commandExecution/outputDelta",
@@ -812,17 +833,16 @@ describe("ShimProxy JSONL integration", () => {
     );
   });
 
-  it("returns a declined tool result without starting OpenSSH", async () => {
+  it("does not create a decline surface for remote commands", async () => {
     const { messages, sshSpawns } = await exerciseRemoteExecApproval("decline");
-    expect(sshSpawns).toBe(0);
+    expect(sshSpawns).toBe(1);
     expect(messages).toContainEqual(
       expect.objectContaining({
         method: "item/completed",
         params: expect.objectContaining({
           item: expect.objectContaining({
             type: "commandExecution",
-            status: "failed",
-            aggregatedOutput: "Remote command execution was declined by the user",
+            status: "completed",
           }),
         }),
       }),

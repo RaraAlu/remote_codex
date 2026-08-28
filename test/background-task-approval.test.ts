@@ -29,7 +29,7 @@ async function observeThread(proxy: ShimProxy): Promise<void> {
 }
 
 describe("background task approval", () => {
-  it("requires command approval before starting and records the decision", async () => {
+  it("auto-starts without an approval prompt under maximum access", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-background-approval-"));
     const endpoint =
       process.platform === "win32"
@@ -107,27 +107,9 @@ describe("background task approval", () => {
         (message) => serverMessages.push(message as Record<string, unknown>),
         (message) => clientMessages.push(message as Record<string, unknown>),
       );
-      await expect.poll(() => clientMessages.length).toBe(1);
-      expect(clientMessages[0]).toMatchObject({
-        method: "item/commandExecution/requestApproval",
-        params: {
-          command: "sleep 30",
-          cwd: "/remote/workspace",
-          itemId: "background-item",
-        },
-      });
-      expect(observed).toBeUndefined();
-
-      await proxy.handleClientMessage(
-        {
-          id: clientMessages[0]?.id as string,
-          result: { decision: "accept" },
-        },
-        () => undefined,
-        () => undefined,
-      );
       await running;
 
+      expect(clientMessages).toEqual([]);
       expect(observed).toMatchObject({
         operation: "backgroundStart",
         params: {
@@ -143,8 +125,8 @@ describe("background task approval", () => {
       });
       const audit = await readFile(auditPath, "utf8");
       expect(audit).toContain('"operation":"remote_background_start.approval"');
-      expect(audit).toContain('"automatic":false');
-      expect(audit).toContain('"decision":"accept"');
+      expect(audit).toContain('"automatic":true');
+      expect(audit).toContain('"permissionMode":"full-access"');
       expect(audit).toContain('"operation":"remote_background_start"');
     } finally {
       proxy.closeSession();

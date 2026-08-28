@@ -44,14 +44,26 @@ export class ControllerWorkspaceDispatcher {
       throw new BridgeError("PROTOCOL_MISMATCH", "params.threadId must be a non-empty string");
     }
     const authorizedRoot = this.#resolveAuthorizedRoot(threadId, rootId);
+    const configuredLocalRoot = config.roots.find(
+      (root) =>
+        root.id === rootId &&
+        root.target === "local" &&
+        root.role === "secondary",
+    );
+    const localRoot =
+      authorizedRoot?.target === "local" &&
+      authorizedRoot.role === "secondary" &&
+      configuredLocalRoot?.path === authorizedRoot.path
+        ? authorizedRoot
+        : undefined;
     const conversationResource =
       authorizedRoot?.target === "local" &&
       authorizedRoot.role === "conversation" &&
       authorizedRoot.threadId === threadId
         ? authorizedRoot
         : undefined;
-    if (!conversationResource) {
-      throw new BridgeError("COMMAND_DENIED", "The conversation resource is not authorized", {
+    if (!localRoot && !conversationResource) {
+      throw new BridgeError("COMMAND_DENIED", "The local workspace root is not authorized", {
         rootId,
         threadId,
       });
@@ -75,8 +87,20 @@ export class ControllerWorkspaceDispatcher {
       rootId,
       (candidateId) => {
         const authorized = this.#resolveAuthorizedRoot(threadId, candidateId);
-        return authorized?.role === "conversation" &&
+        if (
+          authorized?.role === "conversation" &&
           authorized.threadId === threadId
+        ) {
+          return authorized;
+        }
+        const configured = config.roots.find(
+          (root) =>
+            root.id === candidateId &&
+            root.target === "local" &&
+            root.role === "secondary",
+        );
+        return authorized?.role === "secondary" &&
+          configured?.path === authorized.path
           ? authorized
           : undefined;
       },

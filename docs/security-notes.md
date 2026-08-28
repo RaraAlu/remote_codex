@@ -4,9 +4,11 @@
 
 - 项目身份由 `hostId + rootId + target + workspaceRoot + relativePath` 共同决定。
 - 活动 Remote SSH 配置必须且只能有一个 `remote/primary` 根；v1 的单远程根会迁移为
-  该记录。`workspaceRoot` 只是运行期兼容别名，不一致时失败关闭。旧配置中的
-  `local/secondary` 记录不会进入活动窗口会话。
-- `localExecution` 固定为 `deny`，配置无法改成允许。
+  该记录。`workspaceRoot` 只是运行期兼容别名，不一致时失败关闭。默认
+  `vscode-remote` 配置还会直接加入一个覆盖本机文件系统根的 `local-full-access`；它不需要
+  路径选择、授权记录或逐根确认。
+- `localExecution` 固定迁移为 `allow`。Remote SSH thread 使用本机 `full-access`，本机
+  文件、Shell 和进程能力以运行 VS Code UI Extension Host 的操作系统用户权限为边界。
 - 默认 `vscode-remote` 模式只调用当前 Remote SSH 窗口中的 Workspace Executor，不读取
   密码、私钥或 VS Code Remote SSH 的底层连接凭据，也不建立第二条 SSH 连接。
 - 本地 Shim 到 UI 扩展的 IPC 使用每窗口随机令牌认证；令牌只写入当前用户状态目录的
@@ -42,21 +44,23 @@
   `GitHub.copilot-chat` 映射，恢复时保留其他扩展后来发生的设置变化。恢复命令同时关闭
   `autoInitialize`。
 - 结构化命令参数经过 POSIX 单引号转义；用户输入不能改变远端 Shell 参数边界。
-- Shim 在改写前按线程记录官方权限模式；`full-access` 或 `approvalPolicy=never` 自动
-  放行远程命令，其他模式使用绑定单个调用 ID 的官方命令审批。
-- 权限映射只作用于 Remote Executor；传给本地 app-server 的项目目录仍是空控制目录，
-  `permissions` 仍被移除，sandbox 仍固定为只读。
-- stdout/stderr 以官方命令输出事件流式返回；人工拒绝或审批超时不会启动远端进程，
-  完全访问的自动放行会单独写入审计日志。
+- Shim 不再读取原始 thread 权限模式决定 Bridge 操作审批；远端命令、后台任务和结构化
+  工作区变更一律自动放行，并仅记录 `automatic=true` 审计。
+- 本地 app-server 的 `cwd` 仍固定为空控制目录以保持远端项目身份，但 thread 的
+  `permissions` 固定为 `full-access`、`approvalPolicy` 固定为 `never`；绝对本机路径和
+  本机命令不再受 Bridge 沙箱或审批限制。
+- stdout/stderr 以官方命令输出事件流式返回；最大权限的自动放行会单独写入审计日志。
 - 所有文件路径先限制在根目录，再在远端解析符号链接并二次校验。
 - 双端写工具仅接受显式目标、根 ID 和根内路径。整文件写入最多 1 MiB，覆盖与精确
   UTF-8 补丁使用同目录临时文件和原子替换；新建文件使用不覆盖的原子链接。
 - 已存在文件的覆盖、补丁、重命名和删除必须携带最近读取的 SHA-256；哈希不一致、
   路径类型变化或并发创建统一返回 `FILE_CONFLICT`。目录只允许创建、非覆盖重命名和
   空目录删除，不开放递归删除。
-- 覆盖、补丁、重命名和删除在非完全访问模式使用绑定调用 ID 的官方审批；新建文件和
-  目录按有界参数自动执行。`full-access` 自动放行但仍审计目标、根、相对路径、操作、
-  字节数和错误，不记录文件正文。
+- 覆盖、补丁、重命名、删除、新建文件和目录全部自动执行，但仍审计目标、根、相对路径、
+  操作、字节数和错误，不记录文件正文。
+- `local-full-access` 的结构化工具路由仍通过带窗口随机令牌的 Controller transport，并保留
+  单文件大小、哈希、原子替换和幂等边界；但这些只约束 `workspace_*`。本机 Core 文件和
+  Shell 能力可访问当前用户能访问的任意路径、执行任意本机进程，也可绕过结构化工具限制。
 - 默认 VS Code Remote 通道以有界 stdin 传输写入正文，正文不进入远端 argv；远端和
   本地 Controller 分别使用有界幂等账本，相同键参数变化时失败关闭。
 - 断线、超时和取消不会触发本地回退。默认 VS Code Remote 链路只有收到远端 Executor
@@ -74,14 +78,10 @@
   `ComSpec` 调用 PATH/PATHEXT 解析到的 `.cmd` / `.bat`，SSH 仍只接受原生 `ssh.exe`。
   遗留 Linux 绝对路径不会在 Windows 执行；显式配置仍应指向受信任文件。
 - 未知 app-server 服务端请求默认返回 `-32601`。
-- Remote SSH 会话的本地 Core 客户端请求按风险命名空间阻断，而不只依赖当前协议中的
-  已知方法枚举。唯一的 `fs/` 例外是官方 VS Code 客户端创建粘贴文本附件：只接受本机
-  Codex 自管 `attachments` 根内的注册表、UUID 目录和固定 `pasted-text.txt` 所需形状，
-  并限制方法、参数和内容大小。`fuzzyFileSearch` 的一次性请求和三个已知会话请求只对
-  官方 VS Code 客户端开放，并通过带窗口令牌的 Controller 通道查询与当前配置完全匹配的
-  Remote SSH 工作区；请求根不能改变实际搜索边界，结果会再次校验根、相对路径和索引。
-  未知 `fuzzyFileSearch/*` 以及其他 `fs/`、`process/`、`command/exec` 或后台终端方法
-  仍默认失败关闭。附件和文件搜索审计不记录路径、查询文本或内容。
+- Remote SSH 会话不再阻断本地 Core 的 `fs/`、`process/`、`command/exec` 或后台终端；
+  Core 发出的命令、文件和权限审批请求由 Shim 直接自动接受，不再转发确认界面。Bridge 自有的
+  Remote SSH `fuzzyFileSearch` 代理仍把原生 `@` 搜索绑定到远端主根，但这不限制模型另行
+  使用本机全权限文件能力。
 - Bridge 不注册资源管理器上下文添加命令，也不为拖放创建来源清单、本机副本或远端
   目录展开结果。可选兼容层只在拖动位于官方 Codex ViewPane 时捕获 Workbench 的
   URI/文件路径并调用官方文件上下文命令。VS Code Explorer 专用 MIME 证据仍用于远端
@@ -108,33 +108,27 @@
   只接收用户之后实际拖入的本机资源。Controller 规范化并短暂暂存路径；只有匹配的原生
   `mention` 随 `turn/start` 到达时，才把资源绑定到该 `threadId`。文件能力精确到单文件，
   目录能力限制在自身子树，未拖入 mention、另一个 thread、相邻路径、文件系统根和符号
-  链接逃逸均失败关闭。资源不进入项目 `roots`，因此不设置本地次级根数量上限；单次拖放
-  仍受输入资源数和本机 IPC 帧大小限制。所有 conversation resource 只经 Controller
-  本地执行器和显式 `target="local"`、资源 ID 读取，写入和 Git 操作被 Shim 与 Controller
-  双重拒绝，不复制到远端，也不开放本地 Core。`thread/delete` 仅在官方操作成功后清理
-  对应持久化绑定；禁用兼容层会关闭对新拖入资源的接收同意。
+  链接逃逸均在 conversation resource 专用路由内失败关闭。资源不进入项目 `roots`，因此
+  不设置拖放资源数量上限；单次拖放仍受输入资源数和本机 IPC 帧大小限制。专用资源 ID
+  继续保持按 thread 只读，但在最大本机权限模式下它不再构成本机文件的安全隔离边界，
+  因为 Core 可直接访问相同绝对路径。`thread/delete` 只清理该专用引用记录。
 
-## 尚未形成硬保证
+## 最大本机权限风险
 
-Codex Core 仍然拥有内置本地 Shell/文件工具。Shim 已把本地 `cwd` 固定到空的只读
-控制目录，并注入只使用 `remote_*` 工具的开发者指令，但提示词不是安全边界。
+当前产品决策明确放弃本机项目隔离：任何 Remote SSH Codex 对话都可以使用本机 Core
+Shell、文件、进程和当前用户可读的凭据，也能修改或删除当前用户可写的任意路径。空控制
+目录只用于维持远端 thread 项目身份，不是本机沙箱。安装并启用 Bridge 即接受这一风险，
+不存在后续逐路径授权、撤销或人工 Bridge 审批层。
 
-在以下任一方案完成前，不得宣称满足完整的 `INV-004`、`POLICY-006` 和阶段 C：
-
-1. Codex app-server 提供正式能力，可按线程禁用全部内置本地 Shell/文件工具；或
-2. 修改开源 Codex Core，增加强制远程执行后端；或
-3. 用经过验证的操作系统沙箱阻止 app-server 创建本地项目工具进程，同时不破坏认证
-   和 app-server 协议。
-
-远程和本地授权根写入已经接入调用级审批、基础哈希、规范化参数、原子替换、大小限制
-和幂等账本。当前通用命令与重要写操作都使用一次性审批；默认 VS Code Remote 链路的
+远程和本地结构化根写入保留基础哈希、规范化参数、原子替换、大小限制和幂等账本，但
+不再请求调用级审批。默认 VS Code Remote 链路的
 运行中取消和断线账本查询已完成自动化，但真实 Remote SSH 写入、遗留进程与断线恢复、
-Windows 进程树、OpenSSH 回退的远端进程身份和 Core 内置本地工具硬阻断仍待补测。
+Windows 进程树、OpenSSH 回退的远端进程身份和本机最大权限行为仍待补测。
 
-`remote_exec` 约束启动目录位于工作区，但获批命令本身拥有远端 SSH 账号的权限，
-可以显式访问工作区外路径；它不是远端文件系统沙箱。审批前必须检查完整命令。需要
+`remote_exec` 约束启动目录位于工作区，但自动执行的命令本身拥有远端 SSH 账号的权限，
+可以显式访问工作区外路径；它不是远端文件系统沙箱。需要
 Shell 语义时会以 `bash -lc` 等结构化参数呈现，而不是隐藏成未展示的本地字符串。
-选择“完全访问”意味着主动放弃上述逐次检查，但不会放开本地项目目录。
+Remote SSH thread 已固定为完全访问，本机项目目录和命令默认开放。
 
 本地 MCP、App 和 Connector 允许用于远程任务的增强能力。Bridge 的自动 MCP 路由
 只处理无环境变量、无本地 `cwd`、非包管理器启动且远端存在同名可执行文件的 stdio
@@ -162,8 +156,8 @@ Executor 在远端解析，OpenSSH 回退将适配值放在 MCP 字节流之前�
 
 外部对话介入继承目标 VS Code thread 的 Codex 权限模式，而不是发起调用的 CLI thread
 权限。共享网关在所有客户端连接间复用同一权限跟踪状态；目标 thread 为
-`full-access` 时，外部介入触发的 `remote_exec` 不增加 Bridge 二次审批并保留自动放行
-审计。其他模式下，当前 MCP 无法承载官方审批 UI 时会明确拒绝，不能静默升级权限。
+外部介入触发的 `remote_exec` 同样不增加 Bridge 审批并保留自动放行审计；外部客户端
+请求的较低权限模式也会被当前最大权限策略覆盖。
 连接来源、请求方法和结果状态会审计，但对话文本和文件正文不会写入审计。
 
 ## 操作要求

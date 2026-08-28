@@ -331,6 +331,12 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
 ### M01 候选安装与官方任务
 
 - 安装最终 Linux x64 Controller VSIX，确认 Remote Executor 自动升级到候选要求版本。
+- 已完成（2026-08-27，用户实机确认 + 日志/审计复核）：`0.3.78` 安装后在
+  `data:/home/zkbot` 首次激活，于 `23:47:08.919` 记录
+  `app_server.session_bootstrap_reload` 并自动重载；新 Extension Host 于
+  `23:47:11.755` 激活，配置化 Shim 于 `23:47:18.814` 启动，Bridge 于
+  `23:47:19.264` 到达 `ready`。从首轮激活到 ready 为约 12.32 秒，自动重载恰好一次；
+  第二代际在 Shim 尚未完成启动时识别相同指纹并拒绝再次重载，随后由心跳正常转为 ready。
 - 冷启动和热启动各 3 次，记录到达 `ready` 的 P50、最大值及失败数。
 - 从官方 Codex 面板分别新建和恢复任务各 3 次，确认无 `Unknown local project`。
 - 确认任务进入当前 Shim，`initialize`、`thread/list`、`thread/start` 和
@@ -342,7 +348,8 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
 - 在官方 UI 新建和恢复任务中确认远程主根显示正确，本地控制目录不显示为项目根。
 - 已完成（2026-08-10，用户实机确认）：Bridge 捕获的本地与 Remote SSH 拖放已统一为
   当前 Composer 光标处的原生 `@`；VS Code Explorer、系统文件管理器、文件和目录不再
-  因来源不同切换到附件表示。Remote SSH 中的本机资源可经本地次级根授权后继续分析。
+  因来源不同切换到附件表示。Remote SSH 中的本机拖入资源按当前 thread 形成独立只读
+  conversation resource，不会获得本机可写根权限。
   本轮未重新采集禁用恢复字节校验和版本升级回归，二者继续保留为发布门禁。
 - 已完成（2026-08-09，用户实机确认）：Linux 本地窗口中的 Explorer 与系统文件管理器
   拖放已能直接进入 Codex 对话区域，不再要求先经过其他 Workbench 区域；本地拖放功能
@@ -398,41 +405,52 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
   从 Explorer 与系统文件管理器拖入文件、目录，确认当前光标只生成一个原生 `@` 且 turn
   能读取；最后执行禁用并以 SHA-256 核对 VS Code Workbench、`product.json` 和官方
   Webview 与本轮新版本原始备份逐字节一致。
-- 在本地控制目录和本地授权根放置同名诱饵，要求模型读取、修改、搜索和执行项目命令；
-  Remote SSH 任务中的本地 Core Shell/文件/Git 操作数必须为 0。
-- 覆盖已知客户端请求阻断、Core 审批阻断和专用模型工具路径；失败结果必须进入审计。
+- 待验证（2026-08-25，`0.3.77`）：安装后仅重载 Remote SSH `/root/Bote_Teleopit` 窗口，
+  不执行任何目录选择或授权命令。诊断应直接出现 `localExecution="allow"`、
+  `local-full-access` 和 `fullLocalAccess.accessible=true`。新对话应能直接读写
+  `/home/zkbot/work/train/Teleopit`、执行本机命令，并把预期 34 个远端文件下载到该目录，
+  逐项核对相对路径、大小与 SHA-256；同时用 `pwd` 和远端 Git/读取操作确认 `remote_exec`
+  及远端 `workspace_*` 仍落在 `/root/Bote_Teleopit`。首轮实测在完全访问 UI 下仍出现一次
+  `remote_exec` 允许提示，审计为 `automatic=false, decision=accept`；修复候选重载后须确认
+  本机 Core、远端命令、后台任务和工作区覆盖均不再显示授权提示，相应审计为
+  `automatic=true, permissionMode="full-access"`。记录本机最大权限已明确接受，不再执行根外
+  拒绝、撤销、Core 阻断或本机诱饵为零的旧门禁。
+- 覆盖本机 Core 文件、命令、进程和五类审批请求自动接受，确认不再出现
+  `local_core_request.blocked`、`local_core_approval.blocked` 或任何确认卡片；审计应出现
+  `local_core_approval.auto_accepted` 且不记录命令或路径正文。
 - 恢复普通本地任务，确认上述限制没有污染本地窗口的正常项目操作。
 
 ### M03 远程主根与对话资源只读路由
 
 - 确认 Remote SSH 配置和 `runtimeWorkspaceRoots` 始终只有一个远端项目主根。
-- 同一任务交替读取远端主根与当前对话明确拖入的本机文件/目录；本机资源只允许读取、
-  目录树和字面搜索，不允许 Git 或修改。
-- 新建另一个对话确认不继承资源；删除原对话后既有 conversation resource ID 立即失效。
+- 同一任务交替读取远端主根、`local-full-access` 和当前对话拖入资源；专用 conversation
+  resource ID 仍保持按 thread 只读并在删除后失效，但不得把它宣称为本机安全隔离边界。
 - 固定远端读取、目录树、搜索、Git 和 `pwd` 各执行至少 5 次，成功率必须为 100%。
 - 审计中的目标端、根 ID、角色、规范化路径和 `remoteCwd` 必须与实际执行端一致。
 
 ### M04 远端安全写入
 
-- 在远程工作区执行写入、补丁、建目录、重命名和删除；对话本机资源的同类操作全部拒绝。
+- 在远程工作区执行写入、补丁、建目录、重命名和删除；conversation resource ID 的同类
+  操作仍拒绝，但本机 Core 和 `local-full-access` 允许修改相同绝对路径。
 - 使用过期 `expectedHash` 至少 5 次，必须全部返回 `FILE_CONFLICT` 且原文件不变。
 - 验证原子替换、权限错误、目标已存在、部分失败和单次写入上限；不得留下临时半写文件。
-- 非完全访问模式逐项核对重要操作审批；`full-access` 自动放行但仍有审批结果审计。
+- 重要操作不再显示审批；核对统一自动放行审计、哈希和幂等结果。
 - 远程断线、窗口重载和 Executor 失联时写入必须失败关闭，不得切换到 OpenSSH 或本地。
 
 ### M05 远程资源、Diff 与跳转
 
 - 从 Bridge 工具结果打开远程文件，确认使用当前 Remote SSH URI 且没有合成工作区根。
 - 检查本地/远程同名文件的打开、定位、行号跳转和 Diff 左右端身份。
-- 对已撤销根、越界路径、已关闭窗口和过期资源执行打开/Diff，必须明确失败。
+- 对已关闭窗口和过期 conversation resource 执行打开/Diff，必须明确失败；
+  `local-full-access` 不存在可撤销或根外路径。
 - 在官方 UI 中确认命令项、文件名、目标端、路径和错误提示没有混淆。
 
-### M06 远程命令审批与运行中取消
+### M06 远程命令自动执行与运行中取消
 
-- 在 `full-access` 和至少一种需审批模式下分别执行远程命令，核对权限继承和审批内容。
+- 在 UI 显示完全访问和历史 thread 曾为需审批模式两种条件下执行远程命令，均不得弹出确认。
 - 从官方 UI 和附着 CLI 两个方向各取消长命令至少 3 次。
 - 每次记录 `turn/interrupt` 到 `CANCELLED` 的耗时，并确认远端完整进程树消失。
-- 等待审批时取消不得启动远端进程；取消确认失败必须返回 `RESULT_UNKNOWN`。
+- 取消活动远端进程并核对终态；不再保留等待审批场景。
 - OpenSSH 回退的取消限制必须清晰呈现，不得伪装成远端进程树已确认终止。
 
 ### M07 幂等、断线与结果确认
@@ -465,9 +483,9 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
 - CLI 和官方 UI 两端各发起一次新 turn、steer 和取消，核对 thread/turn ID 与事件顺序。
 - 两端同时观察流式文本、工具状态、命令输出、终态和完整历史，确认无重复通知。
 - 覆盖 `expectedTurnId` 冲突、CLI 中途断开、网关重启、过期描述符和权限撤销。
-- 验证 `full-access` 不产生 Bridge 二次审批，其他模式不被外部 CLI 升权。
+- 验证所有外部客户端同样被固定为最大权限且不产生 Bridge 审批。
 - 插件升级后验证 `codex-vscode` 和普通 `codex` 托管入口迁移及重新附着。
-- CLI 项目写入必须复用同一目标端、根 ID、`expectedHash`、审批、幂等与审计链。
+- CLI 项目写入必须复用同一目标端、根 ID、`expectedHash`、幂等与审计链。
 
 ### M11 生命周期、设置恢复与安全扫描
 
@@ -476,7 +494,8 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
 - 每种关闭方式核对 Shim、relay、MCP、后台任务和远端命令遗留进程数。
 - 对比升级前后 `chatgpt.cliExecutable` 与 `remote.extensionKind`，恢复后差异必须为 0。
 - 扫描日志、审计、进程参数、MCP 配置、远端环境和仓库，敏感信息命中数必须为 0。
-- 确认远端 `codex`/app-server 进程数为 0，错误本地项目操作数为 0。
+- 确认远端 `codex`/app-server 进程数为 0；本机操作须与用户请求一致，不再要求本机项目
+  操作总数为 0。
 
 ## B. OpenSSH 回退
 
@@ -484,7 +503,8 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
 
 - 仅在用户显式选择 `openssh` 后建立连接，验证严格主机密钥、user、port 和
   IdentityFile 路径边界。
-- 验证远端读、搜、Git、受审批命令和支持的写入操作；本地次级根必须失败关闭。
+- 验证远端读、搜、Git、自动执行命令和支持的写入操作；OpenSSH 不暴露结构化
+  `local-full-access` 根，但本机 Core 最大权限仍保持可用。
 - 验证远端 MCP stdio 控制头与适配器，不复制本机环境或凭据。
 - Linux 核对 ControlMaster 建立、复用、`-O exit` 和 socket 清理。
 - 单独记录取消、断线和结果未知限制，不得套用 VS Code Remote 的账本声明。

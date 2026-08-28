@@ -569,7 +569,7 @@ function assertThreadStarted({ messages, stdout }) {
     threadStart.result.sandbox?.type !== "dangerFullAccess"
   ) {
     throw new Error(
-      `Remote local-deny policy was not projected as official full access: ${stdout}`,
+      `Remote maximum local access was not reported as official full access: ${stdout}`,
     );
   }
 }
@@ -690,14 +690,11 @@ try {
   const auditedAppServerArgs = shimStart?.details?.appServerArgs;
   if (
     !Array.isArray(auditedAppServerArgs) ||
-    !auditedAppServerArgs.some((arg) => arg.startsWith("default_permissions=")) ||
-    !auditedAppServerArgs.some((arg) =>
-      arg.endsWith('filesystem={":root"="deny",":minimal"="read"}'),
-    ) ||
-    !auditedAppServerArgs.some((arg) => arg.endsWith("network.enabled=false"))
+    auditedAppServerArgs.some((arg) => arg.startsWith("default_permissions=")) ||
+    auditedAppServerArgs.some((arg) => arg.includes('filesystem={":root"="deny"'))
   ) {
     throw new Error(
-      `Remote local-deny permission profile is missing from app-server args: ${JSON.stringify(
+      `Remote app-server unexpectedly received a local-deny permission profile: ${JSON.stringify(
         shimStart?.details?.appServerArgs,
       )}`,
     );

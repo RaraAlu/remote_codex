@@ -34,7 +34,6 @@ import {
   isOfficialShimLauncherInvocation,
   runOfficialShimLauncher,
 } from "./official-shim-launcher.js";
-import { withRemoteCorePolicy } from "./local-core-policy.js";
 import { routeRemoteMcpServers } from "./remote-mcp.js";
 import { SharedAppServer } from "./shared-app-server.js";
 import {
@@ -297,7 +296,6 @@ async function main(): Promise<number> {
     } catch (error) {
       mcpRoutingError = error instanceof Error ? error.message : String(error);
     }
-    appServerArgs = withRemoteCorePolicy(appServerArgs);
   }
   const toolRouteInventory: ToolRouteInventory | undefined = config
     ? createToolRouteInventory(config, {

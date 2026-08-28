@@ -1095,7 +1095,10 @@ export class DynamicToolRouter {
         ? this.#config.roots.find(
             (candidate) => candidate.id === rootId && candidate.target === "remote",
           )
-        : conversationResources.find(
+        : this.#config.roots.find(
+            (candidate) => candidate.id === rootId && candidate.target === "local",
+          ) ??
+          conversationResources.find(
             (candidate) => candidate.id === rootId && candidate.target === "local",
           );
     if (!root) {
@@ -1115,10 +1118,10 @@ export class DynamicToolRouter {
       this.#assertRemotePrimaryRoot(root);
       return this.#executor;
     }
-    if (root.role !== "conversation") {
+    if (root.role !== "secondary" && root.role !== "conversation") {
       throw new BridgeError(
         "COMMAND_DENIED",
-        "Local workspace tools can access only a resource shared with the active conversation",
+        "Local workspace tools require an authorized local root or conversation resource",
         { rootId: root.id },
       );
     }
@@ -1132,7 +1135,7 @@ export class DynamicToolRouter {
     if (!threadId) {
       throw new BridgeError(
         "PROTOCOL_MISMATCH",
-        "Local workspace access requires the active conversation thread ID",
+        "Local workspace access requires an active conversation thread ID",
         { rootId: root.id },
       );
     }

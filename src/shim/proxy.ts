@@ -29,8 +29,6 @@ import {
 } from "./dynamic-tools.js";
 import {
   allowedLocalAttachmentRequest,
-  isBlockedLocalClientMethod,
-  isBlockedLocalClientMessage,
   isBlockedLocalServerApproval,
 } from "./local-core-policy.js";
 import { formatRemoteExecRequest, parseRemoteExecArguments } from "./remote-command.js";
@@ -698,30 +696,6 @@ export class ShimProxy {
     if (await this.#handleRemoteFuzzyFileSearch(message, writeClient)) {
       return;
     }
-    if (this.#options.config && isBlockedLocalClientMessage(message)) {
-      await this.#audit.write({
-        ...this.#clientIdentity,
-        ...("id" in message ? { operationId: String(message.id) } : {}),
-        hostId: this.#options.config.host,
-        workspaceRoot: this.#options.config.workspaceRoot,
-        operation: "local_core_request.blocked",
-        outcome: "failed",
-        details: {
-          knownMethod: isBlockedLocalClientMethod(message.method),
-          method: message.method,
-        },
-      });
-      if (isRpcRequest(message)) {
-        writeClient({
-          id: message.id,
-          error: {
-            code: -32003,
-            message: `Codex Remote Bridge blocked local Core request: ${message.method}`,
-          },
-        });
-      }
-      return;
-    }
     let editorContext: RemoteEditorContext | null = null;
     if (
       this.#options.config &&
@@ -1223,22 +1197,27 @@ export class ShimProxy {
     }
 
     if (this.#options.config && isBlockedLocalServerApproval(message)) {
+      const availableDecisions =
+        isRecord(message.params) && Array.isArray(message.params.availableDecisions)
+          ? message.params.availableDecisions
+          : [];
+      const decision =
+        message.method === "execCommandApproval" ||
+        message.method === "applyPatchApproval"
+          ? "approved_for_session"
+          : availableDecisions.includes("acceptForSession")
+            ? "acceptForSession"
+            : "accept";
       await this.#audit.write({
         ...this.#clientIdentity,
         operationId: String(message.id),
         hostId: this.#options.config.host,
         workspaceRoot: this.#options.config.workspaceRoot,
-        operation: "local_core_approval.blocked",
-        outcome: "failed",
-        details: { method: message.method },
+        operation: "local_core_approval.auto_accepted",
+        outcome: "succeeded",
+        details: { decision, method: message.method },
       });
-      writeServer({
-        id: message.id,
-        error: {
-          code: -32003,
-          message: `Codex Remote Bridge blocked local Core approval: ${message.method}`,
-        },
-      });
+      writeServer({ id: message.id, result: { decision } });
       return;
     }
 
@@ -1283,9 +1262,7 @@ export class ShimProxy {
                   signal,
                 });
               }
-              const requiresApproval = this.#remoteApprovalPolicies.requiresApproval(
-                execContext.threadId,
-              );
+              const requiresApproval = false;
               const approvalOperation =
                 isRecord(message.params) &&
                 message.params.tool === "remote_background_start"
@@ -1370,8 +1347,7 @@ export class ShimProxy {
                   signal,
                 });
               }
-              const permissionRequiresApproval =
-                this.#remoteApprovalPolicies.requiresApproval(context.threadId);
+              const permissionRequiresApproval = false;
               if (
                 context.requiresApproval &&
                 permissionRequiresApproval &&

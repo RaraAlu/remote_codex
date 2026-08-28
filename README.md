@@ -6,13 +6,14 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.76` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
+> 当前源码版本为 `0.3.78` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
 > 快照附件；官方输入区的原生 `@` 文件搜索通过当前 VS Code Remote SSH 工作区查询，
 > 不访问本机控制目录。可选兼容层不要求用户按住 `Shift`：VS Code Explorer 拖放转换为
 > 当前光标处的原生 `@` 引用；无论来自 VS Code Explorer 还是系统文件管理器，文件和
 > 目录都采用同一表示。启用兼容层时可一次性同意接收之后明确拖入的本机资源；
 > Remote SSH 会话始终只有一个远程项目主根。本机拖入项按当前 Codex thread 单独绑定：
-> 文件只开放该文件，目录只开放该目录子树，均为只读且不会复制到远端。Linux x64
+> 专用资源 ID 对文件和目录保持只读，但 `0.3.77` 的本机最大权限意味着该 ID 不再是文件
+> 系统安全边界，Core 仍可直接访问任意本机路径。Linux x64
 > Remote SSH 已验证单次 14 个本机资源可全部进入原生 `@` 输入，不再受旧次级根数量上限
 > 阻断；会话声明、跨对话隔离和删除清理仍按文末 TODO 完成安全验收。
 > Windows 已完成 npm 三种 CLI wrapper 的安全接管、普通
@@ -67,7 +68,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
   VS Code Remote SSH transport 部署当前 Controller 内嵌的配套 Remote Executor 并重载。
 - 远程读取、目录树、字面搜索、Git 状态和结构化命令执行。
 - 基于 SHA-256 的双端安全写入、精确补丁、重命名和删除。
-- 远程命令和重要写操作沿用官方 Codex 权限模式及审批界面。
+- 远程命令和重要写操作也固定自动放行，不显示 Bridge 审批界面。
 - 运行中取消、进程组终止、有界幂等账本和断线结果查询。
 - 受控后台任务的启动、状态、增量日志和取消。
 - 远程文件定位、选区、资源 URI 和 Diff 映射。
@@ -75,8 +76,11 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 - 符合安全条件的 stdio MCP 可通过当前 VS Code Remote 通道在远端运行。
 - 本地 Codex CLI 可附着和介入活动 VS Code Codex thread。
 - 普通本地窗口按当前唯一文件工作区过滤任务列表；Remote SSH 窗口按主机和远程根隔离。
-- 本机拖入资源不再写入项目根配置，而是按当前 Codex thread 形成独立只读能力；不同对话
-  相互隔离，不设置次级根数量上限，删除对话时同步清理其绑定。
+- 本机拖入资源不再写入项目根配置，而是按当前 Codex thread 形成独立只读引用；不同对话
+  的引用记录和删除生命周期仍隔离，但本机最大权限允许 Core 绕过引用直接访问同一路径。
+- Remote SSH 模式默认直接向 Codex 提供本机 VS Code 用户拥有的最大文件系统和进程权限，
+  不再设置本机路径授权、目录选择或逐根审批。模型既可使用本机 Core 文件/Shell 能力，也可
+  通过 `local-full-access` 根的 `workspace_*` 结构化工具访问整个本机文件系统。
 - 本地结构化审计不记录文件正文、密码、私钥、Token 或完整环境变量。
 - 可选的原生 Codex 拖放接收面通过 VS Code Workbench 外层接收 Explorer 与系统文件
   管理器路径，再调用官方 `chatgpt.addFileToThread`。Bridge 为所有受管拖放路径携带标记，
@@ -98,8 +102,11 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 - 默认模式不会建立第二条 SSH 认证链路。
 - Remote SSH 对话中的本机拖入资源只支持默认 `vscode-remote` transport；显式 OpenSSH
   回退没有 Controller 本地资源通道，因此会失败关闭。
-- `remote_exec` 限制启动目录但不是远端文件系统沙箱；批准命令前仍需检查完整参数。
-- 选择“完全访问”会取消逐次审批，但不会开放本地项目目录。
+- 默认 `vscode-remote` 模式不限制本机 Core 文件和命令能力；其实际边界就是本机 VS Code
+  用户的操作系统权限。`workspace_*` 结构化整文件写入仍保持 1 MiB、哈希和原子写边界，
+  但本机 Shell 不受该结构化限制。
+- `remote_exec` 限制启动目录但不是远端文件系统沙箱；最大权限模式会直接执行完整命令。
+- Remote SSH 会话固定使用本机 `full-access`，不会再显示本机路径或命令审批。
 - Windows、Linux 和 OpenSSH 的构包或运行结果不能互相替代。
 
 当前组件矩阵和已验证范围见
@@ -124,7 +131,9 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 3. 使用 VS Code Remote SSH 打开唯一一个远程工作区根目录。
 4. 等待 Bridge 自动配置、部署 Executor，并在必要时完成一次窗口重载。
    普通 Controller/Shim 更新最多需要这一次用户重载；只有 Remote Executor 首装或升级
-   才保留独立的远端窗口自动重载。
+   才保留独立的远端窗口自动重载。首次进入新的 Remote SSH 主机/根时，如果官方 Codex
+   早于窗口会话配置启动，Bridge 会记录该组合并自动重载一次，让 app-server 重新附着；
+   同一组合最多执行一次，失败时不会循环重载。
 5. 状态栏可能先显示远端 transport 已就绪但仍在等待 Codex；只有 Shim 进程存活且
    官方 app-server 完成 `initialize` 后才显示 `Codex: local -> <host> (ready)`。
 6. 运行 `Codex Bridge: Run Diagnostics`，确认远端身份、工作区根和
@@ -158,6 +167,15 @@ code --install-extension "dist/codex-remote-bridge-$version-win32-x64.vsix" --fo
 
 安装后执行一次 `Developer: Reload Window`。正式发布候选仍须在 Linux x64 和 Windows x64
 原生构建机分别生成 stage，再按“开发与验证”一节收集和校验双平台产物。
+
+### 本机最大权限与远端下载
+
+Remote SSH 配置完成后无需额外授权：新 thread 会固定为本机 `full-access`，并同时获得
+`local-full-access` 根。需要把远端文件下载到本机时，直接给出本机绝对目标路径；模型可
+组合远端 `workspace_*` 与本机文件/Shell 能力完成复制和校验。Bridge 不再要求打开另一个
+本地 VS Code 窗口，也不会弹出目录选择器或为每个路径建立授权记录。该模式等同于让当前
+Remote SSH Codex 继承本机 VS Code 用户可访问的全部文件和进程能力，使用者必须自行承担
+误删、覆盖、凭据读取和执行任意本机命令的风险。
 
 ### 启用和使用原生拖放
 
@@ -340,9 +358,10 @@ Remote SSH 实机验证。完整门禁和量化指标见
   `local/secondary` 根改为当前 Codex thread 的只读资源能力；2026-08-10 在真实 Remote SSH
   窗口连续两轮拖入 14 个互不依赖的本机资源，均完成 `stage_drop` 和原生 `@` 插入，不再
   出现次级根数量错误。剩余退出条件是在提交本机文件和目录后确认
-  `conversation_resource.claim`，模型可读取精确文件和目录子树但不能读取相邻路径、写入或
-  获取 Git 状态；另一个对话不得继承这些资源，配置与诊断仍只显示唯一远端主根，删除对话
-  后出现 `conversation_resource.delete_thread`。还需执行禁用与逐字节恢复验收，
+  `conversation_resource.claim`，另一个对话不继承该引用 ID，配置与诊断不得因拖放增加
+  额外根（固定的 `local-full-access` 除外），远端项目根仍只有唯一主根；删除对话后出现
+  `conversation_resource.delete_thread`。专用资源的根外、写入和 Git 负测不再作为整体本机
+  隔离声明，因为 `0.3.77` 明确开放本机 Core 最大权限。还需执行禁用与逐字节恢复验收，
   并在 VS Code 或官方扩展升级后重新探测和回归，不能沿用旧版本放行结果。2026-08-13
   升级到 VS Code `1.133.0` 与 `openai.chatgpt@26.5810.41047` 后已复现旧托管元数据被误判
   为冲突、官方 Composer 新增第六参数而导致统一 `@` 拖放未启用；`0.3.76` 候选已增加
@@ -351,6 +370,18 @@ Remote SSH 实机验证。完整门禁和量化指标见
   输出不再记录 `workbench=conflict`、`inlineMention=conflict` 或因 GNOME modal grab
   冲突导致的 `Request dismissed`，本地窗口及 Remote SSH 窗口从 Explorer 和系统文件管理器直接
   拖入文件/目录均在当前光标生成唯一 `@` 且 turn 可读取，并完成禁用后的逐字节恢复。
+- `0.3.77` 候选按当前产品决策取消全部本机路径授权机制：Remote SSH 配置会直接加入覆盖
+  本机文件系统根的 `local-full-access`，Core 权限固定为 `full-access`，本机文件、Shell、
+  进程和服务端审批请求不再被 Bridge 阻断；Core 审批请求由 Shim 自动接受，远端命令、
+  后台任务和工作区写入也不再读取旧 thread 的审批模式。2026-08-25 首轮 bitahub 实测在
+  完全访问 UI 下仍出现一次 `remote_exec` 允许提示，审计证明旧审批跟踪器返回
+  `automatic=false`；候选已改为一律自动放行。退出条件是安装候选并重载后，无任何目录选择、
+  本机/远端命令或文件授权提示，当前对话即可读取和写入
+  `/home/zkbot/work/train/Teleopit`、执行本机命令，并从
+  `/root/Bote_Teleopit` 下载预期 34 个文件后核对相对路径与 SHA-256；诊断应显示
+  `localExecution="allow"`、`local-full-access` 和 `fullLocalAccess.accessible=true`，同时
+  回归远端命令仍在远端主根执行。该模式明确接受最大本机权限风险，不再以根外拒绝、撤销
+  或本机 Core 阻断作为安全保证。
 
 ### Windows x64 与 0.4.0
 

@@ -726,24 +726,26 @@ export class WorkspaceResourceController
       }
       actualUri = vscode.Uri.joinPath(remote.workspaceUri, ...relativePath.split("/"));
     } else {
-      const authorized = threadId
-        ? this.#resolveAuthorizedRoot(threadId, root.id)
-        : undefined;
-      if (
-        root.role !== "conversation" ||
-        !authorized ||
-        authorized.target !== "local" ||
-        authorized.path !== root.path ||
-        authorized.role !== "conversation" ||
-        authorized.threadId !== threadId
-      ) {
+      const authorized = this.#resolveAuthorizedRoot(threadId ?? "", root.id);
+      const secondaryAuthorized =
+        root.role === "secondary" &&
+        authorized?.role === "secondary" &&
+        authorized.target === "local" &&
+        authorized.path === root.path;
+      const conversationAuthorized =
+        root.role === "conversation" &&
+        authorized?.role === "conversation" &&
+        authorized.target === "local" &&
+        authorized.path === root.path &&
+        authorized.threadId === threadId;
+      if (!secondaryAuthorized && !conversationAuthorized) {
         throw new BridgeError(
           "COMMAND_DENIED",
           "The local workspace resource authorization is no longer valid",
         );
       }
       actualUri =
-        root.kind === "file"
+        root.role === "conversation" && root.kind === "file"
           ? vscode.Uri.file(root.path)
           : vscode.Uri.joinPath(vscode.Uri.file(root.path), ...relativePath.split("/"));
     }
@@ -786,21 +788,24 @@ export class WorkspaceResourceController
       }
       return;
     }
-    const authorized = resolved.threadId
-      ? this.#resolveAuthorizedRoot(resolved.threadId, resolved.root.id)
-      : undefined;
-    if (
-      resolved.root.role !== "conversation" ||
-      !authorized ||
-      authorized.role !== "conversation" ||
-      authorized.threadId !== resolved.threadId ||
-      authorized.path !== resolved.root.path ||
-      authorized.kind !== resolved.root.kind ||
-      !resolved.localPath
-    ) {
+    const authorized = this.#resolveAuthorizedRoot(
+      resolved.threadId ?? "",
+      resolved.root.id,
+    );
+    const secondaryAuthorized =
+      resolved.root.role === "secondary" &&
+      authorized?.role === "secondary" &&
+      authorized.path === resolved.root.path;
+    const conversationAuthorized =
+      resolved.root.role === "conversation" &&
+      authorized?.role === "conversation" &&
+      authorized.threadId === resolved.threadId &&
+      authorized.path === resolved.root.path &&
+      authorized.kind === resolved.root.kind;
+    if ((!secondaryAuthorized && !conversationAuthorized) || !resolved.localPath) {
       throw new BridgeError(
         "COMMAND_DENIED",
-        "The conversation resource authorization is no longer valid",
+        "The local workspace resource authorization is no longer valid",
       );
     }
     try {
@@ -811,7 +816,7 @@ export class WorkspaceResourceController
       if (canonicalPath !== resolved.localPath || !metadata.isFile()) {
         throw new BridgeError(
           "COMMAND_DENIED",
-          "The conversation resource no longer resolves to the registered file",
+          "The local workspace resource no longer resolves to the registered file",
         );
       }
     } catch (error) {
@@ -820,7 +825,7 @@ export class WorkspaceResourceController
       }
       throw new BridgeError(
         "COMMAND_DENIED",
-        "The conversation resource is no longer available",
+        "The local workspace resource is no longer available",
         undefined,
         { cause: error },
       );

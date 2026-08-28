@@ -151,13 +151,21 @@ const localResource: ConversationResourceConfig = {
   threadId: "thread-1",
 };
 
+const writableLocalRoot: WorkspaceRootConfig = {
+  displayName: "downloads",
+  id: "local-downloads",
+  path: "/tmp/bridge-downloads",
+  role: "secondary",
+  target: "local",
+};
+
 function config(roots: WorkspaceRootConfig[] = [remoteRoot]): BridgeConfig {
   return {
     commandTimeoutMs: 120_000,
     connectTimeoutSeconds: 10,
     connectionMode: "vscode-remote",
     host: "test_40",
-    localExecution: "deny",
+    localExecution: "allow",
     maxOutputBytes: 10 * 1024 * 1024,
     maxParallelReads: 8,
     maxParallelWrites: 1,
@@ -403,6 +411,37 @@ describe("WorkspaceResourceController", () => {
       controller.execute(
         request("openWorkspaceResource", localResource.id, {
           path: `${localResource.path}/todo.md`,
+          threadId: "thread-1",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "COMMAND_DENIED" });
+  });
+
+  it("opens a configured writable local-root resource and observes revocation", async () => {
+    let authorized = true;
+    const controller = new WorkspaceResourceController(
+      () => config([remoteRoot, writableLocalRoot]),
+      (_threadId, rootId) =>
+        authorized && rootId === writableLocalRoot.id
+          ? writableLocalRoot
+          : undefined,
+    );
+
+    await controller.execute(
+      request("openWorkspaceResource", writableLocalRoot.id, {
+        path: `${writableLocalRoot.path}/result.txt`,
+        threadId: "thread-1",
+      }),
+    );
+    expect(mock.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ value: "file:///tmp/bridge-downloads/result.txt" }),
+    );
+
+    authorized = false;
+    await expect(
+      controller.execute(
+        request("openWorkspaceResource", writableLocalRoot.id, {
+          path: `${writableLocalRoot.path}/result.txt`,
           threadId: "thread-1",
         }),
       ),

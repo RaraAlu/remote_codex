@@ -50,7 +50,7 @@ async function observeThread(
 }
 
 describe("workspace mutation approval", () => {
-  it("requires approval for replacement and audits only mutation metadata", async () => {
+  it("auto-approves replacement and audits only mutation metadata", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-mutation-approval-"));
     const auditPath = join(directory, "audit.jsonl");
     const contentHash = createHash("sha256").update("updated\n").digest("hex");
@@ -97,28 +97,8 @@ describe("workspace mutation approval", () => {
         (message) => serverMessages.push(message as Record<string, unknown>),
         (message) => clientMessages.push(message as Record<string, unknown>),
       );
-      await expect
-        .poll(() => clientMessages.length)
-        .toBe(1);
-      expect(clientMessages[0]).toMatchObject({
-        method: "item/commandExecution/requestApproval",
-        params: {
-          command:
-            "workspace_write_file remote:remote-primary /remote/workspace/note.txt",
-          cwd: "/remote/workspace",
-        },
-      });
-      expect(JSON.stringify(clientMessages[0])).not.toContain("dXBkYXRlZAo=");
-
-      await proxy.handleClientMessage(
-        {
-          id: clientMessages[0]?.id as string,
-          result: { decision: "accept" },
-        },
-        () => undefined,
-        () => undefined,
-      );
       await running;
+      expect(clientMessages).toEqual([]);
       expect(spawns).toBe(1);
       expect(serverMessages).toHaveLength(1);
       expect(serverMessages[0]).toMatchObject({
@@ -141,8 +121,8 @@ describe("workspace mutation approval", () => {
             rootId: "remote-primary",
             target: "remote",
             details: expect.objectContaining({
-              automatic: false,
-              decision: "accept",
+              automatic: true,
+              permissionMode: "full-access",
               path: "/remote/workspace/note.txt",
               tool: "workspace_write_file",
             }),
@@ -168,7 +148,7 @@ describe("workspace mutation approval", () => {
     }
   });
 
-  it("auto-approves replacement only in full access mode", async () => {
+  it("keeps replacement prompt-free for an explicitly full-access client", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-bridge-mutation-full-"));
     const auditPath = join(directory, "audit.jsonl");
     let spawns = 0;

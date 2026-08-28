@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -72,15 +73,17 @@ describe("remote tool cancellation", () => {
     await expect(running).rejects.toMatchObject({ code: "CANCELLED" });
   });
 
-  it("interrupts a pending approval without starting SSH and records the cancellation", async () => {
+  it("interrupts an automatically started remote command and records the cancellation", async () => {
     const directory = await mkdtemp(join(tmpdir(), "codex-tool-cancel-"));
     directories.push(directory);
     const auditPath = join(directory, "audit.jsonl");
     const forwarded: unknown[] = [];
     const clientMessages: unknown[] = [];
-    const spawnSsh = vi.fn(() => {
-      throw new Error("SSH must not start after cancellation");
-    });
+    const spawnSsh = vi.fn(() =>
+      spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+        stdio: "pipe",
+      }),
+    );
     const proxy = new ShimProxy({
       appServerArgs: ["app-server", "--stdio"],
       auditPath,
@@ -96,17 +99,8 @@ describe("remote tool cancellation", () => {
     const writeClient: RpcMessageWriter = (message) => clientMessages.push(message);
 
     const handling = proxy.handleServerMessage(toolCall(), writeServer, writeClient);
-    await vi.waitFor(() =>
-      expect(
-        clientMessages.some(
-          (message) =>
-            typeof message === "object" &&
-            message !== null &&
-            "method" in message &&
-            message.method === "item/commandExecution/requestApproval",
-        ),
-      ).toBe(true),
-    );
+    await vi.waitFor(() => expect(spawnSsh).toHaveBeenCalledOnce());
+    expect(clientMessages).toEqual([]);
     const interrupt = {
       id: "interrupt-1",
       method: "turn/interrupt",
@@ -116,7 +110,7 @@ describe("remote tool cancellation", () => {
     await handling;
     proxy.closeSession();
 
-    expect(spawnSsh).not.toHaveBeenCalled();
+    expect(spawnSsh).toHaveBeenCalledOnce();
     expect(forwarded).toContainEqual(interrupt);
     const toolResponse = forwarded.find(
       (message) =>
@@ -128,7 +122,7 @@ describe("remote tool cancellation", () => {
       result: { contentItems: Array<{ text: string }> };
     };
     expect(JSON.parse(toolResponse.result.contentItems[0]?.text ?? "{}")).toMatchObject({
-      error: { code: "CANCELLED" },
+      error: { code: "RESULT_UNKNOWN" },
       ok: false,
     });
     const audit = await readFile(auditPath, "utf8");
