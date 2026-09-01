@@ -7,7 +7,7 @@ import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import WebSocket, { WebSocketServer, type RawData } from "ws";
@@ -31,7 +31,11 @@ import type {
   BridgeConfig,
 } from "../core/types.js";
 import { isVsCodeConversationClientName } from "./external-client-identity.js";
-import { currentProcessStartedAtMs } from "./process-identity.js";
+import {
+  currentProcessStartedAtMs,
+  inspectProcessIdentities,
+  type ProcessIdentity,
+} from "./process-identity.js";
 import {
   RemoteTurnClientTracker,
   RemoteToolCallCoordinator,
@@ -83,7 +87,8 @@ interface ExternalTurnInterruptSummary {
 }
 
 export interface ExternalCliSessionDescriptor {
-  version: 1 | 2;
+  version: 1 | 2 | 3;
+  appServer?: ProcessIdentity;
   endpoint: string;
   executablePath?: string;
   host: string;
@@ -235,6 +240,7 @@ export class SharedAppServer {
   readonly #startedAtMs = currentProcessStartedAtMs();
   #activeThreadId: string | undefined;
   #activeWorkspaceRoot: string;
+  #appServerIdentity: ProcessIdentity | null = null;
   #child: ChildProcessWithoutNullStreams | null = null;
   #externalServer: WebSocketServer | null = null;
   #externalToken = "";
@@ -299,6 +305,7 @@ export class SharedAppServer {
       stdio: "pipe",
     });
     this.#child = child;
+    this.#appServerIdentity = await this.#inspectAppServerIdentity(child);
     child.stderr.pipe(errorOutput, { end: false });
     child.stdout.pipe(errorOutput, { end: false });
 
@@ -1092,8 +1099,12 @@ export class SharedAppServer {
   }
 
   async #writeDescriptor(endpoint: string): Promise<void> {
+    if (!this.#appServerIdentity) {
+      throw new Error("Official Codex app-server identity is unavailable");
+    }
     const descriptor: ExternalCliSessionDescriptor = {
-      version: 2,
+      version: 3,
+      appServer: this.#appServerIdentity,
       endpoint,
       executablePath: this.#processExecutablePath,
       host: this.#options.config?.host ?? "local",
@@ -1132,6 +1143,7 @@ export class SharedAppServer {
     this.#externalServer = null;
     this.#child?.kill("SIGTERM");
     this.#child = null;
+    this.#appServerIdentity = null;
     await this.#descriptorQueue.catch(() => undefined);
     await this.#auditQueue.catch(() => undefined);
     await Promise.all([
@@ -1139,6 +1151,43 @@ export class SharedAppServer {
       rm(this.#externalTokenPath, { force: true }),
       rm(this.#upstreamTokenPath, { force: true }),
     ]);
+  }
+
+  async #inspectAppServerIdentity(
+    child: ChildProcessWithoutNullStreams,
+  ): Promise<ProcessIdentity> {
+    if (!child.pid || !Number.isSafeInteger(child.pid) || child.pid <= 0) {
+      throw new Error("Official Codex app-server did not report a process ID");
+    }
+    if (process.platform === "linux") {
+      try {
+        const identity = (await inspectProcessIdentities([child.pid], "linux")).get(
+          child.pid,
+        );
+        if (identity) {
+          return identity;
+        }
+      } catch {
+        // Fall back to the configured executable and spawn time below.
+      }
+    }
+    let executablePath = this.#options.codexExecutable;
+    try {
+      executablePath = realpathSync.native(executablePath);
+    } catch {
+      // The spawned command may be resolved through PATH on non-Linux hosts.
+    }
+    if (!isAbsolute(executablePath)) {
+      executablePath = resolve(
+        this.#options.appServerCwd ?? this.#options.controlDir,
+        executablePath,
+      );
+    }
+    return {
+      executablePath,
+      pid: child.pid,
+      startedAtMs: Date.now(),
+    };
   }
 
   async #closeExternalClients(): Promise<void> {

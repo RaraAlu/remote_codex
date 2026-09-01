@@ -370,7 +370,12 @@ describe("SharedAppServer", () => {
       return current?.threadId === "thread-shared" ? current : undefined;
     });
     expect(descriptor).toMatchObject({
-      version: 2,
+      version: 3,
+      appServer: {
+        executablePath: realpathSync.native(process.execPath),
+        pid: expect.any(Number),
+        startedAtMs: expect.any(Number),
+      },
       executablePath: realpathSync.native(process.execPath),
       pid: process.pid,
     });

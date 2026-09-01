@@ -6,7 +6,7 @@ Codex Remote Bridge 让官方 Codex VS Code 扩展及其内置 app-server 保持
 同时把经过授权的项目操作路由到当前 VS Code Remote SSH 工作区。默认链路复用 VS Code
 已经建立的远程连接，不读取 SSH 密码或私钥，也不会在远端启动 Codex。
 
-> 当前源码版本为 `0.3.78` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
+> 当前源码版本为 `0.3.79` 候选。已取消 Bridge 自定义的资源管理器右键添加入口和远端
 > 快照附件；官方输入区的原生 `@` 文件搜索通过当前 VS Code Remote SSH 工作区查询，
 > 不访问本机控制目录。可选兼容层不要求用户按住 `Shift`：VS Code Explorer 拖放转换为
 > 当前光标处的原生 `@` 引用；无论来自 VS Code Explorer 还是系统文件管理器，文件和
@@ -331,6 +331,21 @@ Remote SSH 实机验证。完整门禁和量化指标见
 
 ### Codex 原生上下文入口
 
+- `0.3.79` 候选修复窗口重载后旧官方 app-server 遗留并占用 thread writer 的问题。Shim
+  会在 v3 会话描述符中记录官方 app-server 的 PID、启动时间和真实可执行路径；新
+  Extension Host 激活时只清理 Shim 已死亡且 app-server 身份仍精确匹配的旧实例，PID
+  复用、无法确认身份和其他 CLI/App 进程均失败关闭。旧 v2 描述符只通过其私有 upstream
+  token 命令行精确迁移。退出条件是在真实 Linux 本地窗口运行一个完整 turn 后重载，旧
+  app-server 自动退出或被新代际清理，恢复同一 thread 不再出现 `already has an active
+  writer` 或“已在另一个应用中打开”，Bridge 审计记录 `app_server.stale_cleanup`，当前
+  app-server 的 `readyz`、`healthz` 保持 200；同时保留独立 CLI 与 ChatGPT App 进程。
+- 修复 Linux 多个 POSIX `codex` 入口的并存管理：当前不同 VS Code Extension Host 的
+  `PATH` 会分别命中 `~/.local/bin/codex` 与 NVM 下的 `codex`，而 v2 集成元数据只保存一个
+  `automaticLauncher`，导致后激活窗口恢复前一个入口并形成 last-writer-wins；未被当前
+  Host 命中的入口会绕过 Bridge，启动独立 app-server。退出条件是安全保存并管理全部已识别
+  的符号链接入口，停用时逐项恢复原目标，并在真实 Linux 本地窗口中同时运行官方 VS Code
+  Codex、普通 `codex` CLI 和 ChatGPT App：空闲界面可各自新建独立对话，显式附着时可共享
+  目标 thread，任一长 turn 不得被误报为另一个表面阻塞，日志与审计能区分独立和附着会话。
 - 核对官方 IDE 背景开关与 Bridge 隔离：当前 `openai.chatgpt@26.727.40816` 的
   `composer-auto-context-enabled` 用户状态为关闭，现有本地 rollout 因而记录
   `ide_context=null`。通过官方 `/ide` 重新开启后，分别验证普通本地窗口的活动文件、

@@ -480,6 +480,18 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
 
 ### M10 外部 CLI 与官方 UI 双向同 thread
 
+- 2026-08-29 Linux 现场诊断发现 `~/.local/bin/codex` 与
+  `~/.nvm/versions/node/v24.18.0/bin/codex` 同时存在。Bridge 的 v2
+  `integration.json` 只保留一个 `automaticLauncher`，多个本地 Extension Host 会随各自
+  `PATH` 在两者间反复迁移托管入口；本轮 NVM 入口因此绕过 Bridge，启动了两个独立 CLI
+  app-server。需增加多 POSIX launcher 测试与真实三表面共存验收。
+- 同轮官方 VS Code turn `01a04e50-74dc-73c1-9f5a-bd580885af8c` 于 07:39 正常
+  `task_complete`，但 07:42 窗口重载后旧 app-server PID `13215` 被用户级 systemd 收养，
+  新实例 PID `195170` 恢复同一 thread 时明确收到 `thread-store conflict: ... already has
+  an active writer`，UI 因而显示“已在另一个应用中打开”。现场精确终止 PID `13215` 后，
+  新实例的 `readyz`、`healthz` 均保持 200。`0.3.79` 候选增加 v3 app-server 进程身份和
+  新 Extension Host 的过期实例清理；需安装后重跑完整 turn、窗口重载、同 thread 恢复，
+  并确认独立 CLI/App 不被清理。
 - CLI 和官方 UI 两端各发起一次新 turn、steer 和取消，核对 thread/turn ID 与事件顺序。
 - 两端同时观察流式文本、工具状态、命令输出、终态和完整历史，确认无重复通知。
 - 覆盖 `expectedTurnId` 冲突、CLI 中途断开、网关重启、过期描述符和权限撤销。

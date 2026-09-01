@@ -27,7 +27,7 @@ function parseDescriptor(
 ): ExternalCliSessionDescriptor {
   if (
     !isRecord(value) ||
-    (value.version !== 1 && value.version !== 2) ||
+    (value.version !== 1 && value.version !== 2 && value.version !== 3) ||
     typeof value.endpoint !== "string" ||
     !/^ws:\/\/127\.0\.0\.1:\d+$/.test(value.endpoint) ||
     typeof value.host !== "string" ||
@@ -49,7 +49,19 @@ function parseDescriptor(
         !(hostPlatform === "win32"
           ? win32.isAbsolute(value.executablePath)
           : isAbsolute(value.executablePath)))) ||
-    (value.version === 2 && typeof value.executablePath !== "string")
+    ((value.version === 2 || value.version === 3) &&
+      typeof value.executablePath !== "string") ||
+    (value.version === 3 &&
+      (!isRecord(value.appServer) ||
+        typeof value.appServer.executablePath !== "string" ||
+        !(hostPlatform === "win32"
+          ? win32.isAbsolute(value.appServer.executablePath)
+          : isAbsolute(value.appServer.executablePath)) ||
+        typeof value.appServer.pid !== "number" ||
+        !Number.isSafeInteger(value.appServer.pid) ||
+        value.appServer.pid <= 0 ||
+        typeof value.appServer.startedAtMs !== "number" ||
+        !Number.isFinite(value.appServer.startedAtMs)))
   ) {
     throw new TypeError("Invalid external CLI session descriptor");
   }
@@ -70,7 +82,7 @@ function descriptorMatchesProcess(
   identity: ProcessIdentity,
   hostPlatform: NodeJS.Platform,
 ): boolean {
-  if (descriptor.version === 2) {
+  if (descriptor.version === 2 || descriptor.version === 3) {
     if (
       Math.abs(descriptor.startedAtMs - identity.startedAtMs) >
       CURRENT_STARTED_AT_TOLERANCE_MS

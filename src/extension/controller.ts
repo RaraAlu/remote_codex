@@ -115,6 +115,7 @@ import {
   type WorkbenchDropCompatibilityResult,
 } from "./workbench-drop-compatibility.js";
 import { VsCodeTransportServer } from "./vscode-transport-server.js";
+import { cleanupStaleOfficialAppServers } from "./stale-app-server-cleanup.js";
 import {
   isWorkspaceResourceOperation,
   WorkspaceResourceController,
@@ -421,6 +422,23 @@ export class BridgeController implements vscode.Disposable {
     if (this.#state.state === "configuring") {
       this.#log("automatic initialization deferred while configuration is in progress");
       return false;
+    }
+
+    try {
+      const cleanup = await cleanupStaleOfficialAppServers();
+      if (cleanup.staleCount > 0) {
+        const outcome = cleanup.failedPids.length === 0 ? "succeeded" : "failed";
+        this.#log(
+          `stale official Codex app-server cleanup ${outcome}: stale=${cleanup.staleCount}, terminated=${cleanup.terminatedPids.length}, removed=${cleanup.removedCount}, failed=${cleanup.failedPids.length}`,
+        );
+        await this.#audit.write({
+          operation: "app_server.stale_cleanup",
+          outcome,
+          details: { ...cleanup },
+        });
+      }
+    } catch (error) {
+      this.#log(`stale official Codex app-server cleanup skipped: ${String(error)}`);
     }
 
     const plan = planAutomaticInitialization({

@@ -566,6 +566,15 @@ transport 的远程 `pwd` 仍通过。真实模型的 Core 本地诱饵执行、
   覆盖首次、已附着、同指纹和新根。用户安装候选后，`data:/home/zkbot` 于
   `23:47:08.919` 自动请求唯一一次重载；第二代际识别相同指纹未再次重载，配置化 Shim
   启动后于 `23:47:19.264` 到达 `ready`。该首次会话自动重载目标已完成实机验证。
+- `0.3.79` 候选处理本地窗口重载后的官方 app-server 遗留。现场只有一个可见 VS Code
+  窗口，但重载前的 app-server PID `13215` 在 Shim 与 launcher 消失后仍被用户级 systemd
+  收养并占有 thread writer；新实例 PID `195170` 因而两次恢复失败，官方 UI 显示会话已在
+  另一个应用中打开。Shim 的 v3 外部会话描述符现记录 app-server PID、启动时间和真实
+  可执行路径；Controller 每次激活只对 Shim 身份已死亡的描述符执行清理，并在终止前再次
+  核对 app-server 身份。PID 复用、活着但无法读取身份的 Shim 以及非 Linux 平台均失败
+  关闭；旧 v2 描述符仅按 Bridge 私有 upstream token 的精确命令行匹配迁移。定向自动化
+  覆盖活动 Shim、死亡 Shim、PID 复用、身份不可读、v2 迁移和非 Linux 边界；真实窗口
+  重载与 thread 恢复仍按根 README TODO 验收。
 
 活动实施项及其退出条件统一保存在根 `README.md` 最末尾的 `TODO` 中；本节只保留已完成
 的能力探针结论。
