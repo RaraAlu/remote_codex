@@ -345,6 +345,12 @@ OpenSSH 和已关闭的故障矩阵不得由既有 Linux 子链推断为通过�
 
 ### M02 项目根、附件与 Core 本地诱饵
 
+- 待修复（2026-08-31）：VS Code `1.135.0`、官方扩展 `26.5825.51511`、Bridge
+  `0.3.79` 的本地窗口重载后，用户确认拖放添加再次失效。Bridge 激活日志显示
+  `layout.integration result=already-repaired`，但拖动时没有新增
+  `phase.workbench.drop.begin`，说明故障位于 Workbench 捕获入口之前，不能用既有补丁元数据
+  或历史验收推断当前资产仍可用。需重新采集 Explorer 与系统文件管理器的拖动信号、当前
+  Workbench/Webview 校验和及实际事件序列，修复后连续 3 轮拖入并再次重载回归。
 - 在官方 UI 新建和恢复任务中确认远程主根显示正确，本地控制目录不显示为项目根。
 - 已完成（2026-08-10，用户实机确认）：Bridge 捕获的本地与 Remote SSH 拖放已统一为
   当前 Composer 光标处的原生 `@`；VS Code Explorer、系统文件管理器、文件和目录不再

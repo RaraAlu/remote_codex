@@ -385,6 +385,12 @@ Remote SSH 实机验证。完整门禁和量化指标见
   输出不再记录 `workbench=conflict`、`inlineMention=conflict` 或因 GNOME modal grab
   冲突导致的 `Request dismissed`，本地窗口及 Remote SSH 窗口从 Explorer 和系统文件管理器直接
   拖入文件/目录均在当前光标生成唯一 `@` 且 turn 可读取，并完成禁用后的逐字节恢复。
+  2026-08-31 在 VS Code `1.135.0`、官方扩展 `26.5825.51511` 和 Bridge `0.3.79` 的
+  本地窗口重载后再次出现拖放无响应；Bridge 日志只记录
+  `layout.integration result=already-repaired`，实际拖动没有任何 `phase.workbench.drop.begin`
+  或后续捕获事件。退出条件增加：重新核对当前 Workbench 捕获入口与官方 Webview 资产，
+  修复后从 VS Code Explorer 和系统文件管理器分别连续拖入文件与目录至少 3 次，均产生
+  完整捕获序列和唯一原生 `@`，并在再次重载后保持有效。
 - `0.3.77` 候选按当前产品决策取消全部本机路径授权机制：Remote SSH 配置会直接加入覆盖
   本机文件系统根的 `local-full-access`，Core 权限固定为 `full-access`，本机文件、Shell、
   进程和服务端审批请求不再被 Bridge 阻断；Core 审批请求由 Shim 自动接受，远端命令、
