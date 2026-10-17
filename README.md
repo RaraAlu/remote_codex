@@ -125,32 +125,7 @@ code --install-extension "dist/codex-remote-bridge-$version-win32-x64.vsix" --fo
 
 安装后执行一次 `Developer: Reload Window`。
 
-### 本机最大权限与远端下载
 
-Remote SSH 配置完成后无需额外授权：新 thread 固定为本机 `full-access` 并获得
-`local-full-access` 根。需要把远端文件下载到本机时，直接给出本机绝对目标路径，模型可
-组合远端 `workspace_*` 与本机文件/Shell 能力完成复制和校验。该模式等同于让当前
-Remote SSH Codex 继承本机 VS Code 用户可访问的全部文件和进程能力，使用者须自行承担
-误删、覆盖、凭据读取和执行任意本机命令的风险。
-
-### 启用原生拖放
-
-1. 扩展激活后自动检查当前 VS Code 与官方 Codex 资产；检测到兼容且尚未启用的接收面时，
-   只弹出一次确认，随后自动请求所需系统文件权限（Linux 会出现 polkit 授权框），补丁
-   成功后由用户手动重载。拒绝后不会重复打扰，可从命令面板执行
-   `Codex Bridge: Enable Native Codex Drop Surface` 重试。VS Code 或官方 Codex 升级后
-   会重新探测并请求一次新确认；无法证明属于升级的哈希或代码形状变化会拒绝修改。
-2. 把文件、目录直接拖入官方 Codex 对话区域，所有 Bridge 捕获的拖放都在当前 Composer
-   光标处生成一个原生 `@` 引用，不需要按 `Shift`。
-3. 本机资源先暂存，只有在对应用原生 `@` 随 turn 提交时才绑定到该 Codex thread；均为
-   只读，不写入 `roots`、不复制到远端、不与其他对话共享。
-4. 删除 Codex 对话会同步清理该 thread 的资源绑定。停用或卸载前先执行
-   `Codex Bridge: Disable Native Codex Drop Surface`，校验并恢复受管资产。
-
-关闭 `codexRemoteBridge.autoInitialize` 后可用 Configure 和 Start 命令手动控制；
-停用前应执行 `Codex Bridge: Restore Official Codex Settings`。Bridge 还会把
-`openai.chatgpt` 与内置 `GitHub.copilot-chat` 固定到本机 UI Extension Host，两项
-`remote.extensionKind` 原值分别备份，恢复时不覆盖其他扩展的映射。
 
 ## 常用命令
 
